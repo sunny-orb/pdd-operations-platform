@@ -1,7 +1,12 @@
+import { lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { ModulePage } from "../features/ModulePage";
 import { getSystemStatus } from "../shared/api/system";
+
+const ProductsPage = lazy(() =>
+  import("../features/products/ProductsPage").then((module) => ({ default: module.ProductsPage })),
+);
 
 const modules = [
   {
@@ -38,10 +43,18 @@ const modules = [
 
 /** 统一应用入口；无参数，展示基础导航与真实系统连接状态。 */
 export function App() {
+  const isProductPage = useLocation().pathname === "/products";
   const status = useQuery({
+    enabled: !isProductPage,
     queryKey: ["system-status"],
     queryFn: ({ signal }) => getSystemStatus(signal),
   });
+  if (isProductPage)
+    return (
+      <Suspense fallback={<p role="status">正在加载商品看板…</p>}>
+        <ProductsPage />
+      </Suspense>
+    );
   return (
     <div className="app-shell">
       <aside className="sidebar">

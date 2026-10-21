@@ -4,7 +4,7 @@
 
 ## 入口
 
-- [TODO.md](TODO.md)：阶段顺序、待核实问题和验收条件。
+- [TODO.md](TODO.md)：逐模块计划、旧项目参考地图、读取边界、待核实问题和验收条件。
 - [docs/architecture.md](docs/architecture.md)：技术栈、模块边界、同步发布、持久化与部署决定。
 - [docs/data-contract.md](docs/data-contract.md)：字段和指标契约的填写模板。
 - [docs/source-migration.md](docs/source-migration.md)：飞书入仓期间的接入顺序、来源登记与切换验收。

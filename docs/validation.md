@@ -12,7 +12,7 @@
 - 本地入口 5173、API 8000 启动成功；前端代理下首页、商品路由、系统状态、存活检查返回 200。
 - 无数据库配置时 readiness 返回 503 和 `not_configured`，属于正确预期。
 - 浏览器验证了首页真实 API 连通、数据库待配置、商品导航、无经营数字的占位页面。
-- GitHub `sunny-orb/pdd-operations-platform` 已创建为 Private，现有 SSH 身份可访问仓库；推送后再核验分支。
+- GitHub `sunny-orb/pdd-operations-platform` 已创建为 Private，初始提交已通过现有 SSH 身份推送到 `main`，本地已跟踪 `origin/main`。
 
 ## 未验证与后续要求
 

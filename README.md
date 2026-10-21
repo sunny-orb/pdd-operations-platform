@@ -9,6 +9,7 @@
 - [docs/data-contract.md](docs/data-contract.md)：字段和指标契约的填写模板。
 - [docs/source-migration.md](docs/source-migration.md)：飞书入仓期间的接入顺序、来源登记与切换验收。
 - [AGENTS.md](AGENTS.md)：Codex 在本仓库中工作的长期约定。
+- [docs/commit-convention.md](docs/commit-convention.md)：提交信息格式、类型及提交粒度。
 
 ## 本地启动
 

@@ -1,0 +1,30 @@
+{
+  "name": "pdd-operations-platform",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "concurrently --kill-others -n web,api \"npm run dev:web\" \"npm run dev:api\"",
+    "dev:web": "npm run dev --workspace @pdd/web",
+    "dev:api": "node scripts/api.mjs dev",
+    "check": "npm run check:web && npm run check:api",
+    "check:web": "npm run check --workspace @pdd/web",
+    "check:api": "node scripts/api.mjs check",
+    "test": "npm run test:web && npm run test:api",
+    "test:web": "npm run test --workspace @pdd/web",
+    "test:api": "node scripts/api.mjs test",
+    "build": "npm run build --workspace @pdd/web",
+    "db:upgrade": "node scripts/api.mjs db:upgrade",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "prettier": "^3.6.2"
+  }
+}

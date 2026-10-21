@@ -7,6 +7,7 @@
 - [TODO.md](TODO.md)：阶段顺序、待核实问题和验收条件。
 - [docs/architecture.md](docs/architecture.md)：技术栈、模块边界、同步发布、持久化与部署决定。
 - [docs/data-contract.md](docs/data-contract.md)：字段和指标契约的填写模板。
+- [docs/source-migration.md](docs/source-migration.md)：飞书入仓期间的接入顺序、来源登记与切换验收。
 - [AGENTS.md](AGENTS.md)：Codex 在本仓库中工作的长期约定。
 
 ## 本地启动

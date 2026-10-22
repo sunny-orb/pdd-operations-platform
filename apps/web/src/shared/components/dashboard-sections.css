@@ -1,0 +1,80 @@
+/* 仅组织页内目录布局；导航选择与滚动定位使用 Ant Design Anchor。 */
+.dashboard-sections {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  max-width: 1732px;
+  margin-inline: auto;
+  padding-left: 24px;
+}
+.dashboard-sections-sidebar {
+  min-width: 0;
+  padding-top: 28px;
+}
+.dashboard-sections-directory {
+  position: sticky;
+  top: 24px;
+  padding: 18px 10px 12px;
+  border: 1px solid var(--ant-color-border-secondary, #e1e8f1);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container, #fff);
+  box-shadow: 0 4px 20px #142b4905;
+}
+.dashboard-sections-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 14px;
+}
+.dashboard-sections-heading .ant-typography:last-child {
+  margin-left: auto;
+  font-size: 11px;
+}
+.dashboard-sections-directory .ant-anchor-link {
+  padding-block: 12px;
+}
+.dashboard-sections-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.dashboard-sections-directory a:focus-visible {
+  outline: 2px solid var(--ant-color-primary, #1768d9);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.dashboard-sections-content {
+  min-width: 0;
+}
+@media (max-width: 991px) {
+  .dashboard-sections {
+    display: block;
+    padding-left: 0;
+  }
+  .dashboard-sections-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: 0;
+  }
+  .dashboard-sections-directory {
+    position: static;
+    border-radius: 0;
+    padding: 10px 14px 0;
+    box-shadow: 0 3px 12px #142b490a;
+  }
+  .dashboard-sections-heading {
+    padding: 0 0 4px;
+  }
+  .dashboard-sections-directory .ant-anchor-wrapper-horizontal {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+  .dashboard-sections-directory .ant-anchor-link {
+    flex-shrink: 0;
+    padding-block: 12px;
+  }
+  .dashboard-sections-content section[id] {
+    scroll-margin-top: 112px;
+  }
+}

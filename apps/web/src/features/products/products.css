@@ -457,6 +457,9 @@
 .trend-footnote {
   font-size: 10px;
 }
+.product-diagnosis-section {
+  scroll-margin-top: 24px;
+}
 .diagnosis-card {
   height: 100%;
   background: linear-gradient(140deg, white, #f2f7ff);

@@ -5,7 +5,7 @@ import { SectionState, type QueryView } from "../components/SectionState";
 
 export function DiagnosisSection({ query }: { query: QueryView<Diagnosis> }) {
   return (
-    <section aria-label="经营诊断">
+    <section id="product-diagnosis" className="product-diagnosis-section" aria-label="经营诊断">
       <Card
         className="diagnosis-card"
         title={

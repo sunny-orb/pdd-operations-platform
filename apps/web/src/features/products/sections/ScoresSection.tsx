@@ -226,7 +226,7 @@ export function ScoresSection({
     selected !== null,
   );
   return (
-    <section className="product-section" aria-labelledby="scores-heading">
+    <section id="product-scores" className="product-section" aria-labelledby="scores-heading">
       <div className="section-heading">
         <div>
           <span className="section-eyebrow">新品潜力四档评分 · 放量决策</span>

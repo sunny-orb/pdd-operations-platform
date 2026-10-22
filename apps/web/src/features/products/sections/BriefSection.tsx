@@ -64,7 +64,7 @@ export function BriefSection({
     versionToken,
   });
   return (
-    <section className="product-section" aria-label="经营核心结论">
+    <section id="product-brief" className="product-section" aria-label="经营核心结论">
       <SectionHeading
         eyebrow="商品经营分析"
         title="经营核心结论"

@@ -46,6 +46,21 @@ function show(path = "/products?preview=1") {
   return { ...result, client };
 }
 describe("商品整页交互与隔离", () => {
+  it("页内目录的六个入口在未接入时也有可定位区块", async () => {
+    show("/products");
+    const navigation = screen.getByRole("navigation", { name: "本页目录" });
+    const links = within(navigation).getAllByRole("link");
+    expect(links).toHaveLength(6);
+    for (const link of links) {
+      const href = link.getAttribute("href");
+      expect(href?.startsWith("#")).toBe(true);
+      const target = document.getElementById(href!.slice(1));
+      expect(target).not.toBeNull();
+      expect(target?.closest("main")).not.toBeNull();
+    }
+    await waitFor(() => expect(screen.getAllByText("数据尚未接入").length).toBeGreaterThan(3));
+  });
+
   it("前置范围接口失败时明确报错，不发无版本经营查询或无限骨架", async () => {
     const fetch = vi
       .spyOn(globalThis, "fetch")

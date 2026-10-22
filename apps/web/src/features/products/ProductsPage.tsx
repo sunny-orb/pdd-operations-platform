@@ -11,6 +11,12 @@ import {
 } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import {
+  AppstoreOutlined,
+  BarChartOutlined,
+  FundOutlined,
+  BulbOutlined,
+  AlertOutlined,
+  TableOutlined,
   ArrowLeftOutlined,
   DatabaseOutlined,
   ExperimentOutlined,
@@ -41,7 +47,20 @@ import { TrendSection, type Comparison } from "./sections/TrendSection";
 import { DiagnosisSection } from "./sections/DiagnosisSection";
 import { AlertsSection } from "./sections/AlertsSection";
 import { DaysSection } from "./sections/DaysSection";
+import {
+  DashboardSections,
+  type DashboardSectionLink,
+} from "../../shared/components/DashboardSections";
 import "./products.css";
+
+const pageSections: DashboardSectionLink[] = [
+  { id: "product-brief", title: "经营核心结论", icon: <AppstoreOutlined /> },
+  { id: "product-scores", title: "评分与放量建议", icon: <BarChartOutlined /> },
+  { id: "overview", title: "全店指标与趋势", icon: <FundOutlined /> },
+  { id: "product-diagnosis", title: "经营诊断", icon: <BulbOutlined /> },
+  { id: "risk", title: "异常与行动建议", icon: <AlertOutlined /> },
+  { id: "product-days", title: "商品明细底表", icon: <TableOutlined /> },
+];
 
 const scenarios: { value: Scenario; label: string }[] = [
   { value: "normal", label: "正常样例" },
@@ -258,205 +277,207 @@ export function ProductsPage() {
               <Link to="/aftersales">售后分析 ↗</Link>
             </Space>
           </div>
-          <main className="product-main">
-            <div className="product-page-heading">
-              <div className="product-title">
-                <span className="product-mark">
-                  <DatabaseOutlined />
-                </span>
-                <div>
-                  <h1>拼多多商品数据看板</h1>
-                  <span className="muted">店铺商品 · 同比经营追踪</span>
+          <DashboardSections sections={pageSections}>
+            <main className="product-main">
+              <div className="product-page-heading">
+                <div className="product-title">
+                  <span className="product-mark">
+                    <DatabaseOutlined />
+                  </span>
+                  <div>
+                    <h1>拼多多商品数据看板</h1>
+                    <span className="muted">店铺商品 · 同比经营追踪</span>
+                  </div>
                 </div>
-              </div>
-              <Space orientation="vertical" align="end" size={4}>
-                <Badge
-                  status={mode === "preview" ? "warning" : "default"}
-                  text={mode === "preview" ? "开发样例 · 非真实经营数据" : "业务数据尚未接入"}
-                />
-                <span className="muted">
-                  {mode === "preview" ? "样例截止" : "数据完整截至"}：
-                  {optionsQuery.data?.meta.dataThrough ?? "未接入"}
-                </span>
-              </Space>
-            </div>
-            {import.meta.env.DEV && (
-              <div className="preview-toolbar">
-                <Space wrap>
-                  <ExperimentOutlined />
-                  <strong>开发交互预览</strong>
-                  <Select
-                    aria-label="数据模式"
-                    value={mode === "preview" ? "preview" : "offline"}
-                    options={[
-                      { value: "offline", label: "未接入模式" },
-                      { value: "preview", label: "开发样例" },
-                    ]}
-                    onChange={(value) => switchMode(value === "preview")}
+                <Space orientation="vertical" align="end" size={4}>
+                  <Badge
+                    status={mode === "preview" ? "warning" : "default"}
+                    text={mode === "preview" ? "开发样例 · 非真实经营数据" : "业务数据尚未接入"}
                   />
-                  {mode === "preview" && (
-                    <Select
-                      aria-label="样例状态场景"
-                      value={scenario}
-                      options={scenarios}
-                      onChange={(value) =>
-                        setParams((previous) => {
-                          const next = new URLSearchParams(previous);
-                          next.set("scenario", value);
-                          return next;
-                        })
-                      }
-                    />
-                  )}
+                  <span className="muted">
+                    {mode === "preview" ? "样例截止" : "数据完整截至"}：
+                    {optionsQuery.data?.meta.dataThrough ?? "未接入"}
+                  </span>
                 </Space>
-                <Typography.Text type="secondary">
-                  仅前端验证 · 未连接数据库 / 数仓 · 未调用AI
-                </Typography.Text>
               </div>
-            )}
-            {mode === "preview" && (
-              <Alert
-                className="preview-banner"
-                type="warning"
-                showIcon
-                title="开发样例 · 非真实经营数据"
-                description="以下商品、金额、评分与诊断均为合成样例，仅验证页面布局和交互；切换筛选不会查询数仓，评分不代表真实模型结果。"
-              />
-            )}
-            <div className="page-scope">
-              <Tag color="blue" variant="filled">
-                当前范围
-              </Tag>
-              <span>{rangeLabel}</span>
-              <span className="muted">粒度：店铺 × 商品ID × 日期（非SKU）</span>
-              <span className="muted">
-                {mode === "preview" ? "来源：小型合成开发样例" : "来源：尚未接入"}
-              </span>
-            </div>
-            {versionNotice && (
-              <Alert showIcon type="info" title="数据版本已更新，当前条件已统一重新加载。" />
-            )}
-            {optionsQuery.isError && (
-              <Alert
-                type="error"
-                showIcon
-                title="筛选数据加载失败"
-                description={optionsQuery.error.message}
-                action={<Button onClick={() => void optionsQuery.refetch()}>重试</Button>}
-              />
-            )}
-            {versionLocked ? (
-              <Alert
-                type="warning"
-                showIcon
-                title="数据版本连续变化，请稍后重新加载"
-                action={
-                  <Button
-                    onClick={() => {
-                      versionCoordinator.current.reset();
-                      setVersionLocked(false);
-                      client.removeQueries({ queryKey: ["products"] });
-                      setVersionToken(versionCoordinator.current.epoch);
-                    }}
-                  >
-                    重新加载
-                  </Button>
-                }
-              />
-            ) : (
-              <ProductBootstrapContext.Provider
-                value={{
-                  ready: optionsQuery.isSuccess,
-                  error: mode === "api" ? optionsQuery.error : null,
-                  notConnected: optionsQuery.data?.availability === "not_connected",
-                  retry: () => {
-                    void optionsQuery.refetch();
-                  },
-                }}
-              >
-                <ProductDataVersionContext.Provider value={dataVersion}>
-                  <div key={pageKey}>
-                    <BriefSection
-                      mode={mode}
-                      scenario={scenario}
-                      filters={overviewFilters}
-                      versionToken={versionToken}
-                      onProduct={chooseProduct}
+              {import.meta.env.DEV && (
+                <div className="preview-toolbar">
+                  <Space wrap>
+                    <ExperimentOutlined />
+                    <strong>开发交互预览</strong>
+                    <Select
+                      aria-label="数据模式"
+                      value={mode === "preview" ? "preview" : "offline"}
+                      options={[
+                        { value: "offline", label: "未接入模式" },
+                        { value: "preview", label: "开发样例" },
+                      ]}
+                      onChange={(value) => switchMode(value === "preview")}
                     />
-                    {overviewQuery.data?.data && (
-                      <Alert
-                        className="health-banner"
-                        type={overviewQuery.data.data.health.tone}
-                        showIcon
-                        title={
-                          <>
-                            <b>增长健康度</b> · {overviewQuery.data.data.health.title}
-                          </>
+                    {mode === "preview" && (
+                      <Select
+                        aria-label="样例状态场景"
+                        value={scenario}
+                        options={scenarios}
+                        onChange={(value) =>
+                          setParams((previous) => {
+                            const next = new URLSearchParams(previous);
+                            next.set("scenario", value);
+                            return next;
+                          })
                         }
-                        description={overviewQuery.data.data.health.description}
                       />
                     )}
-                    <ScoresSection
-                      mode={mode}
-                      scenario={scenario}
-                      filters={scoreFilters}
-                      onChange={changeScores}
-                      options={scoreOptions}
-                      versionToken={versionToken}
-                    />
-                    <OverviewSection
-                      query={overviewQuery}
-                      filters={overviewFilters}
-                      options={options}
-                      onChange={changeOverview}
-                      onReset={() => reset("overview")}
-                      metric={metric}
-                      onMetric={setMetric}
-                    />
-                    <div className="analysis-grid">
-                      <TrendSection
-                        query={trendQuery}
-                        label={metricNames[metric]}
-                        comparison={comparison}
-                        onComparison={setComparison}
+                  </Space>
+                  <Typography.Text type="secondary">
+                    仅前端验证 · 未连接数据库 / 数仓 · 未调用AI
+                  </Typography.Text>
+                </div>
+              )}
+              {mode === "preview" && (
+                <Alert
+                  className="preview-banner"
+                  type="warning"
+                  showIcon
+                  title="开发样例 · 非真实经营数据"
+                  description="以下商品、金额、评分与诊断均为合成样例，仅验证页面布局和交互；切换筛选不会查询数仓，评分不代表真实模型结果。"
+                />
+              )}
+              <div className="page-scope">
+                <Tag color="blue" variant="filled">
+                  当前范围
+                </Tag>
+                <span>{rangeLabel}</span>
+                <span className="muted">粒度：店铺 × 商品ID × 日期（非SKU）</span>
+                <span className="muted">
+                  {mode === "preview" ? "来源：小型合成开发样例" : "来源：尚未接入"}
+                </span>
+              </div>
+              {versionNotice && (
+                <Alert showIcon type="info" title="数据版本已更新，当前条件已统一重新加载。" />
+              )}
+              {optionsQuery.isError && (
+                <Alert
+                  type="error"
+                  showIcon
+                  title="筛选数据加载失败"
+                  description={optionsQuery.error.message}
+                  action={<Button onClick={() => void optionsQuery.refetch()}>重试</Button>}
+                />
+              )}
+              {versionLocked ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  title="数据版本连续变化，请稍后重新加载"
+                  action={
+                    <Button
+                      onClick={() => {
+                        versionCoordinator.current.reset();
+                        setVersionLocked(false);
+                        client.removeQueries({ queryKey: ["products"] });
+                        setVersionToken(versionCoordinator.current.epoch);
+                      }}
+                    >
+                      重新加载
+                    </Button>
+                  }
+                />
+              ) : (
+                <ProductBootstrapContext.Provider
+                  value={{
+                    ready: optionsQuery.isSuccess,
+                    error: mode === "api" ? optionsQuery.error : null,
+                    notConnected: optionsQuery.data?.availability === "not_connected",
+                    retry: () => {
+                      void optionsQuery.refetch();
+                    },
+                  }}
+                >
+                  <ProductDataVersionContext.Provider value={dataVersion}>
+                    <div key={pageKey}>
+                      <BriefSection
+                        mode={mode}
+                        scenario={scenario}
+                        filters={overviewFilters}
+                        versionToken={versionToken}
+                        onProduct={chooseProduct}
                       />
-                      <DiagnosisSection query={diagnosisQuery} />
+                      {overviewQuery.data?.data && (
+                        <Alert
+                          className="health-banner"
+                          type={overviewQuery.data.data.health.tone}
+                          showIcon
+                          title={
+                            <>
+                              <b>增长健康度</b> · {overviewQuery.data.data.health.title}
+                            </>
+                          }
+                          description={overviewQuery.data.data.health.description}
+                        />
+                      )}
+                      <ScoresSection
+                        mode={mode}
+                        scenario={scenario}
+                        filters={scoreFilters}
+                        onChange={changeScores}
+                        options={scoreOptions}
+                        versionToken={versionToken}
+                      />
+                      <OverviewSection
+                        query={overviewQuery}
+                        filters={overviewFilters}
+                        options={options}
+                        onChange={changeOverview}
+                        onReset={() => reset("overview")}
+                        metric={metric}
+                        onMetric={setMetric}
+                      />
+                      <div className="analysis-grid">
+                        <TrendSection
+                          query={trendQuery}
+                          label={metricNames[metric]}
+                          comparison={comparison}
+                          onComparison={setComparison}
+                        />
+                        <DiagnosisSection query={diagnosisQuery} />
+                      </div>
+                      <AlertsSection
+                        filters={overviewFilters}
+                        mode={mode}
+                        scenario={scenario}
+                        versionToken={versionToken}
+                      />
+                      <DaysSection
+                        mode={mode}
+                        scenario={scenario}
+                        filters={dayFilters}
+                        onChange={changeDays}
+                        onReset={() => reset("days")}
+                        options={dayOptions}
+                        versionToken={versionToken}
+                      />
                     </div>
-                    <AlertsSection
-                      filters={overviewFilters}
-                      mode={mode}
-                      scenario={scenario}
-                      versionToken={versionToken}
-                    />
-                    <DaysSection
-                      mode={mode}
-                      scenario={scenario}
-                      filters={dayFilters}
-                      onChange={changeDays}
-                      onReset={() => reset("days")}
-                      options={dayOptions}
-                      versionToken={versionToken}
-                    />
-                  </div>
-                </ProductDataVersionContext.Provider>
-              </ProductBootstrapContext.Provider>
-            )}
-            <div className="product-footer">
-              <span>
-                数据完整性：{optionsQuery.data?.meta.isPreview ? "仅样例覆盖" : "尚未核实"} ·
-                最近同步成功：{mode === "preview" ? "样例无真实同步" : "尚无记录"}
-              </span>
-              <Button
-                type="text"
-                size="small"
-                icon={<ReloadOutlined />}
-                onClick={() => void client.invalidateQueries({ queryKey: ["products"] })}
-              >
-                刷新当前页面
-              </Button>
-              <span>页面刷新不会同步上游</span>
-            </div>
-          </main>
+                  </ProductDataVersionContext.Provider>
+                </ProductBootstrapContext.Provider>
+              )}
+              <div className="product-footer">
+                <span>
+                  数据完整性：{optionsQuery.data?.meta.isPreview ? "仅样例覆盖" : "尚未核实"} ·
+                  最近同步成功：{mode === "preview" ? "样例无真实同步" : "尚无记录"}
+                </span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ReloadOutlined />}
+                  onClick={() => void client.invalidateQueries({ queryKey: ["products"] })}
+                >
+                  刷新当前页面
+                </Button>
+                <span>页面刷新不会同步上游</span>
+              </div>
+            </main>
+          </DashboardSections>
         </div>
       </AntApp>
     </ConfigProvider>

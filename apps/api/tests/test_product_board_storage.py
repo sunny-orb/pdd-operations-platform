@@ -151,3 +151,24 @@ def test_empty_comparison_window_is_no_records_not_observed(sales_pg, tmp_path):
         sources = {r["dataset"]: r for r in repo.meta()["sources"]}
         assert sources["product_promotion"]["status"] == "no_records"
         assert sources["product_daily"]["status"] == "partial"
+
+
+def test_reconciled_full_scope_can_remove_source_rows_without_deleting_history(sales_pg, tmp_path):
+    import sqlalchemy as sa
+
+    store = ProductBoardStore(sales_pg, tmp_path, reconcile_full_scope=True)
+    end, rows = candidate()
+    first = store.run(lambda hb: (end, rows))
+    rows["profile_records"] = rows["profile_records"][:1]
+    second = store.run(lambda hb: (end, rows))
+    assert first["versions"]["profile_records"] != second["versions"]["profile_records"]
+    with sales_pg.connect() as c:
+        assert (
+            c.execute(
+                sa.text(
+                    "SELECT count(*) FROM public.profile_source_records WHERE dataset_version_id=:v"
+                ),
+                dict(v=first["versions"]["profile_records"]),
+            ).scalar_one()
+            > 0
+        )

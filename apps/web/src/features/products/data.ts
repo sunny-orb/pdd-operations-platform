@@ -5,7 +5,7 @@ import { z } from "zod";
 import dayjs from "dayjs";
 import { ApiError, get, params } from "./api";
 import { meta, options } from "./contracts";
-import { readScope, scopeError, writeScope, type Scope, type ScopeName } from "./scope";
+import { patchScope, readScope, scopeError, type Scope, type ScopeName } from "./scope";
 
 export function useProducts() {
   const [search, setSearch] = useSearchParams();
@@ -13,6 +13,8 @@ export function useProducts() {
     queryKey: ["m1", "meta"],
     queryFn: ({ signal }) => get("meta", meta, new URLSearchParams(), signal),
     retry: false,
+    refetchInterval: 45000,
+    refetchOnWindowFocus: "always",
   });
   const retried = useRef(new Set<string>());
   const version = metadata.data?.data_version ?? "";
@@ -32,22 +34,16 @@ export function useProducts() {
     : "";
   const scope = (name: ScopeName) => readScope(search, name, from, metadata.data?.date_to ?? "");
   const change = (name: ScopeName, patch: Partial<Scope>) =>
-    setSearch(
-      (p) =>
-        writeScope(p, name, {
-          ...readScope(p, name, from, metadata.data?.date_to ?? ""),
-          ...patch,
-        }),
-      { replace: true },
-    );
+    setSearch((p) => patchScope(p, name, patch, from, metadata.data?.date_to ?? ""), {
+      replace: true,
+    });
   const reset = (name: ScopeName) =>
     setSearch(
-      (p) =>
-        writeScope(
-          p,
-          name,
-          readScope(new URLSearchParams(), name, from, metadata.data?.date_to ?? ""),
-        ),
+      (p) => {
+        const next = new URLSearchParams(p);
+        [...next.keys()].filter((k) => k.startsWith(`${name}_`)).forEach((k) => next.delete(k));
+        return next;
+      },
       { replace: true },
     );
   return { metadata, version, scope, change, reset, stale };

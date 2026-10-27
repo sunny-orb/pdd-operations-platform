@@ -65,7 +65,8 @@ export function ProductsPage() {
                 <div>
                   {meta?.sources.map((s) => (
                     <p key={s.dataset}>
-                      {s.table} · 接收 {localTime(s.received_at)} · 完整性未知
+                      {s.table} · 观察截至 {s.observed_through ?? "资料快照"} · 接收{" "}
+                      {localTime(s.received_at)} · 完整性未知
                     </p>
                   ))}
                   <p>最近任务：{meta?.latest_attempt.status ?? "未接收"}</p>

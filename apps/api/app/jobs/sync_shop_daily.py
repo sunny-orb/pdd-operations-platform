@@ -20,22 +20,28 @@ from app.modules.sales.storage import ShopDailyStore
 ROOT = Path(__file__).resolve().parents[4]
 
 
+def sync_engine(url):
+    """本地最多三连接：项目锁、评分发布锁、评分RR快照；上游仍串行。"""
+    return sa.create_engine(
+        url,
+        hide_parameters=True,
+        pool_size=3,
+        max_overflow=0,
+        pool_timeout=5,
+        connect_args={"connect_timeout": 5, "options": "-c statement_timeout=15000"},
+    )
+
+
 def runtime_engine():
     """沿既有本机写入身份，限定连接目标；不初始化或变更任何密码。"""
     from migrations_v2.local import local_url
 
     password = (ROOT / "var/local-db/sync.env").read_text().strip().split("=", 1)[1]
     url = local_url("pdd_operations").set(username="pdd_ingest", password=password)
-    return sa.create_engine(
-        url,
-        hide_parameters=True,
-        pool_size=2,
-        max_overflow=0,
-        connect_args={"connect_timeout": 5, "options": "-c statement_timeout=15000"},
-    )
+    return sync_engine(url)
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from", dest="start", type=date.fromisoformat, required=True)
     parser.add_argument("--to", dest="end", type=date.fromisoformat, required=True)
@@ -92,6 +98,16 @@ def main():
         if engine:
             engine.dispose()
     return 0
+
+
+def main():
+    from app.jobs.project_sync import run_guarded
+
+    engine = runtime_engine()
+    try:
+        return run_guarded(engine, _main)
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

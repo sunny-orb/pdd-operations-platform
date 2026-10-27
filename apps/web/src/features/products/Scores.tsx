@@ -29,6 +29,7 @@ export function Scores({ state, scope }: { state: ProductsState; scope: Scope })
           <b>{data?.total ?? "—"} 款新品</b>
           <small>近7日截至 {data?.end ?? "—"}</small>
           <small>当前资料归属 · 完整日未知</small>
+          {data?.status === "trial_active" && <small>新试行标准已启用 · 待验证</small>}
         </div>
       </div>
       <details className="potential-guide">
@@ -47,7 +48,7 @@ export function Scores({ state, scope }: { state: ProductsState; scope: Scope })
         <>
           <div className="m1-score-groups">
             <span>
-              完整验证 <b>{data.groups.complete}</b>
+              完整评分 <b>{data.groups.complete}</b>
             </span>
             <span>
               待验证 <b>{data.groups.pending}</b>
@@ -77,7 +78,9 @@ export function Scores({ state, scope }: { state: ProductsState; scope: Scope })
             responsive
             size="small"
             onChange={(page) => state.change("score", { page })}
-            showTotal={(total) => `共 ${total} 款 · 标准未接入`}
+            showTotal={(total) =>
+              `共 ${total} 款 · ${data.status === "trial_active" ? "新试行标准已启用 · 待验证" : data.status === "pending_recompute" ? "输入已更新 · 评分待重算" : "标准未接入"}`
+            }
           />
         </>
       )}
@@ -119,7 +122,10 @@ function ScoreTile({ item, open }: { item: ScoreCard; open: () => void }) {
       <div className="tier-card-body">
         <h3>{item.product_name ?? "未命名商品"}</h3>
         <small>商品ID：{item.product_id}</small>
-        <p className="tier-card-status pending">暂未评分 · 缺少相容四档标准</p>
+        <p className="tier-card-status pending">{item.decision_label}</p>
+        <p>
+          已计分 {format(item.score)} / 100 · 待验证权重 {item.pending_weight} 分
+        </p>
         <p>
           近7日交易 {format(item.revenue, "currency")} · 访客 {format(item.visitors)} · 支付{" "}
           {format(item.units)} 件
@@ -197,6 +203,11 @@ function ScoreDialog({
       width: 90,
       render: (v: string | null) => (v == null ? "—" : `${format(v)}分`),
     },
+    {
+      title: "状态与原因",
+      dataIndex: "reason",
+      width: 220,
+    },
   ];
   return (
     <Modal
@@ -230,26 +241,35 @@ function ScoreDialog({
             <div>
               <span>已计分得分</span>
               <b>{format(item.score)} / 100</b>
-              <small>相容标准未接入</small>
+              <small>新试行标准 · 待验证</small>
             </div>
             <div>
               <span>待验证权重</span>
               <b>{item.pending_weight} 分</b>
-              <small>10 项指标待验证</small>
+              <small>
+                {item.signals.filter((signal) => signal.points == null).length} 项指标待验证
+              </small>
             </div>
             <div>
               <span>完整评分</span>
               <b>{format(item.complete_score)}</b>
-              <small>暂未评分</small>
+              <small>缺项未齐，不生成完整总分</small>
             </div>
             <div>
               <span>达标 / 有效指标</span>
-              <b>— / —</b>
+              <b>
+                {
+                  item.signals.filter(
+                    (signal) => signal.points != null && !/^0(?:\.0*)?$/.test(signal.points),
+                  ).length
+                }{" "}
+                / {item.signals.filter((signal) => signal.points != null).length}
+              </b>
               <small>不以缺项作零分</small>
             </div>
           </div>
           <div className="potential-detail-note">
-            <b>放量判断：暂未评分</b>
+            <b>放量判断：{item.decision_label}</b>
             <p>{item.reason}。当前原值仅代表已接收观察记录，完整日未知。</p>
           </div>
           <Table
@@ -267,7 +287,7 @@ function ScoreDialog({
             </p>
             <p>
               <b>历史参照：</b>
-              评分标准尚未完成商品身份与适用范围核验；不将历史商品试算线扩为全品类通用。冲锋衣临时ROI线须有适用标准才可启用。
+              新试行标准只用已接收的当期60日，训练窗口截止评分日前14日；每个店铺商品先取完整7日特征的中位数，同品类至少12款，否则全品类至少24款硬回退，不足则待验证。阶段与季节不猜测，标准不代表爆款概率。
             </p>
             <p>
               <b>推广门槛：</b>

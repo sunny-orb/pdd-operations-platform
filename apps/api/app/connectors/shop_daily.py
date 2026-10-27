@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import pymysql
 
+from app.connectors.retry import RetryBudget, execute_read
 from app.modules.sales.contracts import SalesError
 from app.modules.sales.normalization import normalize_shop_daily
 from app.modules.sales.source_policy import (
@@ -34,6 +35,7 @@ class ShopDailyReader:
             cursorclass=pymysql.cursors.DictCursor,
         )
         self.heartbeat = heartbeat
+        self.retry_budget = RetryBudget()
         self.read = self._read
 
     @classmethod
@@ -54,12 +56,15 @@ class ShopDailyReader:
             while True:
                 self.heartbeat()
                 with self.connection.cursor() as cursor:
-                    cursor.execute(
+                    execute_read(
+                        cursor,
                         f"SELECT id,dt,time_granularity,shop_id,shop_name,updated_at,"
                         f"json_data FROM `{SOURCE_TABLE}` WHERE time_granularity=%s AND "
                         "shop_id IN (%s,%s,%s,%s,%s,%s) AND dt>=%s AND dt<%s "
                         "ORDER BY dt,shop_id,id LIMIT %s OFFSET %s",
                         ("day", *window.shop_ids, start, end, PAGE_SIZE, offset),
+                        self.retry_budget,
+                        self.heartbeat,
                     )
                     rows = cursor.fetchall()
                 for row in rows:

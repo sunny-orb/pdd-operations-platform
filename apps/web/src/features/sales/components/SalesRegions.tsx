@@ -428,7 +428,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
               .join("、")}
             ；仅合计已知值，不补零。
             <br />
-            <SourceState source={d?.source ?? source} label="聚水潭地区" />
+            <SourceState source={source ?? d?.source} label="聚水潭地区" />
           </p>
         )}
       </div>
@@ -452,7 +452,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
           来源：bwd_rpa_pdd_region_sales_summary_pddht_f · 来源更新时间：
           {d?.source.source_updated_text ?? "—"}
           <br />
-          <SourceState source={d?.source ?? source} label="后台地区" />
+          <SourceState source={source ?? d?.source} label="后台地区" />
           。买家数按店铺、日期、地区累加，不跨日去重。客单价仅用成交金额/买家均有值的记录计算；当前筛选无记录店铺日{" "}
           {d?.missing_shop_days.length ?? "—"}，不补零。
         </p>

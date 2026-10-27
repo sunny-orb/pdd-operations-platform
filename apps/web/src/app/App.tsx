@@ -12,6 +12,12 @@ const SalesPage = lazy(() =>
   import("../features/sales/SalesPage").then((module) => ({ default: module.SalesPage })),
 );
 
+const PromotionPage = lazy(() =>
+  import("../features/promotion/PromotionPage").then((module) => ({
+    default: module.PromotionPage,
+  })),
+);
+
 const modules = [
   {
     path: "/",
@@ -50,11 +56,18 @@ export function App() {
   const pathname = useLocation().pathname;
   const isProductPage = pathname === "/products";
   const isSalesPage = pathname === "/sales" || pathname === "/store-sales";
+  const isPromotionPage = pathname === "/promotion";
   const status = useQuery({
-    enabled: !isProductPage && !isSalesPage,
+    enabled: !isProductPage && !isSalesPage && !isPromotionPage,
     queryKey: ["system-status"],
     queryFn: ({ signal }) => getSystemStatus(signal),
   });
+  if (isPromotionPage)
+    return (
+      <Suspense fallback={<p role="status">正在加载推广分析看板…</p>}>
+        <PromotionPage />
+      </Suspense>
+    );
   if (isSalesPage)
     return (
       <Suspense fallback={<p role="status">正在加载店铺销售看板…</p>}>

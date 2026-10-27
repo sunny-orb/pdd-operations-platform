@@ -7,6 +7,7 @@ from decimal import Decimal
 import pymysql
 from pymysql.constants import FIELD_TYPE
 
+from app.connectors.retry import RetryBudget, execute_read
 from app.modules.sales.contracts import SalesError
 from app.modules.sales.datasets import PROMOTION_METRICS, SOURCE_MAX_ROWS, SOURCE_PAGE_SIZE, SPECS
 from app.modules.sales.source_normalization import normalize_source
@@ -32,6 +33,7 @@ class SalesSourceReader:
             cursorclass=pymysql.cursors.DictCursor,
         )
         self.heartbeat = heartbeat
+        self.retry_budget = RetryBudget()
         self.scan = self._scan
 
     @classmethod
@@ -52,11 +54,14 @@ class SalesSourceReader:
                 self.heartbeat()
                 with self.connection.cursor() as cursor:
                     placeholders = ",".join(["%s"] * len(spec.shop_ids))
-                    cursor.execute(
+                    execute_read(
+                        cursor,
                         f"SELECT {','.join(spec.columns)} FROM `{spec.source_table}` WHERE "
                         f"shop_id IN ({placeholders}) AND time_granularity=%s AND dt>=%s AND dt<%s "
                         "ORDER BY dt,shop_id,id LIMIT %s OFFSET %s",
                         (*spec.shop_ids, "day", start, stop, SOURCE_PAGE_SIZE, offset),
+                        self.retry_budget,
+                        self.heartbeat,
                     )
                     page = cursor.fetchall()
                 for row in page:

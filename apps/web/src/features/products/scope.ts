@@ -56,3 +56,24 @@ export function writeScope(params: URLSearchParams, name: ScopeName, scope: Scop
   }
   return next;
 }
+
+/** 仅日期输入会固定日期；普通筛选后默认窗口仍跟随新版本。 */
+export function patchScope(
+  params: URLSearchParams,
+  name: ScopeName,
+  patch: Partial<Scope>,
+  from: string,
+  to: string,
+) {
+  const explicit =
+    params.has(`${name}_from`) ||
+    params.has(`${name}_to`) ||
+    patch.from !== undefined ||
+    patch.to !== undefined;
+  const next = writeScope(params, name, { ...readScope(params, name, from, to), ...patch });
+  if (!explicit) {
+    next.delete(`${name}_from`);
+    next.delete(`${name}_to`);
+  }
+  return next;
+}

@@ -855,3 +855,15 @@ HAVING COUNT(*) > 1;
 原型对照入口为requirements所列商品子站。本地sites-current的dashboard、tier-score及三份直接引用CSS为保存版证据；线上本次HTML实际引用page-QfgGr3Ix.js、index.a_H9cAux.css与page.DTe4wH7v.css，核心布局/颜色/排版规则与保存版相符，压缩存在等价颜色/小数写法。未取得可比的线上同输入全页截图，不据此声称逐像素验收。
 
 线上评分资源只提取身份/品类/季节/阶段、四条显示线、参照/声明样本数和增长基数，不迁移旧分数或当前经营特征。152个原对象中55组有数值显示线；参数没有原shop_id/shop，不能把单独product_id推定为原完整链接，未发布到score_standards；也不能代替缺少的完整拟合模型。有限投影及资源摘要留在忽略的var/m1-prototype。历史57款的证据保留历史状态，本次55组不冒充同一版本；标准适用性、收藏定义和归因未决继续保留。
+
+<a id="project-sync-source-20261028"></a>
+
+## 本轮同步、M2扩列与模型材料（2026-10-28）
+
+按最新用户授权核对M1实际最新日，必要SQL只查询已批准六店day的两张事实MAX(dt)，两源均2026-10-26，尚无27日记录；源码较慢源min截断已改为接收各源最新观察，页面分别按自身事实MAX显示。当前成功商品三表仍是此前投影，不把本轮资源失败说成新成功。
+
+本轮实际源拒绝为PyMySQL ProgrammingError1064，有限诊断信息 `Exceed concurrency limit: 3 backend`；不能从这一个backend报错推定账号或全局并发额度已确定。项目侧串行及有界退避，未改上游资源组/ETL/权限。StarRocks官方[资源组说明](https://docs.starrocks.io/docs/administration/management/resource_management/resource_group/)用于核对存在查询并发限制机制，未据此认定本实例的具体配置；实测失败/恢复唯一见validation和私有任务记录。
+
+M2沿用同一商品推广BWD与M3两店铺渠道来源，未加ADS或旧声明零。ODS商品推广JSON新增必要键“净交易额(元)”和“成交笔数”，明星pdd_star_shop新增transaction_count；实际稳定投影重新发布，前者净额/笔数1597/1597非空，明星笔数268/268、净额不适用仍NULL。物理表不新增字段，SPECS/解释版本已更新，前四量保持原值；真实逐格/56组接口及M3回归证据见validation。
+
+模型按用户指明的备份限定必要模型文件名与M1目录核查：取得sites-current/product-data-dashboard/scripts/viral_tiers.py，156行，SHA256为a46fb3d0956941fcca78958fa9252920b5c5c358cb62aeecaeb45806550d2ad8，已只读复制到runtime/m1-v6。没有取得原data/new_product_tiers.json或原拟合参数包，旧重算源码含缺日补零/单product_id归并，未原样搬进主链。原V6源码离线8项边界可运行，依赖numpy/pandas；本机业务主链用用户另行批准的纯Decimal阶段无关试行适配，非恢复原拟合参数。接口/私有样本/训练截止/新标准及评分发布通过实际v2任务绑定，相容性和真实分数验证统一见[验收记录](validation.md#m1-trial-scores-20261028)。

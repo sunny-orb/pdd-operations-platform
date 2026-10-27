@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .source_policy import SHOPS
 
-EXTENDED_REVISION = "m3-full-page-v1"
+EXTENDED_REVISION = "m3-full-page-v2-m2-promotion"
 SOURCE_PAGE_SIZE, SOURCE_MAX_ROWS, INSERT_BATCH_SIZE = 2000, 300000, 1000
 REFUND_BASE = "XGzTbd9xJaASV3soYnycMmf0nY3"
 REFUND_TABLE = "tblISBHrFF4jFJqW"
@@ -79,7 +79,14 @@ SPECS = {
             "shop_channel_promotion_daily",
             "pdd_star_shop",
             IDENTITY
-            + ("cost", "transaction_amount", "impression_count", "click_count", "create_time"),
+            + (
+                "cost",
+                "transaction_amount",
+                "transaction_count",
+                "impression_count",
+                "click_count",
+                "create_time",
+            ),
             channel="star_shop",
         ),
         DatasetSpec(
@@ -131,6 +138,8 @@ SPECS = {
 PROMOTION_METRICS = {
     "总花费(元)": "spend",
     "交易额(元)": "attributed_revenue",
+    "净交易额(元)": "net_attributed_revenue",
+    "成交笔数": "attributed_deals",
     "曝光量": "impressions",
     "点击量": "clicks",
 }

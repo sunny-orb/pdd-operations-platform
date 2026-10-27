@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from app.api.product_board import router as products_router
+from app.api.promotion import router as promotion_router
 from app.api.sales import router as sales_router
 from app.api.system import router
 from app.core.config import Settings
@@ -78,7 +79,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.exception_handler(BoardError)
     async def handle_board_error(request: Request, error: BoardError):
         return error_response(
-            request, error.status, error.code, "商品经营暂不可用，请核对数据状态或重试"
+            request, error.status, error.code, "经营数据暂不可用，请核对数据状态或重试"
         )
 
     @application.exception_handler(SalesError)
@@ -98,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(router)
     application.include_router(products_router)
+    application.include_router(promotion_router)
     application.include_router(sales_router)
     return application
 

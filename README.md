@@ -65,7 +65,7 @@ Windows使用`py -3.12 -m venv apps/api/.venv`和`apps/api/.venv/Scripts/python.
 | API / 文档   | http://127.0.0.1:8000 / http://127.0.0.1:8000/docs                                                               |
 | M3店铺销售   | http://127.0.0.1:5173/sales ，`/store-sales`同页；店铺日、退款、推广、评分及两类地区真实接入；目标入口当前不可用 |
 | 存活 / 就绪  | `/health/live` / `/health/ready`；数据库未配置时就绪503是预期，不能冒充业务正常                                  |
-| M1真实商品页 | `/products`，新版三来源真实查询；评分标准未生效，十项当前值及原因保留                                            |
+| M1真实商品页 | `/products`，新版三来源真实查询；新试行标准/参考部分分已接入，缺项及待验证原因保留                               |
 
 本机数据库使用Docker Desktop，整个项目共用`pdd_operations`，使用独立v2结构，容器和数据库本身保留。以下迁移/测试入口是旧实现的运行说明，重新设计期间暂停执行：
 
@@ -92,14 +92,32 @@ npm run sync:m1 -- --publish     # 三来源与资料关系原子发布到本地
 npm run dev                     # 本地前后端
 ```
 
-接收仅用已批准三张数仓表、六店day、最近60日及去年对应期和当前必要资料；连接位置见[data-contract 3.2](docs/data-contract.md#32-推广字段)，本轮证据见[source-evidence](docs/source-evidence.md#m1-v2-rebuild-20261028)。凭据不写命令行/仓库。来源私有投影、解释及生产代码留在忽略的var中，API仍为只读pdd_app，接收为现有pdd_ingest。没有定时、来源回写或自动删源；来源修订、缺旧键或读取失败不静默覆盖当前入口。
+接收仅用已批准三张数仓表、六店day、最近60日及去年对应期和当前必要资料；连接位置见[data-contract 3.2](docs/data-contract.md#32-推广字段)，本轮证据见[source-evidence](docs/source-evidence.md#m1-v2-rebuild-20261028)。凭据不写命令行/仓库。来源私有投影、解释及生产代码留在忽略的var中，API仍为只读pdd_app，接收为现有pdd_ingest。当前本机项目定时器已启用，运行入口见下；来源修订形成新版本，受控完整分页双读下的移除键留审计，既有原行/版本不删除。来源读取失败保留旧成功入口并明确状态，不回写来源。
 
-当前GET为`meta`、`options`、`overview`、`days`、`scores`、`scores/{listing_id}`，固定data_version，不相容返回409；覆盖、成功和失败状态分别表达。四榜、健康度、七指标、流量链路、趋势和风险由本地聚合；评分区现阶段返回绑定四输入版本的十项观察值及缺参原因，不产生伪造分数或完整放量结果。收藏区间可加性、归因与标准适用范围限制见[问题台账](docs/issues.md#m1-商品经营含新品评分)。接口以[data-contract 7.9](docs/data-contract.md#m1-v2-query-contract)为准，历史旧M1接口和model_versions等不再是当前物理结构。
+当前GET为`meta`、`options`、`overview`、`days`、`scores`、`scores/{listing_id}`，固定data_version，不相容返回409；覆盖、成功和失败状态分别表达。四榜、健康度、七指标、流量链路、趋势和风险由本地聚合；评分区读取相容四输入及新试行标准/评分版本，返回十项原值、参考部分分、四线/样本和待验证原因；完整分与正式放量保持关闭。收藏区间可加性、归因与标准适用范围限制见[问题台账](docs/issues.md#m1-商品经营含新品评分)。接口以[data-contract 7.9](docs/data-contract.md#m1-v2-query-contract)为准，历史旧M1接口和model_versions等不再是当前物理结构。
 
-`profiles:m1`、`scores:m1`、旧`db:upgrade`仍停用，不用旧任务重建已删除的数据库结构。新增04只授既有M1表最小权限；真实PG验证后，受控本地升级脚本为`scripts/upgrade-products-local.py`，已升级不会覆盖数据。
+旧`profiles:m1`、`scores:m1`、`db:upgrade`仍停用，不用旧任务重建已删除的数据库结构。04授既有M1表最小权限，05补评分父行FOR SHARE必需的UPDATE(id)权限（封版不可变仍有效）；真实PG验证后，受控本地升级脚本为`scripts/upgrade-products-local.py`，已升级不会覆盖数据。
 
 v2本轮受控入口为`apps/api/.venv/bin/python scripts/db-v2.py verify`（仅新建/清理本轮隔离库并验证，项目只读）和`create`（仅允许已验证的初始空库；当前已创建后会拒绝重复覆盖）。入口不读取通用DATABASE_URL；不直接运行schema.sql，不开放旧M1接数或同步。后续结构变更追加Alembic revision及实施/验证说明。
 
 Python和前端都有锁文件；后端依赖从`requirements-dev.in`在独立环境解析，不只改输入。正式数据表变更走Alembic，仅按已批准范围创建业务迁移；业务待决口径不在建表时默认确认。
 
 目标GitHub仓库为私有`sunny-orb/pdd-operations-platform`；初始化推送是历史记录，当前本地提交与远端同步需分别实查。凭据、经营数据、备份、模型及日志不提交，生产发布需要明确授权。
+
+## 项目自动同步与推广入口
+
+推广页为`http://127.0.0.1:5173/promotion`，默认店铺推广；商品模式`?mode=product`。两模式真实数据/独立版本/来源状态、八指标/趋势、漏斗/Top5、SOP观察及分页已接入；跨渠道成交和未核口径限制见[统一问题台账](docs/issues.md#m2-推广分析)。
+
+本机独立launchd检查已接入来源，每日Asia/Shanghai 10:00、14:00、18:00串行刷新；来源成功后自动重算相容试行评分。页面45秒及聚焦检查本地新版本，默认日期推进、自选范围保留。钟点唯一配置为[config/sync.toml](config/sync.toml)，也可调整：
+
+```bash
+apps/api/.venv/bin/python scripts/sync-project.py --status
+apps/api/.venv/bin/python scripts/sync-project.py --set-times 10:00 14:00 18:00
+apps/api/.venv/bin/python scripts/sync-project.py --run-now
+apps/api/.venv/bin/python scripts/install-sync-schedule.py          # 本机安装/重载
+apps/api/.venv/bin/python scripts/install-sync-schedule.py --remove # 只移除定时器
+```
+
+凭据独立保存在Git忽略的本机0600文件，前端及Git中没有密码。机器睡眠/关机不会按时执行；恢复后当日漏点合并补跑。当前同步只覆盖已接入来源及批准窗口，未开发页面不会冒充同步完成；窗口外历史回补仍由受控任务安排。数仓backend资源拒绝时总预算退避，失败保旧版/时间与原因；定时到点不保证上游已有新日或已齐数。运行/验收见[架构](docs/architecture.md#sync-trigger-policy)、[验证](docs/validation.md#project-sync-m2-20261028)。
+
+新试行评分独立入口为`PYTHONPATH=apps/api apps/api/.venv/bin/python -m app.jobs.score_product_board`，只读本地输入并发布参考评分，不连接上游。模型材料/算法及最小权限设计见[说明](docs/m1-model-reuse.md)；原参数与新试行参照分开追溯，不复用旧经营数字。

@@ -390,6 +390,9 @@ def overview(repo, q):
 
 
 def score_cards(repo, q, listing_id=None):
+    from app.modules.product_scoring.query import published_scores
+
+    published, computation_status = published_scores(repo)
     info, groups = scope(repo, q)
     end = repo.end
     start = end - timedelta(days=6)
@@ -484,7 +487,21 @@ def score_cards(repo, q, listing_id=None):
                 action="先核对资料、原值和参照标准，保留评分位置",
             )
         )
-    cards.sort(key=lambda r: (-(r["revenue"] or 0), r["shop_id"], r["product_id"]))
+    for item in cards:
+        if item["listing_id"] in published:
+            item.update(published[item["listing_id"]])
+        elif computation_status == "pending_recompute":
+            item.update(
+                reason="输入已更新，试行评分待重算；不沿用旧分", action="等待相容试行评分发布"
+            )
+    cards.sort(
+        key=lambda r: (
+            0 if r["score"] is not None else 1,
+            -(r["score"] or 0),
+            r["shop_id"],
+            r["product_id"],
+        )
+    )
     if q.judgement:
         cards = [r for r in cards if r["decision"] == q.judgement]
     return dict(
@@ -494,8 +511,12 @@ def score_cards(repo, q, listing_id=None):
         end=end,
         page=q.page,
         size=q.size,
-        status="standards_not_connected",
-        groups=dict(complete=0, pending=0, unscored=len(cards)),
+        status=computation_status,
+        groups=dict(
+            complete=0,
+            pending=sum(r["score"] is not None for r in cards),
+            unscored=sum(r["score"] is None for r in cards),
+        ),
     )
 
 

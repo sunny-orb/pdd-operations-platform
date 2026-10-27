@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pymysql
 
+from app.connectors.retry import RetryBudget, execute_read
 from app.modules.product_board.source import (
     AD_NUM,
     COLUMNS,
@@ -33,6 +34,7 @@ class ProductBoardReader:
             cursorclass=pymysql.cursors.DictCursor,
         )
         self.heartbeat = heartbeat
+        self.retry_budget = RetryBudget()
 
     def close(self):
         self.connection.close()
@@ -42,16 +44,20 @@ class ProductBoardReader:
         for code in ("product_daily", "product_promotion"):
             self.heartbeat()
             with self.connection.cursor() as c:
-                c.execute(
+                execute_read(
+                    c,
                     f"SELECT MAX(dt) latest FROM `{TABLES[code]}` WHERE time_granularity=%s "
                     "AND shop_id IN (%s,%s,%s,%s,%s,%s)",
                     ("day", *SHOPS),
+                    getattr(self, "retry_budget", None),
+                    self.heartbeat,
                 )
                 value = c.fetchone()["latest"]
                 if not value:
                     raise ValueError("SOURCE_NO_DATES")
                 latest.append(value.date())
-        return min(*latest, datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1))
+        # 接收覆盖两源最新观察；页面分别按事实MAX日期展示，不以较慢源截断。
+        return min(max(latest), datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1))
 
     def projection(self, code, end):
         numbers = set(PRODUCT_NUM.values()) if code == "product_daily" else set(AD_NUM.values())
@@ -79,10 +85,13 @@ class ProductBoardReader:
                     else ("day", *SHOPS, period[0], period[1] + timedelta(days=1))
                 )
                 with self.connection.cursor() as c:
-                    c.execute(
+                    execute_read(
+                        c,
                         f"SELECT {columns} FROM `{TABLES[code]}` {clause} "
                         f"ORDER BY `{key}` LIMIT %s OFFSET %s",
                         (*params, 1000, offset),
+                        self.retry_budget,
+                        self.heartbeat,
                     )
                     batch = c.fetchall()
                 result.extend(batch)

@@ -92,8 +92,17 @@ class Repository:
     def __init__(self, connection, versions, token):
         self.c, self.versions, self.token = connection, versions, token
         self.start = versions["product_daily"]["period_start"]
-        self.end = versions["product_daily"]["period_end"]
         self.params = {code: r["id"] for code, r in versions.items()}
+        self.end = (
+            connection.execute(
+                sa.text(
+                    "SELECT max(business_date) FROM public.product_daily_facts "
+                    "WHERE dataset_version_id=:product_daily"
+                ),
+                self.params,
+            ).scalar_one()
+            or versions["product_daily"]["period_end"]
+        )
 
     def meta(self):
         attempt = (
@@ -125,6 +134,15 @@ class Repository:
             self.params,
         ).one()
         coverage = {code: [] for code in CODES}
+        observed_through = {}
+        for code, table, field in (
+            ("product_daily", "product_daily_facts", "business_date"),
+            ("product_promotion", "product_promotion_records", "period_start"),
+        ):
+            observed_through[code] = self.c.execute(
+                sa.text(f"SELECT max({field}) FROM public.{table} WHERE dataset_version_id=:v"),
+                dict(v=self.params[code]),
+            ).scalar_one()
         for row in self.c.execute(
             sa.text(
                 "SELECT dataset_version_id,window_start,window_end,availability_state,"
@@ -168,6 +186,7 @@ class Repository:
                     dataset=code,
                     table=self.versions[code]["source_locator"],
                     version=self.params[code],
+                    observed_through=observed_through.get(code),
                     received_at=self.versions[code]["received_at"].isoformat()
                     if self.versions[code]["received_at"]
                     else None,

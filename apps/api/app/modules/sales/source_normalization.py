@@ -138,6 +138,7 @@ def normalize_source(code, rows, window, heartbeat=lambda: None):
                         else {
                             "cost": "spend",
                             "transaction_amount": "attributed_revenue",
+                            "transaction_count": "attributed_deals",
                             "impression_count": "impressions",
                             "click_count": "clicks",
                         }
@@ -148,13 +149,13 @@ def normalize_source(code, rows, window, heartbeat=lambda: None):
                     row.update(
                         channel_code=spec.channel,
                         source_channel_label=None,
-                        net_attributed_revenue=None,
-                        attributed_deals=None,
                         source_created_time_raw=str(item["create_time"])
                         if item.get("create_time")
                         else None,
                         source_created_at=None,
                     )
+                    if spec.channel == "star_shop":
+                        row["net_attributed_revenue"] = None
                 elif code == "shop_regions":
                     row.update(
                         source_region_name=item.get("province"),

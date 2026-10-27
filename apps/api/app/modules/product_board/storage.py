@@ -32,8 +32,10 @@ LOADED_PRODUCER_HASH = producer_hash()
 
 
 class ProductBoardStore:
-    def __init__(self, engine, archive_root):
+    def __init__(self, engine, archive_root, *, reconcile_full_scope=False):
         self.engine, self.archive_root = engine, Path(archive_root)
+        self.reconcile_full_scope = reconcile_full_scope
+        self.changes = []
         m = sa.MetaData()
         self.tables = {
             n: sa.Table(n, m, schema="public", autoload_with=engine, resolve_fks=False)
@@ -54,6 +56,7 @@ class ProductBoardStore:
         if producer_hash() != LOADED_PRODUCER_HASH:
             raise ValueError("PRODUCER_CODE_CHANGED")
         code_hash = LOADED_PRODUCER_HASH
+        self.changes = []
         task = self.tables["task_runs"]
         run = str(uuid4())
         with self.engine.connect() as c:
@@ -139,6 +142,13 @@ class ProductBoardStore:
                 )
                 os.chmod(archive / "manifest.json", 0o600)
                 versions = self._stage(c, rows, end, archive, heartbeat)
+                if self.reconcile_full_scope:
+                    changes = archive / "reconciliation.json"
+                    changes.write_text(json.dumps(self.changes, ensure_ascii=False))
+                    os.chmod(changes, 0o600)
+                    manifest["files"][changes.name] = fingerprint(changes.read_text())
+                    manifest["reconciliation_policy"] = "stable-full-scope"
+                    (archive / "manifest.json").write_text(json.dumps(manifest, default=str))
                 if producer_hash() != code_hash:
                     raise ValueError("PRODUCER_CODE_CHANGED")
                 with c.begin():
@@ -248,14 +258,28 @@ class ProductBoardStore:
                         for r in oldrows
                         if not fields or any(a <= r[fields[2]] <= b for a, b in windows(end))
                     }
-                    if oldkeys - newrows.keys():
+                    removed = oldkeys - newrows.keys()
+                    if removed and not self.reconcile_full_scope:
                         raise ValueError("SOURCE_DELETE_UNCONFIRMED")
-                    if fields and any(
-                        r["source_row_key"] in newrows
-                        and any(r[k] != newrows[r["source_row_key"]][k] for k in fields)
-                        for r in oldrows
-                    ):
+                    changed = (
+                        sum(
+                            r["source_row_key"] in newrows
+                            and any(r[k] != newrows[r["source_row_key"]][k] for k in fields)
+                            for r in oldrows
+                        )
+                        if fields
+                        else 0
+                    )
+                    if changed and not self.reconcile_full_scope:
                         raise ValueError("SOURCE_KEY_IDENTITY_CHANGED")
+                    self.changes.append(
+                        dict(
+                            dataset=code,
+                            previous_version=old,
+                            removed_keys=len(removed),
+                            identity_changes=changed,
+                        )
+                    )
         listings = {
             r["listing_id"]: (r["source_shop_id"], r["source_product_id"])
             for code in ("product_daily", "product_promotion")

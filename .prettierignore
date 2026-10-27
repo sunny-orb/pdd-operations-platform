@@ -7,3 +7,8 @@ package-lock.json
 *.lock
 
 .superpowers
+
+# 私有模型输入/生成结果不参与源码格式化。
+runtime/m1-v6/inputs/
+runtime/m1-v6/outputs/
+runtime/m1-v6/data/

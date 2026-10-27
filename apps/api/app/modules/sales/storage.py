@@ -42,10 +42,13 @@ def reflect_tables(engine, fact_table="shop_daily_facts"):
 
 
 class ShopDailyStore:
-    def __init__(self, engine, *, archive_root: Path, approved=None, spec=None):
+    def __init__(
+        self, engine, *, archive_root: Path, approved=None, spec=None, reconcile_full_scope=False
+    ):
         if spec is not None and SPECS.get(spec.code) != spec:
             raise SalesError("UNKNOWN_SALES_DATASET")
         self.spec = spec
+        self.reconcile_full_scope = reconcile_full_scope
         self.code = spec.code if spec else "shop_daily"
         self.fact_table = spec.fact_table if spec else "shop_daily_facts"
         self.date_column = spec.date_column if spec else "business_date"
@@ -204,6 +207,9 @@ class ShopDailyStore:
                 shops=SHOPS,
                 fingerprint=candidate.fingerprint,
                 producer_revision=producer_revision(),
+                reconciliation_policy="stable-full-scope"
+                if self.reconcile_full_scope
+                else "protected",
                 input_sha256=__import__("hashlib").sha256(data).hexdigest(),
             )
         )
@@ -250,12 +256,19 @@ class ShopDailyStore:
                     sa.select(
                         facts.c.source_row_key, facts.c.shop_id, facts.c[self.date_column]
                     ).where(facts.c.dataset_version_id == old)
-                )
+                ).all()
                 new_keys = {
                     (r["source_row_key"], r["shop_id"], r[self.date_column]) for r in candidate.rows
                 }
-                if any(tuple(row) not in new_keys for row in old_rows):
+                removed = sum(tuple(row) not in new_keys for row in old_rows)
+                if removed and not self.reconcile_full_scope:
                     raise SalesError("SOURCE_OLD_KEY_MISSING")
+                if self.reconcile_full_scope:
+                    evidence = Path(archive).parent / "reconciliation.json"
+                    evidence.write_text(
+                        canonical(dict(previous_version=old, removed_or_moved_keys=removed))
+                    )
+                    os.chmod(evidence, 0o600)
             reuse = connection.execute(
                 sa.select(versions.c.id).where(
                     versions.c.dataset_code == self.code,

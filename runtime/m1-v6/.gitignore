@@ -1,0 +1,13 @@
+# 私有模型参数、历史输入、二进制及离线输出不得提交。
+data/
+inputs/
+outputs/
+*.pkl
+*.pickle
+*.joblib
+*.bin
+*.npz
+*.npy
+*.pt
+*.pth
+*.onnx

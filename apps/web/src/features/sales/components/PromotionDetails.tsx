@@ -1,10 +1,20 @@
 import { SourceState } from "./SourceState";
-import type { SalesMetrics } from "../api/contracts";
+import type { SalesMetrics, FiltersResponse } from "../api/contracts";
 import { fixed, money, percent } from "../format";
-export function PromotionDetails({ data }: { data?: SalesMetrics }) {
+export function PromotionDetails({
+  data,
+  sources,
+}: {
+  data?: SalesMetrics;
+  sources?: FiltersResponse["data"]["sources"];
+}) {
+  const channels = data?.promotion_channels?.map((x) => ({
+    ...x,
+    source: { ...x.source, ...sources?.[x.code] },
+  }));
   return (
     <div className="promotion-source">
-      {data?.promotion_channels
+      {channels
         ?.filter((x) => ["failed", "abandoned"].includes(x.source.last_attempt_status ?? ""))
         .map((x) => (
           <p key={x.code}>
@@ -16,7 +26,7 @@ export function PromotionDetails({ data }: { data?: SalesMetrics }) {
         ))}
       <details>
         <summary>查看推广口径与补齐记录</summary>
-        {data?.promotion_channels?.map((x) => (
+        {channels?.map((x) => (
           <p key={x.code}>
             <b>{x.code.endsWith("star_shop") ? "官方明星店铺" : "商品推广概览"}</b> · 最新日{" "}
             {x.source.observed_through ?? "—"} · 更新时间原文{" "}

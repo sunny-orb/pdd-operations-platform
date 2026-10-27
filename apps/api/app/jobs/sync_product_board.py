@@ -10,7 +10,7 @@ from app.jobs.sync_shop_daily import ROOT, runtime_engine
 from app.modules.product_board.storage import ProductBoardStore
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--publish", action="store_true")
@@ -58,6 +58,16 @@ def main():
         if engine:
             engine.dispose()
     return 0
+
+
+def main():
+    from app.jobs.project_sync import run_guarded
+
+    engine = runtime_engine()
+    try:
+        return run_guarded(engine, _main)
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

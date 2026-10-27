@@ -242,7 +242,7 @@ export function SalesPage() {
                 </Card>
               ))}
             </div>
-            <PromotionDetails data={data} />
+            <PromotionDetails data={data} sources={filters?.data.sources} />
             <p className="refund-coverage-note">
               退款率按销售与退款均有值的同店同日记录计算。已匹配退款{" "}
               {money(data?.refund_match?.matched_refunds)} ÷ 对应成交金额{" "}
@@ -254,7 +254,7 @@ export function SalesPage() {
               。这是同日统计参考，日期及订单范围待核，缺失不补零。
               <br />
               <SourceState
-                source={data?.refund_match?.source ?? filters?.data.sources?.shop_refunds}
+                source={filters?.data.sources?.shop_refunds ?? data?.refund_match?.source}
                 label="飞书退款"
               />
             </p>

@@ -1,0 +1,237 @@
+.m2-promotion-scope {
+  min-width: 0;
+  font-family: Arial, "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+.m2-promotion-scope * {
+  box-sizing: border-box;
+}
+.m2-promotion-scope main {
+  width: 100%;
+}
+.m2-promotion-scope a {
+  color: #1768d9;
+}
+.m2-promotion-scope .promotion-modes {
+  margin-top: 0;
+  padding-top: 18px;
+  margin-bottom: 0;
+}
+.m2-promotion-scope .promotion-modes .ant-btn {
+  height: auto;
+  font-weight: 500;
+}
+.m2-promotion-scope .hero h1 {
+  color: white;
+}
+.m2-promotion-scope .hero small {
+  color: #d7e7ff;
+}
+.m2-promotion-scope .hero .snapshot {
+  max-width: 49%;
+}
+.m2-promotion-scope .hero .snapshot p {
+  margin: 0;
+}
+.m2-promotion-scope .m2-hero-source-link {
+  display: inline-block;
+  margin-top: 8px;
+  color: #e8f1ff;
+  font-size: 12px;
+}
+.m2-promotion-scope .filters .ant-picker,
+.m2-promotion-scope .filters .ant-select {
+  width: 100%;
+  min-height: 40px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 400;
+}
+.m2-promotion-scope .filters .ant-picker input {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-weight: 400;
+}
+.m2-promotion-scope .filters .ant-select-input {
+  height: auto;
+}
+.m2-promotion-scope .filters .ant-select-content {
+  font-weight: 400;
+}
+.m2-promotion-scope .m2-source-state {
+  padding: 10px 0 2px;
+  color: #617189;
+  font-size: 12px;
+}
+.m2-promotion-scope .m2-source-state summary {
+  cursor: pointer;
+}
+.m2-promotion-scope .m2-source-state ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.m2-promotion-scope .m2-source-state li {
+  margin: 7px 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.m2-promotion-scope .m2-source-state .ant-tag {
+  margin-inline: 6px;
+}
+.m2-promotion-scope .m2-status {
+  margin: 12px 0;
+}
+.m2-promotion-scope .m2-status .ant-alert {
+  margin-top: 8px;
+}
+.m2-promotion-scope .m2-trend {
+  height: 300px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 8px;
+}
+.m2-promotion-scope .m2-chart-tooltip {
+  max-width: 330px;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid #dce5f0;
+  border-radius: 8px;
+  box-shadow: 0 5px 16px #14213522;
+  font-size: 12px;
+}
+.m2-promotion-scope .m2-chart-tooltip p {
+  margin: 6px 0;
+}
+.m2-promotion-scope .m2-chart-tooltip small {
+  color: #617189;
+}
+.m2-promotion-scope .chart-panel {
+  min-width: 0;
+}
+.m2-promotion-scope .legend {
+  min-height: 20px;
+}
+.m2-promotion-scope .risk {
+  grid-template-columns: 1fr 0.8fr 1fr 1fr;
+}
+.m2-promotion-scope .m2-empty {
+  padding: 14px;
+  color: #617189;
+  text-align: center;
+  font-size: 13px;
+}
+.m2-promotion-scope .m2-store-table {
+  max-height: 360px;
+  overflow: auto;
+}
+.m2-promotion-scope .store-promotion .table-panel {
+  padding: 0;
+}
+.m2-promotion-scope .sop-table .ant-pagination {
+  padding: 10px;
+}
+.m2-promotion-scope .sop-table td {
+  font-weight: 400;
+}
+.m2-promotion-scope .sop-table td b {
+  font-weight: 700;
+}
+.m2-promotion-scope .sop-diagnosis small {
+  font-weight: 400;
+}
+.m2-promotion-scope .sop-diagnosis details > summary {
+  padding: 5px 0;
+}
+.m2-promotion-scope .m2-rule-state {
+  display: inline;
+  font-size: 12px;
+}
+.m2-options-hint {
+  display: block;
+  padding: 8px 12px;
+  color: #617189;
+}
+@media (max-width: 980px) {
+  .m2-promotion-scope .hero .snapshot {
+    max-width: 100%;
+  }
+}
+@media (max-width: 620px) {
+  .m2-promotion-scope .promotion-modes {
+    padding-inline: 14px;
+    gap: 8px;
+  }
+  .m2-promotion-scope .promotion-modes .ant-btn {
+    padding: 10px 14px;
+  }
+  .m2-promotion-scope .panel {
+    padding: 16px;
+  }
+  .m2-promotion-scope .table-panel {
+    padding: 0;
+  }
+  .m2-promotion-scope .panel-title {
+    flex-wrap: wrap;
+  }
+  .m2-promotion-scope .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .m2-promotion-scope .risk {
+    grid-template-columns: 1fr 1fr;
+  }
+  .m2-promotion-scope .risk span:nth-last-child(-n + 2) {
+    display: block;
+  }
+  .m2-promotion-scope .sop-diagnosis .panel-title a {
+    white-space: normal;
+  }
+  .m2-promotion-scope .callout {
+    overflow-wrap: anywhere;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .m2-promotion-scope .metric:hover {
+    transform: none;
+  }
+}
+/* 推广页在窄视口独立取消初始化壳的360px下限；宽表格仍在自身容器滚动。 */
+body:has(.m2-promotion-scope) {
+  min-width: 0;
+}
+.m2-promotion-scope .metrics > *,
+.m2-promotion-scope .filters > *,
+.m2-promotion-scope .grid > *,
+.m2-promotion-scope .sop-summary > *,
+.m2-promotion-scope .table-wrap {
+  min-width: 0;
+}
+.m2-promotion-scope .filters .ant-picker,
+.m2-promotion-scope .filters .ant-select {
+  min-width: 0;
+  max-width: 100%;
+}
+.m2-promotion-scope .m2-source-state,
+.m2-promotion-scope .metric strong {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 620px) {
+  .m2-promotion-scope .filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .m2-promotion-scope .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .m2-promotion-scope .metric {
+    padding: 14px;
+  }
+  .m2-promotion-scope .metric strong {
+    font-size: clamp(15px, 4.5vw, 23px);
+  }
+}
+
+.m2-promotion-scope .sop-clues,
+.m2-promotion-scope .sop-clues p {
+  overflow-wrap: anywhere;
+}

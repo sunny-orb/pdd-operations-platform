@@ -20,7 +20,7 @@ from app.modules.sales.storage import ShopDailyStore
 ROOT = Path(__file__).resolve().parents[4]
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=["all", *SPECS], default="all")
     parser.add_argument("--from", dest="start", type=date.fromisoformat, required=True)
@@ -110,6 +110,16 @@ def main():
         if engine:
             engine.dispose()
     return int(errors > 0)
+
+
+def main():
+    from app.jobs.project_sync import run_guarded
+
+    engine = runtime_engine()
+    try:
+        return run_guarded(engine, _main)
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":

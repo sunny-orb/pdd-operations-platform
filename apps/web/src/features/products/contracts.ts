@@ -112,6 +112,7 @@ export const meta = z.object({
       dataset: z.string(),
       table: z.string(),
       version: z.string(),
+      observed_through: z.string().nullable().optional(),
       received_at: z.string().nullable(),
       status: z.string(),
       completeness: z.string(),

@@ -404,7 +404,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_03",
+            "20261028_04",
         )
 
     def test_02_all_numeric_columns_reject_nonfinite_values(self):
@@ -671,7 +671,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_03",
+            "20261028_04",
         )
 
     def test_18_locking_seal_blocks_content_and_rejects_after_commit(self):

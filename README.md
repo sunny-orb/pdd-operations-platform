@@ -2,7 +2,7 @@
 
 公司内部拼多多运营看板的独立重构项目。采用React/TypeScript前端、FastAPI后端和PostgreSQL查询库。当前模块进度与授权统一见[TODO](TODO.md)，实际验证见[验证记录](docs/validation.md)。
 
-**数据库采用独立v2迁移链。** 新设计及[实施方案](docs/database-schema/migration-plan.md)覆盖30张业务表；实际执行进度见[TODO](TODO.md#当前任务与范围)，证据见[验证记录](docs/validation.md#database-v2-local-created)。旧M1模型/迁移保留为历史实现，旧接数、解析、评分、真实页面查询仍暂停，不运行旧`db:upgrade`或默认`alembic upgrade head`。任何结构变更先改migration并说明原因，schema.sql仅为派生审阅稿；已执行revision不改写，未来追加新revision。
+**数据库采用独立v2迁移链。** 新设计及[实施方案](docs/database-schema/migration-plan.md)覆盖30张业务表；实际执行进度见[TODO](TODO.md#当前任务与范围)，证据见[验证记录](docs/validation.md#database-v2-local-created)。旧M1模型/迁移、旧解析及评分任务保留历史且继续停用；M1新版三来源、查询和前端已迁到v2，不运行旧`db:upgrade`或默认`alembic upgrade head`。任何结构变更先改migration并说明原因，schema.sql仅为派生审阅稿；已执行revision不改写，未来追加新revision。
 
 <a id="refactor-principles"></a>
 
@@ -65,8 +65,7 @@ Windows使用`py -3.12 -m venv apps/api/.venv`和`apps/api/.venv/Scripts/python.
 | API / 文档   | http://127.0.0.1:8000 / http://127.0.0.1:8000/docs                                                               |
 | M3店铺销售   | http://127.0.0.1:5173/sales ，`/store-sales`同页；店铺日、退款、推广、评分及两类地区真实接入；目标入口当前不可用 |
 | 存活 / 就绪  | `/health/live` / `/health/ready`；数据库未配置时就绪503是预期，不能冒充业务正常                                  |
-| M1真实商品页 | `/products`，代码保留；数据库重设计期间真实数据查询暂停                                                          |
-| M1开发样例   | `/products?preview=1`，仅DEV合成样例，持续标识非真实经营数据，不接数仓/数据库/AI                                 |
+| M1真实商品页 | `/products`，新版三来源真实查询；评分标准未生效，十项当前值及原因保留                                            |
 
 本机数据库使用Docker Desktop，整个项目共用`pdd_operations`，使用独立v2结构，容器和数据库本身保留。以下迁移/测试入口是旧实现的运行说明，重新设计期间暂停执行：
 
@@ -83,39 +82,21 @@ npm run db:test     # 前后端全套测试，PG合成数据仅进入pdd_operati
 
 手工/非本地Docker部署仍可在`apps/api`使用具有迁移权限的`DATABASE_URL`执行`python -m alembic upgrade head`；服务启动不自动建表。该命令会按旧迁移重建旧结构；当前暂停，新链使用[独立v2方案](docs/database-schema/migration-plan.md)，不能混用。readiness成功只代表应用库可连接，不代表经营API或页面已完成对账。
 
-以下M1内容仅描述旧代码的实现和历史运行方式，不与当前v2结构兼容，不代表功能可用。
+## M1商品经营当前入口
 
-旧M1三来源手工接入入口（重新设计期间暂停）：
-
-```bash
-WAREHOUSE_HOST=<数仓主机> WAREHOUSE_PORT=9030 WAREHOUSE_USER=ro npm run sync:m1
-```
-
-终端隐藏输入数仓密码，本入口不保存；不要将密码写命令行、前端环境变量或仓库。任务仅取契约3.2批准的三表、六店day、最近60日及去年对应期和当前必要资料，单连接串行读取并复核投影。它在本地以独立`pdd_ingest`角色写库，私有随机密码保存在Git忽略的权限600文件`var/local-db/sync.env`；API账号仍只读。无定时任务、飞书重复接入、文件快照导出或自动删源；失败保留当前有效数据，缺旧键/身份迁移须对账后处理。完整日未知不会因入库变成已确认；M1经营GET已可查真实PG，前端`/products`已默认读取真实API。
-
-旧M1商品资料解析与经营接口入口（重新设计期间暂停）：
+`/products`已从零重建，旧本地前端未读取即移除，没有样例回退入口。React/Ant Design/Recharts保留原型六区与共享导航，真实数据只通过`/api/v1/products`查询。总览、评分、底表三套URL范围独立；金额与计数传输字符串，展示舍入用BigInt，只有图形坐标近似Number。
 
 ```bash
-npm run profiles:m1 # 仅解析已入PG资料并发布，不访问数仓
-npm run scores:m1   # 使用已入库标准重算新品评分，不访问数仓
-npm run dev:api     # 本机API及 http://127.0.0.1:8000/docs
+npm run sync:m1 -- --verify-only # 隐藏输入数仓密码，双读必要投影，不发布
+npm run sync:m1 -- --publish     # 三来源与资料关系原子发布到本地v2
+npm run dev                     # 本地前后端
 ```
 
-已实现GET `/api/v1/products/filters`、`overview`、`trend`、`brief`、`alerts`、`diagnosis`、`days`。例如`/api/v1/products/overview?date_from=2026-09-23&date_to=2026-10-22`；真实返回`data/meta`，字段使用snake_case，金额和比率为十进制字符串。接口文档：[Swagger](http://127.0.0.1:8000/docs)、[ReDoc](http://127.0.0.1:8000/redoc)、[OpenAPI JSON](http://127.0.0.1:8000/openapi.json)。九个GET均有参数、成功响应模型（含十进制字符串/空值/评分分项）、统一错误及request_id；口径与范围仍以[契约第7节](docs/data-contract.md#7-前后端查询接口)为准。来源手工任务成功后会衔接本地资料解析；两阶段间无相容资料时查询明确503，不混用旧资料；版本改变返回409整组重取。没有在API请求中同步数仓。
+接收仅用已批准三张数仓表、六店day、最近60日及去年对应期和当前必要资料；连接位置见[data-contract 3.2](docs/data-contract.md#32-推广字段)，本轮证据见[source-evidence](docs/source-evidence.md#m1-v2-rebuild-20261028)。凭据不写命令行/仓库。来源私有投影、解释及生产代码留在忽略的var中，API仍为只读pdd_app，接收为现有pdd_ingest。没有定时、来源回写或自动删源；来源修订、缺旧键或读取失败不静默覆盖当前入口。
 
-新品评分GET为`/api/v1/products/scores`、`/api/v1/products/scores/{score_id}`，独立选项为`/api/v1/products/filters?scope=scores`。评分任务使用独立写入角色，从PG分别聚合商品和推广；记录模型/输入版本及十项证据。GET不重算；输入或标准变化时返回待计算，旧详情/旧评分版本返回409。标准存于PG的model_versions，不依赖旧页面分数或经营文件快照；新标准可经`npm run scores:m1 -- --standards-file <经核对的标准参数文件绝对路径> --import-only`追加，文件不能含凭据或经营快照且不提交。来源和适用范围必须核实，不能用本命令把试算升级成业务验收。
+当前GET为`meta`、`options`、`overview`、`days`、`scores`、`scores/{listing_id}`，固定data_version，不相容返回409；覆盖、成功和失败状态分别表达。四榜、健康度、七指标、流量链路、趋势和风险由本地聚合；评分区现阶段返回绑定四输入版本的十项观察值及缺参原因，不产生伪造分数或完整放量结果。收藏区间可加性、归因与标准适用范围限制见[问题台账](docs/issues.md#m1-商品经营含新品评分)。接口以[data-contract 7.9](docs/data-contract.md#m1-v2-query-contract)为准，历史旧M1接口和model_versions等不再是当前物理结构。
 
-当前已固化的线上显示四线为原商品身份及原品类绑定的固定试算基线，精度与历史生成缺口明确保留；收藏定义、完整日、推广归因说明未补齐时不伪造完整分或正式放量建议。评分重算需要显式后台任务；原值同步后至相容评分重算完成前标pending。详细返回及限制见契约3.5.1与7.5；前端已接入真实API，定时调度后续实施。
-
-只看商品前端可运行`npm run dev:web`。前端开发代理`/api`和`/health`，浏览器无需数据库地址。`/products`默认真实模式，失败明确报错并重试，不回退经营样例；开发模式可显式`?preview=1`或`?data=offline`。三套筛选独立，评分绑定自身结果版本；目录只取分页候选，搜索可定位未在前100项的商品。金额/比率保持原串，展示舍入用BigInt，只有图形坐标近似为Number，提示仍读原串。只读实机联调可显式执行`VITE_M1_LIVE_TEST=1 npm exec --workspace @pdd/web -- vitest run src/features/products/api/live.test.ts`，需本机API已启动；测试不写业务库。
-
-## 检查与版本保存
-
-M3首段三GET为`/api/v1/sales/filters`、`performance`、`shops`，由前端固定版本读取，GET不会访问来源或启动同步。手工接收入口为`apps/api/.venv/bin/python scripts/sync-sales.py --from YYYY-MM-DD --to YYYY-MM-DD --verify-only`；正式发布显式改为`--publish`，必须是完整批准六店窗口，不能用局部窗口覆盖历史。数仓密码隐藏输入；API仍只读，独立任务使用既有本地写入身份。批准范围、单位与完整性限制见[契约](docs/data-contract.md#m3-source-access)，权限升级/回退见[迁移方案](docs/database-schema/migration-plan.md)，源投影→PG→API只读复核用`apps/api/.venv/bin/python scripts/verify-sales-local.py`，须先启动本机API。必要输入、生产者源码及SHA归档在Git忽略的`var/ingestion/shop_daily/`，不自动清理；重放不执行归档代码，解释器不相容时拒绝，需使用归档的对应解释版本单独复核。
-
-M3其余六来源手工入口为`apps/api/.venv/bin/python scripts/sync-sales-sources.py --from 2026-02-01 --to 2026-10-27 --publish`（日期须等于当次完整批准窗口）；`--dataset`可单独选已核来源，`--verify-only`不入库。数仓仍隐藏输入密码，飞书用本机已授权user身份及官方CLI；不在GET刷新时触发上游。只读逐字段/聚合复核用`scripts/verify-sales-sources-local.py`，目标不可用及日期/归因限制见[契约7.8](docs/data-contract.md#78-m3整页续段查询契约)。新增targets/ratings/regions/product-regions及其filters，均在`/api/v1/sales`，页面保留原型字段、独立筛选与状态。完整日未知，目标额尚未接通，不能称全页业务验收关闭。
-
-代码检查入口：`npm run check`、`npm test`、`npm run build`、`npm run format:check`。仅文档改动按AGENTS检查文档，不重复声称历史测试是本轮通过。
+`profiles:m1`、`scores:m1`、旧`db:upgrade`仍停用，不用旧任务重建已删除的数据库结构。新增04只授既有M1表最小权限；真实PG验证后，受控本地升级脚本为`scripts/upgrade-products-local.py`，已升级不会覆盖数据。
 
 v2本轮受控入口为`apps/api/.venv/bin/python scripts/db-v2.py verify`（仅新建/清理本轮隔离库并验证，项目只读）和`create`（仅允许已验证的初始空库；当前已创建后会拒绝重复覆盖）。入口不读取通用DATABASE_URL；不直接运行schema.sql，不开放旧M1接数或同步。后续结构变更追加Alembic revision及实施/验证说明。
 

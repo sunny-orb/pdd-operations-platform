@@ -5,3 +5,5 @@ coverage
 var
 package-lock.json
 *.lock
+
+.superpowers

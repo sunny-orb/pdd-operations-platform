@@ -19,7 +19,7 @@ const commands = {
   "db:up": [],
   "db:test": [],
   "db:status": [],
-  "sync:m1": [],
+  "sync:m1": ["app.jobs.sync_product_board"],
   "profiles:m1": [],
   "scores:m1": [],
 };
@@ -30,14 +30,13 @@ const localDatabaseActions = {
   "db:upgrade": "migrate",
   "db:test": "test",
   "db:status": "status",
-  "sync:m1": "sync:m1",
   "profiles:m1": "profiles:m1",
   "scores:m1": "scores:m1",
 };
 const localAction = localDatabaseActions[process.argv[2]];
 const args = localAction
   ? [path.join(root, "scripts/db-local.py"), localAction, ...process.argv.slice(3)]
-  : ["-m", ...command];
+  : ["-m", ...command, ...process.argv.slice(3)];
 const child = spawn(python, args, { cwd: api, stdio: "inherit" });
 child.on("error", () => {
   console.error("无法启动 Python，请按 README 配置 Python 3.12+ 和后端依赖。");

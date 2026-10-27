@@ -18,6 +18,12 @@ export function buildDefaultFilters(): Filters {
 }
 export const productKey = (shopId: string, productId: string) =>
   JSON.stringify([shopId, productId]);
+/** 经营/明细目录仅在实际传给filters接口的条件相同时复用；不联动筛选状态。 */
+export function sameCatalogFilters(left: Filters, right: Filters): boolean {
+  return (
+    ["dateFrom", "dateTo", "shop", "operator", "category", "level", "keyword"] as const
+  ).every((key) => left[key] === right[key]);
+}
 const fields = [
   "dateFrom",
   "dateTo",

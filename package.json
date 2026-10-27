@@ -19,7 +19,13 @@
     "test:web": "npm run test --workspace @pdd/web",
     "test:api": "node scripts/api.mjs test",
     "build": "npm run build --workspace @pdd/web",
+    "db:up": "node scripts/api.mjs db:up",
     "db:upgrade": "node scripts/api.mjs db:upgrade",
+    "db:test": "node scripts/api.mjs db:test",
+    "db:status": "node scripts/api.mjs db:status",
+    "sync:m1": "node scripts/api.mjs sync:m1",
+    "profiles:m1": "node scripts/api.mjs profiles:m1",
+    "scores:m1": "node scripts/api.mjs scores:m1",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

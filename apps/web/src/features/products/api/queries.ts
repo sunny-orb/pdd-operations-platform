@@ -37,7 +37,8 @@ export function useProductQuery<T>(
     staleTime: 30_000,
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
-      query.state.data?.computationState === "pending" && query.state.dataUpdateCount < 12
+      ["pending", "running"].includes(query.state.data?.computationState ?? "") &&
+      query.state.dataUpdateCount < 12
         ? 5_000
         : false,
     refetchIntervalInBackground: false,

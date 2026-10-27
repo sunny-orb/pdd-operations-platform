@@ -94,7 +94,10 @@ export const scores: Score[] = products
         };
       },
     );
-    const verifiedScore = scoreMetrics.reduce((total, metric) => total + (metric.points ?? 0), 0);
+    const verifiedScore = scoreMetrics.reduce(
+      (total, metric) => total + Number(metric.points ?? 0),
+      0,
+    );
     const pendingWeight = scoreMetrics
       .filter((metric) => metric.points === null)
       .reduce((total, metric) => total + metric.weight, 0);

@@ -129,10 +129,10 @@ function mount() {
 }
 
 describe("新品评分展示", () => {
-  it("待验证卡只显示已验证得分，不将缺项折算成完整分数", () => {
+  it("待验证卡只显示已计分得分，不将缺项折算成完整分数", () => {
     mount();
     expect(screen.getByText("示例晴日帽")).toBeTruthy();
-    expect(screen.getAllByText(/已验证得分/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/已计分得分/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/完整评分 48/)).toBeNull();
     expect(screen.getByText("推广窗口数据不足")).toBeTruthy();
   });
@@ -143,6 +143,7 @@ describe("新品评分展示", () => {
     expect(await screen.findByRole("dialog")).toBeTruthy();
     expect(query.mock.calls.some(([endpoint]) => endpoint === "scores/sample-score")).toBe(true);
     expect(screen.getByText("近7日访客")).toBeTruthy();
+    expect(screen.getByText("秋季")).toBeTruthy();
     expect(screen.getByText("示例帽子参照组")).toBeTruthy();
   });
 });

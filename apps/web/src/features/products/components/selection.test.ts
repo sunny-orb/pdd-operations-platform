@@ -11,6 +11,16 @@ const options: Options = {
   dateRange: { from: "", to: "" },
 };
 describe("级联筛选", () => {
+  it("正式分页目录保留未出现在前100项的选择，仅剔除明确跨店身份", () => {
+    const f = { ...buildDefaultFilters(), products: ['["outdoor","999"]'] };
+    expect(reconcileSelection(f, { ...options, retainSelection: true })).toBeNull();
+    expect(
+      reconcileSelection(
+        { ...f, shop: "outdoor", products: ['["other","999"]'] },
+        { ...options, retainSelection: true },
+      ),
+    ).toEqual({ products: [] });
+  });
   it("换店后清除失效运营，暂不清空仍可能有效的下游品类", () => {
     expect(
       reconcileSelection(

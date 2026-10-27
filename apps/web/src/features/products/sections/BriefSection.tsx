@@ -4,7 +4,7 @@ import { useProductQuery } from "../api/queries";
 import type { Brief, Filters, Mode, Product, RankItem, Scenario } from "../api/contracts";
 import { SectionState } from "../components/SectionState";
 import { SectionHeading } from "../components/SectionHeading";
-import { displayChange, displayValue } from "../components/display";
+import { displayChange, displayValue, isNegative } from "../components/display";
 
 function Ranking({
   items,
@@ -33,11 +33,14 @@ function Ranking({
             <div className="rank-caption">{item.note}</div>
             <div className="rank-values">
               <span>
-                交易 <b>{displayValue(item.value, "money")}</b>
+                {type === "risk" ? "累计交易" : "交易"} <b>{displayValue(item.value, "money")}</b>
               </span>
-              <span className={item.change != null && item.change < 0 ? "negative" : "positive"}>
-                {displayChange(item.change)}
-              </span>
+              {type !== "risk" && (
+                <span className={isNegative(item.change) ? "negative" : "positive"}>
+                  较前7天 {displayChange(item.change)}
+                </span>
+              )}
+              {type === "new" && <span>转化 {displayValue(item.conversion, "percent")}</span>}
             </div>
           </div>
         </div>
@@ -78,21 +81,13 @@ export function BriefSection({
         {(data) => (
           <>
             <div className="brief-grid">
-              <Card
-                size="small"
-                title="近7天热销品类 · Top 3"
-                extra={<Tag variant="filled">品类</Tag>}
-              >
+              <Card size="small" title="近7天热卖品类Top3" extra={<Tag variant="filled">品类</Tag>}>
                 <div className="muted rank-window">
                   {data.window.from} 至 {data.window.to}
                 </div>
                 <Ranking items={data.categories} onProduct={onProduct} type="hot" />
               </Card>
-              <Card
-                size="small"
-                title="热卖商品（含新品）· Top 3"
-                extra={<Tag variant="filled">商品</Tag>}
-              >
+              <Card size="small" title="近7天热卖商品Top3" extra={<Tag variant="filled">商品</Tag>}>
                 <div className="muted rank-window">
                   {data.window.from} 至 {data.window.to}
                 </div>
@@ -100,7 +95,7 @@ export function BriefSection({
               </Card>
               <Card
                 size="small"
-                title="异常下滑商品 · Top 3"
+                title="异常下滑Top3"
                 extra={
                   <Tag color="red" variant="filled">
                     关注
@@ -111,7 +106,7 @@ export function BriefSection({
               </Card>
               <Card
                 size="small"
-                title="新品起势 · Top 3"
+                title="新品起势Top3"
                 extra={
                   <Tag color="green" variant="filled">
                     机会
@@ -121,6 +116,12 @@ export function BriefSection({
                 <Ranking items={data.rising} onProduct={onProduct} type="new" />
               </Card>
             </div>
+            {data.unassignedCategory && (
+              <p className="muted">
+                未归属品类交易：{displayValue(data.unassignedCategory.value, "money")}
+                ；保留在总额中，不参与品类排名。
+              </p>
+            )}
             <div className="brief-actions">
               <Tag color="blue" variant="filled">
                 建议动作
@@ -133,7 +134,9 @@ export function BriefSection({
                 ))}
               </Space>
               <Tag variant="filled">
-                {query.data?.meta.isPreview ? "样例规则摘要 · 未调用AI" : "依据当前范围经营证据"}
+                {query.data?.meta.isPreview
+                  ? "样例规则摘要 · 未调用AI"
+                  : "预留位置 · 建议动作尚未接入AI"}
               </Tag>
             </div>
           </>

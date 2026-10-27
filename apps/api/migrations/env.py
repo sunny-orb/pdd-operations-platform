@@ -3,6 +3,7 @@
 from alembic import context
 
 from app.core.config import Settings
+from app.db import tables  # noqa: F401  # 注册M1元数据，不执行DDL
 from app.db.base import Base
 from app.db.connection import build_engine
 

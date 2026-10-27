@@ -5,7 +5,11 @@ import { useEffect, useState } from "react";
 import { reconcileSelection } from "./selection";
 import type { Filters, Options, Scope } from "../api/contracts";
 
-const optionsOf = (values: string[]) => values.map((value) => ({ value, label: value }));
+const optionsOf = (values: string[]) =>
+  values.map((value) => ({
+    value,
+    label: value === "__unassigned__" ? "未匹配 / 资料冲突" : value,
+  }));
 /** 筛选控件只更新所属scope；日历/选择/搜索统一使用Ant Design，商品值含店铺。 */
 export function FiltersBar({
   scope,
@@ -36,10 +40,11 @@ export function FiltersBar({
   const selectedOptions =
     options?.products.filter(
       (p) =>
-        (!filters.shop || p.shopId === filters.shop) &&
-        (!filters.operator || p.operator === filters.operator) &&
-        (!filters.category || p.category === filters.category) &&
-        (!filters.level || p.level === filters.level),
+        options?.retainSelection ||
+        ((!filters.shop || p.shopId === filters.shop) &&
+          (!filters.operator || p.operator === filters.operator) &&
+          (!filters.category || p.category === filters.category) &&
+          (!filters.level || p.level === filters.level)),
     ) ?? [];
   useEffect(() => {
     if (!options) return;
@@ -58,7 +63,12 @@ export function FiltersBar({
               ? [dayjs(filters.dateFrom), dayjs(filters.dateTo || filters.dateFrom)]
               : null
           }
-          onChange={(_, dates) => onChange({ dateFrom: dates[0] ?? "", dateTo: dates[1] ?? "" })}
+          onChange={(_, dates) =>
+            onChange({
+              dateFrom: dates[0] || (options?.retainSelection ? options.dateRange.from : ""),
+              dateTo: dates[1] || (options?.retainSelection ? options.dateRange.to : ""),
+            })
+          }
           allowClear
         />
       )}
@@ -92,11 +102,13 @@ export function FiltersBar({
           placeholder="全部判断"
           allowClear
           value={filters.judgment || undefined}
-          options={[
-            { value: "complete", label: "完整验证" },
-            { value: "partial", label: "待验证" },
-            { value: "unscored", label: "暂未评分" },
-          ]}
+          options={
+            options?.decisions ?? [
+              { value: "complete", label: "完整验证" },
+              { value: "partial", label: "待验证" },
+              { value: "unscored", label: "暂未评分" },
+            ]
+          }
           onChange={(v) => onChange({ judgment: v ?? "" })}
         />
       ) : (
@@ -114,14 +126,28 @@ export function FiltersBar({
         aria-label={`${label}商品`}
         mode="multiple"
         maxTagCount="responsive"
+        maxCount={20}
         placeholder="全部商品"
         showSearch
         optionFilterProp="label"
         value={filters.products}
-        options={selectedOptions.map((p) => ({ value: p.key, label: `${p.name} · ${p.shopName}` }))}
+        options={[
+          ...selectedOptions.map((p) => ({ value: p.key, label: `${p.name} · ${p.shopName}` })),
+          ...filters.products
+            .filter((key) => !selectedOptions.some((p) => p.key === key))
+            .map((key) => ({
+              value: key,
+              label: `商品 ${JSON.parse(key)[1]} · 店铺 ${JSON.parse(key)[0]}`,
+            })),
+        ]}
         onChange={(products) => onChange({ products })}
         allowClear
       />
+      {options?.retainSelection && (
+        <span className="muted">
+          商品目录共 {options.productTotal} 款，先展示前100款；可按名称或ID搜索。
+        </span>
+      )}
       <Input
         aria-label={`${label}搜索`}
         prefix={<SearchOutlined />}

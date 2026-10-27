@@ -3,6 +3,7 @@ import { z } from "zod";
 export type Scope = "overview" | "scores" | "days";
 export type Scenario = "normal" | "empty" | "partial" | "error" | "pending" | "not-connected";
 export type Mode = "preview" | "offline" | "api";
+export type Scalar = string | number | null;
 export type Filters = {
   dateFrom: string;
   dateTo: string;
@@ -35,12 +36,30 @@ export type Metric = {
   value: string | null;
   previous: string | null;
   yearAgo: string | null;
-  mom: number | null;
-  yoy: number | null;
+  mom: Scalar;
+  yoy: Scalar;
+  missingReasons?: string[];
+  status?: string;
   format: "money" | "number" | "percent";
 };
-export type Period = { days: number; value: string | null; change: number | null };
-export type FunnelNode = { key: string; label: string; value: number | null; note: string };
+export type PeriodCoverage = {
+  expectedDays: number;
+  observedDays: number;
+  notImportedDays: number;
+  missingRecordDays: number;
+  missingProductCount: number;
+};
+export type Period = {
+  days: number;
+  value: string | null;
+  change: Scalar;
+  window?: string;
+  status?: string;
+  missingReasons?: string[];
+  coverage?: PeriodCoverage;
+  previousCoverage?: PeriodCoverage;
+};
+export type FunnelNode = { key: string; label: string; value: Scalar; note: string };
 export type Overview = {
   metrics: Metric[];
   periods: Period[];
@@ -51,8 +70,9 @@ export type RankItem = {
   product?: Product;
   name: string;
   value: string | null;
-  change: number | null;
+  change: Scalar;
   note: string;
+  conversion?: Scalar;
 };
 export type Brief = {
   categories: RankItem[];
@@ -61,6 +81,7 @@ export type Brief = {
   rising: RankItem[];
   actions: string[];
   window: { from: string; to: string };
+  unassignedCategory?: RankItem | null;
 };
 export type ScoreMetric = {
   key: string;
@@ -68,11 +89,11 @@ export type ScoreMetric = {
   value: string | null;
   format: "money" | "number" | "percent" | "ratio";
   weight: number;
-  tiers: number[];
+  tiers: Scalar[];
   grade: string;
-  points: number | null;
+  points: Scalar;
   reference: string;
-  sampleSize: number;
+  sampleSize: number | null;
   reason: string;
 };
 export type Score = {
@@ -80,27 +101,38 @@ export type Score = {
   product: Product;
   date: string;
   modelVersion: string;
+  ruleVersion?: string;
   stage: string;
-  age: number;
+  age: number | null;
   season: string;
   status: "complete" | "partial" | "unscored";
-  score: number | null;
-  verifiedScore: number;
+  score: Scalar;
+  verifiedScore: Scalar;
   pendingWeight: number;
+  activeCount?: number;
+  pendingCount?: number;
+  metCount?: number;
   recommendation: string;
   reason: string;
   metrics: ScoreMetric[];
+  currentValues?: Record<string, Scalar>;
+  referenceNote?: string;
+  listedDate?: string | null;
+  observedDate?: string | null;
+  currentWindow?: string;
+  previousWindow?: string;
 };
 export type Scores = {
   items: Score[];
   total: number;
   counts: { complete: number; partial: number; unscored: number };
+  allCount?: number;
 };
 export type Trend = {
   points: {
     date: string;
-    current: number | null;
-    lastYear: number | null;
+    current: Scalar;
+    lastYear: Scalar;
     [key: string]: string | number | null;
   }[];
   series: { key: string; label: string; color: string }[];
@@ -120,26 +152,32 @@ export type ProductAlert = {
   product: Product;
   priority: "P0" | "P1" | "P2";
   signal: string;
-  current: number;
-  baseline: number;
-  change: number;
-  trend: number[];
-  revenue: string;
-  impact: string;
+  current: Scalar;
+  baseline: Scalar;
+  change: Scalar;
+  trend: Scalar[];
+  revenue: string | null;
+  impact: string | null;
+  metricFormat?: "number" | "percent";
   reasons: string[];
   action: string;
   dueAt: string | null;
   workflowState: string | null;
 };
-export type Alerts = { items: ProductAlert[]; total: number };
+export type Alerts = {
+  items: ProductAlert[];
+  total: number;
+  unassessedCount?: number;
+  rankingStatus?: string;
+};
 export type DayRow = {
   key: string;
   product: Product;
   date: string;
-  visitors: number | null;
+  visitors: Scalar;
   revenue: string | null;
-  conversion: number | null;
-  yoy: number | null;
+  conversion: Scalar;
+  yoy: Scalar;
 };
 export type Days = { items: DayRow[]; total: number };
 export type Options = {
@@ -149,6 +187,9 @@ export type Options = {
   levels: string[];
   products: Product[];
   dateRange: { from: string; to: string };
+  productTotal?: number;
+  retainSelection?: boolean;
+  decisions?: { value: string; label: string }[];
 };
 export type Meta = {
   dataVersion: string;
@@ -157,11 +198,23 @@ export type Meta = {
   completeness: "complete" | "partial" | "unknown";
   missingReasons: string[];
   isPreview: boolean;
+  scoreVersion?: string;
+  completeThrough?: string | null;
+  syncStatus?: string;
+  modelStatus?: string;
+  hasCompatibleResult?: boolean;
+  lastError?: { code: string | null; message: string | null } | null;
+  sourceUpdatedAt?: string | null;
+  sourceUpdateStatus?: string;
+  requestId?: string;
+  coverageNote?: string;
+  lastAttemptAt?: string | null;
+  lastAttemptStatus?: string | null;
 };
 export type Envelope<T> = {
   data: T | null;
   availability: "ready" | "empty" | "not_connected";
-  computationState: "ready" | "pending" | "failed";
+  computationState: "ready" | "pending" | "running" | "failed";
   meta: Meta;
 };
 export type RequestOptions = {
@@ -171,6 +224,7 @@ export type RequestOptions = {
   comparison?: "year" | "products" | "relative";
   dataVersion?: string;
   versionToken?: number;
+  scoreVersion?: string;
 };
 
 const decimal = z

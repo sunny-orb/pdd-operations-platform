@@ -1,3 +1,4 @@
+import { parseApiEnvelope } from "./wire";
 import { validateDateRange } from "../state/filters";
 import { getJson } from "../../../shared/api/client";
 import {
@@ -34,7 +35,7 @@ export async function requestProducts<T>(
   signal?: AbortSignal,
 ): Promise<Envelope<T>> {
   if (signal?.aborted) throw abortError();
-  validateDateRange(filters);
+  if (scope !== "scores") validateDateRange(filters);
   if (options.mode === "offline") return disconnectedEnvelope<T>();
   if (options.mode === "preview") {
     if (!import.meta.env.DEV) throw new Error("生产环境不能启用开发样例。");
@@ -50,26 +51,48 @@ export async function requestProducts<T>(
   )
     throw new Error("未知商品接口");
   const params = new URLSearchParams({
-    scope,
-    page: String(filters.page),
-    page_size: String(filters.pageSize),
+    ...(endpoint === "filters" || scope !== "scores"
+      ? { scope: scope === "days" ? "detail" : scope }
+      : {}),
+    page: String(endpoint === "filters" ? 1 : filters.page),
+    page_size: String(endpoint === "filters" ? 100 : filters.pageSize),
   });
   const fields = {
-    date_from: filters.dateFrom,
-    date_to: filters.dateTo || filters.dateFrom,
+    date_from: scope !== "scores" ? filters.dateFrom : undefined,
+    date_to: scope !== "scores" ? filters.dateTo || filters.dateFrom : undefined,
     shop_id: filters.shop,
     operator: filters.operator,
     category: filters.category,
-    level: filters.level,
+    level: scope !== "scores" ? filters.level : undefined,
     keyword: filters.keyword,
-    judgment: filters.judgment,
+    decision: scope === "scores" ? filters.judgment : undefined,
+    score_version: scope === "scores" ? options.scoreVersion : undefined,
     data_version: options.dataVersion,
-    metric: options.metric,
+    metric: options.metric
+      ? ((
+          {
+            revenue: "product_revenue",
+            aov: "revenue_per_buyer",
+            conversion: "buyer_conversion_rate",
+          } as Record<string, string>
+        )[options.metric] ?? options.metric)
+      : undefined,
     comparison: options.comparison,
   };
   for (const [key, value] of Object.entries(fields)) if (value) params.set(key, value);
-  for (const product of filters.products) params.append("products", product);
+  if (filters.products.length > 20) throw new Error("一次最多对比20款商品。");
+  if (endpoint !== "filters")
+    for (const product of filters.products) {
+      const parts: unknown = JSON.parse(product);
+      if (
+        !Array.isArray(parts) ||
+        parts.length !== 2 ||
+        !parts.every((p) => typeof p === "string" && p && !p.includes(":"))
+      )
+        throw new Error("商品身份格式错误，请重新选择。");
+      params.append("product_key", `pdd:${parts[0]}:${parts[1]}`);
+    }
   const value = await getJson(`/api/v1/products/${endpoint}?${params}`, signal);
   if (signal?.aborted) throw abortError();
-  return parseEnvelope<T>(endpoint, value);
+  return parseApiEnvelope<T>(endpoint, value);
 }

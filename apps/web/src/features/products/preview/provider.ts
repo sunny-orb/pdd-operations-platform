@@ -41,7 +41,8 @@ const matchDay = (row: DayRow, f: Filters) =>
 const sumMoney = (rows: DayRow[]) => rows.reduce((sum, row) => sum + Number(row.revenue ?? 0), 0);
 const moneyValue = (rows: DayRow[]) =>
   rows.some((row) => row.revenue === null) ? null : sumMoney(rows).toFixed(2);
-const sumVisitors = (rows: DayRow[]) => rows.reduce((sum, row) => sum + (row.visitors ?? 0), 0);
+const sumVisitors = (rows: DayRow[]) =>
+  rows.reduce((sum, row) => sum + Number(row.visitors ?? 0), 0);
 const unique = (values: string[]) => [...new Set(values)];
 const paginate = <T>(items: T[], filters: Filters) =>
   items.slice((filters.page - 1) * filters.pageSize, filters.page * filters.pageSize);

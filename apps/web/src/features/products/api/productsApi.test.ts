@@ -8,6 +8,37 @@ const options = { mode: "preview" as const, scenario: "normal" as const };
 afterEach(() => vi.unstubAllGlobals());
 
 describe("商品契约与开发适配", () => {
+  it("正式参数使用后端字段、复合商品键和评分独立版本", async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
+    vi.stubGlobal("fetch", fetch);
+    const selected = {
+      ...filters,
+      products: [productKey("663599807", "1007941996178")],
+      judgment: "hold",
+    };
+    await requestProducts("trend", "days", selected, {
+      mode: "api",
+      scenario: "normal",
+      metric: "aov",
+      dataVersion: "facts",
+    }).catch(() => {});
+    const url = new URL(fetch.mock.calls[0][0], "http://localhost");
+    expect(url.searchParams.get("scope")).toBe("detail");
+    expect(url.searchParams.get("metric")).toBe("revenue_per_buyer");
+    expect(url.searchParams.getAll("product_key")).toEqual(["pdd:663599807:1007941996178"]);
+    expect(url.searchParams.has("decision")).toBe(false);
+    await requestProducts("scores", "scores", selected, {
+      mode: "api",
+      scenario: "normal",
+      scoreVersion: "score",
+      dataVersion: "facts",
+    }).catch(() => {});
+    const scoreUrl = new URL(fetch.mock.calls[1][0], "http://localhost");
+    expect(scoreUrl.searchParams.get("score_version")).toBe("score");
+    expect(scoreUrl.searchParams.get("decision")).toBe("hold");
+    expect(scoreUrl.searchParams.has("date_from")).toBe(false);
+    expect(scoreUrl.searchParams.has("level")).toBe(false);
+  });
   it("未接入不访问网络，也不生成经营零值", async () => {
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);

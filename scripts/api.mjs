@@ -15,11 +15,30 @@ const commands = {
   dev: ["uvicorn", "app.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
   check: ["ruff", "check", "."],
   test: ["pytest", "-q"],
-  "db:upgrade": ["alembic", "upgrade", "head"],
+  "db:upgrade": [],
+  "db:up": [],
+  "db:test": [],
+  "db:status": [],
+  "sync:m1": [],
+  "profiles:m1": [],
+  "scores:m1": [],
 };
 const command = commands[process.argv[2]];
 if (!command) throw new Error("不支持的 API 命令");
-const child = spawn(python, ["-m", ...command], { cwd: api, stdio: "inherit" });
+const localDatabaseActions = {
+  "db:up": "up",
+  "db:upgrade": "migrate",
+  "db:test": "test",
+  "db:status": "status",
+  "sync:m1": "sync:m1",
+  "profiles:m1": "profiles:m1",
+  "scores:m1": "scores:m1",
+};
+const localAction = localDatabaseActions[process.argv[2]];
+const args = localAction
+  ? [path.join(root, "scripts/db-local.py"), localAction, ...process.argv.slice(3)]
+  : ["-m", ...command];
+const child = spawn(python, args, { cwd: api, stdio: "inherit" });
 child.on("error", () => {
   console.error("无法启动 Python，请按 README 配置 Python 3.12+ 和后端依赖。");
   process.exitCode = 1;

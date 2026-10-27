@@ -46,8 +46,32 @@ function show(path = "/products?preview=1") {
   return { ...result, client };
 }
 describe("商品整页交互与隔离", () => {
+  it("通过共享看板布局展示顶部导航与页内目录", () => {
+    show("/products?data=offline");
+    const header = screen.getByRole("banner", { name: "看板导航" });
+    expect(within(header).getByRole("link", { name: "店铺销售 ↗" }).getAttribute("href")).toBe(
+      "/sales",
+    );
+    expect(screen.getByRole("navigation", { name: "本页目录" })).toBeTruthy();
+  });
+
+  it("目录按钮可往返收起展开且不影响正文", async () => {
+    show("/products?data=offline");
+    const toggle = screen.getByRole("button", { name: "收起本页目录" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    await userEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "展开本页目录" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(document.getElementById("product-days")).not.toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "展开本页目录" }));
+    expect(screen.getByRole("button", { name: "收起本页目录" }).getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+  });
+
   it("页内目录的六个入口在未接入时也有可定位区块", async () => {
-    show("/products");
+    show("/products?data=offline");
     const navigation = screen.getByRole("navigation", { name: "本页目录" });
     const links = within(navigation).getAllByRole("link");
     expect(links).toHaveLength(6);
@@ -65,7 +89,7 @@ describe("商品整页交互与隔离", () => {
     const fetch = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async () => new Response("unavailable", { status: 503 }));
-    show("/products?data=api");
+    show("/products");
     await waitFor(() =>
       expect(screen.getAllByText("页面数据范围加载失败").length).toBeGreaterThan(3),
     );
@@ -73,9 +97,9 @@ describe("商品整页交互与隔离", () => {
     expect(fetch.mock.calls.every((call) => String(call[0]).includes("/filters?"))).toBe(true);
   });
 
-  it("默认未接入不请求经营接口，六块保留且不出现样例数字", async () => {
+  it("显式离线不请求经营接口，六块保留且不出现样例数字", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
-    show("/products");
+    show("/products?data=offline");
     await waitFor(() => expect(screen.getAllByText("数据尚未接入").length).toBeGreaterThan(3));
     expect(screen.getByRole("heading", { name: "经营核心结论" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "查看表现档位与放量建议" })).toBeTruthy();
@@ -92,7 +116,7 @@ describe("商品整页交互与隔离", () => {
     });
     await waitFor(() => expect(within(detail).getByText(/当前筛选下暂无匹配结果/)).toBeTruthy());
     expect(screen.getByRole("region", { name: "查看表现档位与放量建议" }).textContent).toContain(
-      "共 6 款新品",
+      "匹配 6 / 6 款新品",
     );
     const overviewQueries = client.getQueryCache().findAll({ queryKey: ["products", "overview"] });
     expect(

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Card, Space, Table, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { Line, LineChart } from "recharts";
@@ -33,7 +34,8 @@ const columns: ColumnsType<ProductAlert> = [
     width: 115,
     render: (_, row) => (
       <span>
-        {displayValue(row.current)} / {displayValue(row.baseline)}
+        {displayValue(row.current, row.metricFormat)} /{" "}
+        {displayValue(row.baseline, row.metricFormat)}
       </span>
     ),
   },
@@ -47,9 +49,13 @@ const columns: ColumnsType<ProductAlert> = [
     title: "近7日趋势",
     dataIndex: "trend",
     width: 105,
-    render: (values: number[]) => (
+    render: (values: ProductAlert["trend"]) => (
       <span role="img" aria-label={`7日趋势：${values.join("、")}`}>
-        <LineChart width={85} height={30} data={values.map((value) => ({ value }))}>
+        <LineChart
+          width={85}
+          height={30}
+          data={values.map((value) => ({ value: value === null ? null : Number(value) }))}
+        >
           <Line
             dataKey="value"
             stroke="#d65659"
@@ -112,11 +118,19 @@ export function AlertsSection({
   scenario: Scenario;
   versionToken: number;
 }) {
-  const query = useProductQuery<Alerts>("alerts", "overview", filters, {
-    mode,
-    scenario,
-    versionToken,
-  });
+  const scopeKey = JSON.stringify({ ...filters, page: 1, pageSize: 25 });
+  const [paging, setPaging] = useState({ key: scopeKey, page: 1 });
+  const page = paging.key === scopeKey ? paging.page : 1;
+  const query = useProductQuery<Alerts>(
+    "alerts",
+    "overview",
+    { ...filters, page, pageSize: 25 },
+    {
+      mode,
+      scenario,
+      versionToken,
+    },
+  );
   return (
     <section id="risk" className="product-section" aria-label="异常影响金额与行动闭环">
       <SectionHeading
@@ -134,15 +148,29 @@ export function AlertsSection({
       <Card size="small">
         <SectionState query={query}>
           {(data) => (
-            <Table<ProductAlert>
-              size="small"
-              columns={columns}
-              dataSource={data.items}
-              rowKey="id"
-              pagination={false}
-              scroll={{ x: 1460 }}
-              locale={{ emptyText: "当前范围未发现达到规则门槛的异常" }}
-            />
+            <>
+              {!!data.unassessedCount && (
+                <p className="muted">
+                  另有 {data.unassessedCount} 款输入不足，尚不能判断异常；未视为正常。
+                </p>
+              )}
+              <Table<ProductAlert>
+                size="small"
+                columns={columns}
+                dataSource={data.items}
+                rowKey="id"
+                pagination={{
+                  current: page,
+                  pageSize: 25,
+                  total: data.total,
+                  showSizeChanger: false,
+                  showTotal: (total) => `共 ${total} 条异常`,
+                  onChange: (next) => setPaging({ key: scopeKey, page: next }),
+                }}
+                scroll={{ x: 1460 }}
+                locale={{ emptyText: "当前范围未发现达到规则门槛的异常" }}
+              />
+            </>
           )}
         </SectionState>
         <div className="table-footnote">

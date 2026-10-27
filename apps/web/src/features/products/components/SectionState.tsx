@@ -47,19 +47,11 @@ export function SectionState<T>({
       />
     );
   const response = query.data;
-  if (!response || response.availability === "not_connected")
-    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="数据尚未接入" />;
-  if (response.computationState === "failed")
-    return (
-      <Alert
-        type="warning"
-        showIcon
-        title="分析暂不可用"
-        description="基础数据仍可查看，请稍后重试此区域。"
-        action={<Button onClick={() => void query.refetch()}>重试</Button>}
-      />
-    );
-  if (response.computationState === "pending")
+  if (
+    response &&
+    ["pending", "running"].includes(response.computationState) &&
+    !response.meta.hasCompatibleResult
+  )
     return (
       <Alert
         type="info"
@@ -68,7 +60,19 @@ export function SectionState<T>({
         description="本区域等待计算，不影响其他经营数据。可稍后刷新。"
       />
     );
-  if (response.availability === "empty" || !response.data)
+  if (response?.computationState === "failed" && !response.meta.hasCompatibleResult)
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        title="分析暂不可用"
+        description={response.meta.lastError?.message ?? "基础数据仍可查看，请稍后重试此区域。"}
+        action={<Button onClick={() => void query.refetch()}>重试</Button>}
+      />
+    );
+  if (!response || response.availability === "not_connected")
+    return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="数据尚未接入" />;
+  if (!response.data)
     return (
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -82,16 +86,45 @@ export function SectionState<T>({
           正在更新当前范围…
         </span>
       )}
-      {response.meta.completeness !== "complete" && (
+      {response.computationState === "ready" && response.meta.lastAttemptStatus === "failed" && (
+        <Alert
+          type="warning"
+          showIcon
+          title="最近评分计算失败，保留上次相容结果"
+          description={`${response.meta.lastAttemptAt ?? "时间未记录"}；${response.meta.lastError?.message ?? "请检查评分任务记录。"}`}
+        />
+      )}
+      {response.computationState !== "ready" && (
+        <Alert
+          type="warning"
+          showIcon
+          title="展示上次相容结果"
+          description={
+            response.meta.lastError?.message ?? "新计算尚未完成，当前结果日期与版本见本区域。"
+          }
+        />
+      )}
+      {response.availability === "empty" && (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="当前筛选下暂无匹配结果，可清除本区域筛选"
+        />
+      )}
+      {response.meta.missingReasons.filter(
+        (reason) => !["来源完整日尚未确认", "按当前资料归属"].includes(reason),
+      ).length > 0 && (
         <Alert
           type="warning"
           showIcon
           title="部分数据不足"
           description={
-            response.meta.missingReasons.join("；") || "完整性尚未确认，缺项不参与判断。"
+            response.meta.missingReasons
+              .filter((reason) => !["来源完整日尚未确认", "按当前资料归属"].includes(reason))
+              .join("；") || "完整性尚未确认，缺项不参与判断。"
           }
         />
       )}
+      {response.meta.coverageNote && <span className="muted">{response.meta.coverageNote}</span>}
       {children(response.data)}
     </Space>
   );

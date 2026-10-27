@@ -1,0 +1,23 @@
+name: pdd-operations-platform
+services:
+  postgres:
+    image: postgres:17-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pdd_admin
+      POSTGRES_DB: pdd_operations
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请先运行 npm run db:up 初始化本地配置}
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pdd_admin -d pdd_operations"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    shm_size: 128mb
+volumes:
+  postgres_data:

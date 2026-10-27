@@ -9,7 +9,7 @@ import type { Filters, MetricKey, Options, Overview } from "../api/contracts";
 import { SectionState, type QueryView } from "../components/SectionState";
 import { FiltersBar } from "../components/FiltersBar";
 import { SectionHeading } from "../components/SectionHeading";
-import { displayChange, displayValue } from "../components/display";
+import { displayChange, displayValue, isNegative } from "../components/display";
 
 export function OverviewSection({
   query,
@@ -91,13 +91,16 @@ export function OverviewSection({
                   <div className="metric-last">
                     去年同期 {displayValue(item.yearAgo, item.format)}
                   </div>
+                  {item.missingReasons?.length ? (
+                    <div className="metric-last">{item.missingReasons.join("；")}</div>
+                  ) : null}
                   <div className="metric-changes">
-                    <span className={item.yoy != null && item.yoy < 0 ? "negative" : "positive"}>
+                    <span className={isNegative(item.yoy) ? "negative" : "positive"}>
                       {item.yoy != null &&
-                        (item.yoy < 0 ? <ArrowDownOutlined /> : <ArrowUpOutlined />)}{" "}
+                        (isNegative(item.yoy) ? <ArrowDownOutlined /> : <ArrowUpOutlined />)}{" "}
                       同比 {displayChange(item.yoy)}
                     </span>
-                    <span className={item.mom != null && item.mom < 0 ? "negative" : "positive"}>
+                    <span className={isNegative(item.mom) ? "negative" : "positive"}>
                       环比 {displayChange(item.mom)}
                     </span>
                   </div>
@@ -114,12 +117,29 @@ export function OverviewSection({
                 {data.periods.map((period) => (
                   <div className="period-stat" key={period.days}>
                     <span className="muted">近 {period.days} 日</span>
+                    {period.window && <small className="muted">{period.window}</small>}
+                    {period.status && period.status !== "valid" && (
+                      <Tag color="gold">{period.value === null ? "暂无可用值" : "已观察小计"}</Tag>
+                    )}
                     <strong>{displayValue(period.value, "money")}</strong>
-                    <span
-                      className={
-                        period.change != null && period.change < 0 ? "negative" : "positive"
-                      }
-                    >
+                    {period.coverage && (
+                      <small className="muted">
+                        本期已观察{period.coverage.observedDays}/{period.coverage.expectedDays}
+                        日；未入库{period.coverage.notImportedDays}日，缺店铺记录
+                        {period.coverage.missingRecordDays}日，缺商品记录
+                        {period.coverage.missingProductCount}项
+                      </small>
+                    )}
+                    {period.previousCoverage && (
+                      <small className="muted">
+                        前期已观察{period.previousCoverage.observedDays}/
+                        {period.previousCoverage.expectedDays}日
+                      </small>
+                    )}
+                    {!!period.missingReasons?.length && (
+                      <small className="muted">{period.missingReasons.join("；")}</small>
+                    )}
+                    <span className={isNegative(period.change) ? "negative" : "positive"}>
                       较前{period.days}日 {displayChange(period.change)}
                     </span>
                   </div>

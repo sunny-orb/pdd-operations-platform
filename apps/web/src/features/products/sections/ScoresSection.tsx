@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { BarChartOutlined, InfoCircleOutlined } from "@ant-design/icons";
 import {
+  Alert,
   Button,
   Card,
   Collapse,
@@ -35,12 +36,14 @@ type Props = {
   onChange: (patch: Partial<Filters>) => void;
   options: Options | null;
   versionToken: number;
+  scoreVersion?: string;
+  optionsError?: Error | null;
   onVersionConflict?: () => void;
 };
 
 const groups = [
-  { key: "complete", title: "完整验证 · 放量建议", color: "green" },
-  { key: "partial", title: "待验证 · 仅展示已验证得分", color: "gold" },
+  { key: "complete", title: "完整评分 · 放量建议", color: "green" },
+  { key: "partial", title: "部分试算 · 仅展示已计分得分", color: "gold" },
   { key: "unscored", title: "暂未评分 · 继续观察", color: "default" },
 ] as const;
 
@@ -57,7 +60,7 @@ function ScoreCard({ item, open }: { item: Score; open: () => void }) {
         </span>
         <Tag color={group.color}>
           {item.status === "complete"
-            ? "完整验证"
+            ? "完整评分"
             : item.status === "partial"
               ? "待验证"
               : "未评分"}
@@ -69,13 +72,13 @@ function ScoreCard({ item, open }: { item: Score; open: () => void }) {
       </div>
       <div className="score-value">
         <div>
-          <span className="muted">{item.status === "complete" ? "完整评分" : "已验证得分"}</span>
+          <span className="muted">{item.status === "complete" ? "完整评分" : "已计分得分"}</span>
           <strong>
             {item.status === "unscored"
               ? "—"
               : item.status === "complete"
                 ? (item.score ?? "—")
-                : item.verifiedScore}
+                : displayValue(item.verifiedScore)}
             <small> 分</small>
           </strong>
         </div>
@@ -84,12 +87,27 @@ function ScoreCard({ item, open }: { item: Score; open: () => void }) {
           <b>{item.pendingWeight} 分</b>
         </div>
       </div>
+      {item.activeCount !== undefined && (
+        <div className="muted">
+          有效 {item.activeCount} 项 · 基础以上 {item.metCount} 项 · 另 {item.pendingCount} 项待验证
+        </div>
+      )}
       <Typography.Paragraph className="score-recommendation">
         {item.recommendation}
       </Typography.Paragraph>
       <Typography.Paragraph type="secondary" className="score-notes">
-        {item.reason || `${item.stage} · 上市${item.age}天`}
+        {item.reason ||
+          `${item.stage} · ${item.age === null ? "上架日期尚未核实" : `上市${item.age}天`}`}
       </Typography.Paragraph>
+      {item.currentValues && (
+        <div className="score-notes">
+          近7日交易 {displayValue(item.currentValues.product_revenue_7d, "money")} · 访客{" "}
+          {displayValue(item.currentValues.visitors_7d)} · 支付{" "}
+          {displayValue(item.currentValues.units_7d)} 件<br />
+          曝光 {displayValue(item.currentValues.ad_impressions_7d)} · ROI{" "}
+          {displayValue(item.currentValues.ad_roi_7d, "ratio")}
+        </div>
+      )}
       <Button
         block
         icon={<BarChartOutlined />}
@@ -114,7 +132,8 @@ function ScoreDetails({ score, isPreview }: { score: Score; isPreview: boolean }
           <strong>{item.label}</strong>
           <div className="muted">{item.reference}</div>
           <div className="muted">
-            本组 {item.sampleSize} 款{item.reason ? ` · ${item.reason}` : ""}
+            参照样本 {item.sampleSize === null ? "未知" : `${item.sampleSize} 款`}
+            {item.reason ? ` · ${item.reason}` : ""}
           </div>
         </>
       ),
@@ -168,12 +187,27 @@ function ScoreDetails({ score, isPreview }: { score: Score; isPreview: boolean }
           { key: "shop", label: "店铺", children: score.product.shopName },
           { key: "operator", label: "负责运营", children: score.product.operator },
           { key: "category", label: "品类", children: score.product.category },
-          { key: "age", label: "上市阶段", children: `${score.age}天 · ${score.stage}` },
+          {
+            key: "listed",
+            label: "真实上架日期",
+            children: score.listedDate ?? "缺失；不以首次观察日代替",
+          },
+          {
+            key: "age",
+            label: "上市天数",
+            children: score.age === null ? "未知" : `${score.age}天`,
+          },
+          { key: "stage", label: "参照阶段", children: score.stage },
+          { key: "season", label: "参照季节", children: score.season },
+          { key: "observed", label: "首次经营观察日", children: score.observedDate ?? "未知" },
           { key: "model", label: "模型版本", children: score.modelVersion },
+          { key: "rule", label: "规则版本", children: score.ruleVersion ?? "—" },
           { key: "date", label: "评分截至", children: score.date },
+          { key: "window", label: "近7日窗口", children: score.currentWindow ?? "—" },
+          { key: "previous", label: "前7日窗口", children: score.previousWindow ?? "—" },
           {
             key: "verified",
-            label: "已验证得分",
+            label: "已计分得分",
             children: score.status === "unscored" ? "—" : `${score.verifiedScore}分`,
           },
           { key: "pending", label: "待验证权重", children: `${score.pendingWeight}分` },
@@ -184,6 +218,14 @@ function ScoreDetails({ score, isPreview }: { score: Score; isPreview: boolean }
           },
         ]}
       />
+      {!isPreview && (
+        <Alert
+          type="warning"
+          showIcon
+          title={score.referenceNote}
+          description="当前实际生命周期未分类；四档线来自原商品固定显示基线，不代表正式动态模型已验收。"
+        />
+      )}
       {score.reason && (
         <Typography.Paragraph type="secondary">
           <InfoCircleOutlined /> {score.reason}
@@ -213,17 +255,20 @@ export function ScoresSection({
   onChange,
   options,
   versionToken,
+  scoreVersion,
+  optionsError,
   onVersionConflict,
 }: Props) {
   const [selected, setSelected] = useState<Score | null>(null);
-  const requestOptions = { mode, scenario, versionToken };
-  const query = useProductQuery<Scores>("scores", "scores", filters, requestOptions);
+  const requestOptions = { mode, scenario, versionToken, scoreVersion };
+  const scoreReady = mode !== "api" || !!scoreVersion;
+  const query = useProductQuery<Scores>("scores", "scores", filters, requestOptions, scoreReady);
   const details = useProductQuery<Score>(
     `scores/${selected?.id ?? "unselected"}`,
     "scores",
     filters,
     requestOptions,
-    selected !== null,
+    selected !== null && scoreReady,
   );
   return (
     <section id="product-scores" className="product-section" aria-labelledby="scores-heading">
@@ -246,12 +291,15 @@ export function ScoresSection({
             label: "查看评分与放量口径",
             children: (
               <Typography.Paragraph type="secondary">
-                按品类、季节和生命周期比较指标档位，区分完整验证、待验证与暂未评分。评分由后端模型任务提供；当前开发样例用于验证交互，不代表模型已验收。缺少推广或历史窗口时展示原因，不自动补零或放大得分。
+                基础、良好、优秀、突出分别得到该项权重的25%、50%、75%、100%；未达基础得0分。同线取达到的最高档，原值比较后格式化。缺项不补零、不重分摊权重，十项都有效才有完整总分。当前真实结果使用原商品固定历史基线试算；评分支付转化率=订单÷访客，经营主卡=买家÷访客；ROI=总归因成交额÷总花费。收藏定义、完整窗口及标准验收未齐时，不给出正式放量结论。
               </Typography.Paragraph>
             ),
           },
         ]}
       />
+      {optionsError && (
+        <Alert type="error" showIcon title="新品筛选加载失败" description={optionsError.message} />
+      )}
       <FiltersBar
         scope="scores"
         score
@@ -265,8 +313,9 @@ export function ScoresSection({
           <>
             <div className="section-count">
               <Typography.Text type="secondary">
-                共 {data.total} 款新品 · 完整验证 {data.counts.complete} · 待验证{" "}
-                {data.counts.partial} · 未评分 {data.counts.unscored}
+                匹配 {data.total} / {data.allCount ?? data.total} 款新品 · 完整评分{" "}
+                {data.counts.complete} · 部分试算 {data.counts.partial} · 未评分{" "}
+                {data.counts.unscored}
               </Typography.Text>
               <Typography.Text type="secondary">
                 评分截至：{query.data?.meta.dataThrough ?? "—"}

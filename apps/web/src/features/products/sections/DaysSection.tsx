@@ -1,11 +1,11 @@
-import { Card, Table, Tag } from "antd";
+import { Alert, Card, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { DayRow, Days, Filters, Mode, Options, Scenario } from "../api/contracts";
 import { useProductQuery } from "../api/queries";
 import { FiltersBar } from "../components/FiltersBar";
 import { SectionHeading } from "../components/SectionHeading";
 import { SectionState } from "../components/SectionState";
-import { displayChange, displayValue } from "../components/display";
+import { displayChange, displayValue, isNegative } from "../components/display";
 
 const columns: ColumnsType<DayRow> = [
   { title: "日期", dataIndex: "date", width: 115 },
@@ -59,7 +59,7 @@ const columns: ColumnsType<DayRow> = [
     align: "right",
     width: 130,
     render: (value) => (
-      <span className={value == null ? "muted" : value < 0 ? "negative" : "positive"}>
+      <span className={value == null ? "muted" : isNegative(value) ? "negative" : "positive"}>
         {displayChange(value)}
       </span>
     ),
@@ -73,6 +73,7 @@ export function DaysSection({
   onReset,
   options,
   versionToken,
+  optionsError,
 }: {
   mode: Mode;
   scenario: Scenario;
@@ -81,6 +82,7 @@ export function DaysSection({
   onReset: () => void;
   options: Options | null;
   versionToken: number;
+  optionsError?: Error | null;
 }) {
   const query = useProductQuery<Days>("days", "days", filters, { mode, scenario, versionToken });
   return (
@@ -92,6 +94,14 @@ export function DaysSection({
         extra={<Tag variant="filled">店铺 × 商品 × 自然日</Tag>}
       />
       <Card size="small">
+        {optionsError && (
+          <Alert
+            type="error"
+            showIcon
+            title="明细筛选加载失败"
+            description={optionsError.message}
+          />
+        )}
         <FiltersBar
           scope="days"
           filters={filters}

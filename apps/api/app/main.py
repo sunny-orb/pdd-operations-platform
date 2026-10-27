@@ -11,9 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
+from app.api.products import router as products_router
 from app.api.system import router
 from app.core.config import Settings
 from app.db.connection import build_engine
+from app.modules.products.query import QueryError
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def handle_validation_error(request: Request, error: RequestValidationError):
         return error_response(request, 422, "VALIDATION_ERROR", "请求参数不符合接口要求")
 
+    @application.exception_handler(QueryError)
+    async def handle_query_error(request: Request, error: QueryError):
+        return error_response(request, error.status, error.code, error.message)
+
     @application.exception_handler(Exception)
     async def handle_unexpected_error(request: Request, error: Exception):
         logger.error(
@@ -81,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return error_response(request, 500, "INTERNAL_ERROR", "服务暂时不可用")
 
     application.include_router(router)
+    application.include_router(products_router)
     return application
 
 

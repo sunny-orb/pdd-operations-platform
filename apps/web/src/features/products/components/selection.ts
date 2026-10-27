@@ -6,6 +6,13 @@ export function reconcileSelection(filters: Filters, options: Options): Partial<
   if (filters.operator && !options.operators.includes(filters.operator)) return { operator: "" };
   if (filters.category && !options.categories.includes(filters.category)) return { category: "" };
   if (filters.level && !options.levels.includes(filters.level)) return { level: "" };
+  // 正式目录分页，未出现在本页不等于无效；只清理明确跨店的商品。
+  if (options.retainSelection) {
+    const products = filters.products.filter(
+      (key) => !filters.shop || JSON.parse(key)[0] === filters.shop,
+    );
+    return products.length !== filters.products.length ? { products } : null;
+  }
   const products = filters.products.filter((key) =>
     options.products.some((product) => product.key === key),
   );

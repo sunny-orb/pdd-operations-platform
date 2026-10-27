@@ -1,29 +1,33 @@
 /* 仅组织页内目录布局；导航选择与滚动定位使用 Ant Design Anchor。 */
 .dashboard-sections {
+  position: relative;
   display: grid;
-  grid-template-columns: 196px minmax(0, 1fr);
-  max-width: 1732px;
-  margin-inline: auto;
-  padding-left: 24px;
+  grid-template-columns: var(--directory-width, 192px) minmax(0, 1fr);
+  transition: grid-template-columns 240ms cubic-bezier(0.2, 0, 0, 1);
 }
 .dashboard-sections-sidebar {
   min-width: 0;
-  padding-top: 28px;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  overflow-y: auto;
+  background: var(--ant-color-bg-container, #fff);
+  border-right: 1px solid var(--ant-color-border-secondary, #e1e8f1);
 }
 .dashboard-sections-directory {
-  position: sticky;
-  top: 24px;
-  padding: 18px 10px 12px;
-  border: 1px solid var(--ant-color-border-secondary, #e1e8f1);
-  border-radius: 12px;
+  /* 隔离首页全局nav布局，避免窄屏将目录标题挤成竖排。 */
+  display: block;
+  margin-top: 0;
+  overflow: visible;
+  padding: 28px 10px 12px;
   background: var(--ant-color-bg-container, #fff);
-  box-shadow: 0 4px 20px #142b4905;
 }
 .dashboard-sections-heading {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 10px 14px;
+  padding: 0 0 14px;
+  white-space: nowrap;
 }
 .dashboard-sections-heading .ant-typography:last-child {
   margin-left: auto;
@@ -48,13 +52,23 @@
 }
 @media (max-width: 991px) {
   .dashboard-sections {
-    display: block;
+    display: flex;
+    flex-direction: column;
     padding-left: 0;
+  }
+  .dashboard-sections-content {
+    display: contents;
+  }
+  .dashboard-sections-content > .dashboard-topbar {
+    order: -1;
   }
   .dashboard-sections-sidebar {
     position: sticky;
     top: 0;
     z-index: 20;
+    height: auto;
+    overflow-y: visible;
+    border-right: 0;
     padding: 0;
   }
   .dashboard-sections-directory {
@@ -77,4 +91,104 @@
   .dashboard-sections-content section[id] {
     scroll-margin-top: 112px;
   }
+}
+
+.dashboard-sections-toggle.ant-btn {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  color: inherit;
+  border-radius: 8px;
+}
+.dashboard-sections-heading .ant-typography,
+.dashboard-sections-label {
+  transition: opacity 160ms ease;
+}
+.dashboard-sections-icon {
+  flex: 0 0 16px;
+  width: 16px;
+  text-align: center;
+}
+@media (min-width: 992px) {
+  .dashboard-sections.is-collapsed {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+  .dashboard-sections-heading {
+    gap: 4px;
+    overflow: hidden;
+  }
+  .dashboard-sections-heading .ant-typography {
+    flex-shrink: 0;
+  }
+  .dashboard-sections-link {
+    display: flex;
+    white-space: nowrap;
+  }
+  .dashboard-sections.is-collapsed .dashboard-sections-heading .ant-typography,
+  .dashboard-sections.is-collapsed .dashboard-sections-label {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .dashboard-sections.is-collapsed .dashboard-sections-directory {
+    padding-inline: 5px;
+  }
+  .dashboard-sections.is-collapsed .ant-anchor-link {
+    padding-inline: 0;
+  }
+  .dashboard-sections.is-collapsed .ant-anchor-link-title {
+    padding-inline: 0;
+  }
+  .dashboard-sections.is-collapsed .dashboard-sections-link {
+    width: 34px;
+    justify-content: center;
+    gap: 0;
+  }
+  .dashboard-sections.is-collapsed .dashboard-sections-label {
+    width: 0;
+    overflow: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-sections,
+  .dashboard-sections-heading .ant-typography,
+  .dashboard-sections-label {
+    transition: none;
+  }
+}
+
+.dashboard-sections-resizer {
+  position: absolute;
+  z-index: 35;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--directory-width, 192px) - 4px);
+  width: 8px;
+  cursor: col-resize;
+  touch-action: none;
+}
+.dashboard-sections-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: transparent;
+  transition: background-color 150ms ease;
+}
+.dashboard-sections-resizer:hover::after,
+.dashboard-sections-resizer:focus-visible::after,
+.dashboard-sections.is-resizing .dashboard-sections-resizer::after {
+  background: var(--ant-color-primary, #1768d9);
+}
+.dashboard-sections-resizer:focus-visible {
+  outline: none;
+}
+.dashboard-sections.is-resizing {
+  transition: none;
+  user-select: none;
+  cursor: col-resize;
+}
+.dashboard-sections.is-resizing * {
+  cursor: col-resize !important;
+}
+.dashboard-sections-resizer[hidden] {
+  display: none;
 }

@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import type { Trend } from "../api/contracts";
 import { SectionState, type QueryView } from "../components/SectionState";
+import { displayValue } from "../components/display";
 import { chartLabel } from "../components/chartLabel";
 
 export type Comparison = "year" | "products" | "relative";
@@ -20,11 +21,13 @@ export function TrendSection({
   label,
   comparison,
   onComparison,
+  hasProducts = true,
 }: {
   query: QueryView<Trend>;
   label: string;
   comparison: Comparison;
   onComparison: (value: Comparison) => void;
+  hasProducts?: boolean;
 }) {
   return (
     <Card
@@ -39,10 +42,11 @@ export function TrendSection({
         onChange={(value) => onComparison(value as Comparison)}
         options={[
           { value: "year", label: "去年同期" },
-          { value: "products", label: "商品对比" },
-          { value: "relative", label: "相对走势" },
+          { value: "products", label: "商品对比", disabled: !hasProducts },
+          { value: "relative", label: "相对走势", disabled: !hasProducts },
         ]}
       />
+      {!hasProducts && <p className="muted">先在经营总览选择商品，即可比较商品或相对走势。</p>}
       <SectionState query={query}>
         {(data) => (
           <>
@@ -53,7 +57,16 @@ export function TrendSection({
             >
               <ResponsiveContainer width="100%" height={290} minWidth={0}>
                 <LineChart
-                  data={data.points}
+                  data={data.points.map((point) => ({
+                    ...point,
+                    ...Object.fromEntries(
+                      data.series.map((series) => [
+                        series.key,
+                        point[series.key] == null ? null : Number(point[series.key]),
+                      ]),
+                    ),
+                    original: point,
+                  }))}
                   margin={{ top: 24, right: 14, left: 3, bottom: 0 }}
                   accessibilityLayer
                 >
@@ -80,10 +93,11 @@ export function TrendSection({
                     width={52}
                   />
                   <Tooltip
-                    formatter={(value) =>
-                      value == null
-                        ? "数据不足"
-                        : chartLabel(Number(value), data.format, data.mode === "relative")
+                    formatter={(_value, _name, entry) =>
+                      displayValue(
+                        entry.payload?.original?.[String(entry.dataKey)],
+                        data.mode === "relative" ? "percent" : data.format,
+                      )
                     }
                     contentStyle={{ borderRadius: 10, borderColor: "#e0e7ef", fontSize: 12 }}
                   />

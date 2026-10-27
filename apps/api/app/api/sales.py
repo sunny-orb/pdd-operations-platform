@@ -1,10 +1,16 @@
 """新版M3只读协议处理；来源接收永不在GET内运行。"""
 
 from datetime import date
+from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
 
-from app.api.sales_schemas import FiltersResponse, PerformanceResponse, ShopsResponse
+from app.api.sales_schemas import (
+    DetailResponse,
+    FiltersResponse,
+    PerformanceResponse,
+    ShopsResponse,
+)
 from app.modules.sales.contracts import SalesError
 from app.modules.sales.query import SalesQuery, SalesService
 
@@ -53,4 +59,89 @@ def shops(
     return finish(
         request,
         SalesService(request.app.state.engine).shops(SalesQuery(date_from, date_to, data_version)),
+    )
+
+
+@router.get("/targets", response_model=DetailResponse)
+def targets(request: Request, month: str, data_version: str = Query(min_length=1, max_length=100)):
+    from app.modules.sales.detail_queries import SalesDetails
+
+    return finish(request, SalesDetails(request.app.state.engine).targets(month, data_version))
+
+
+@router.get("/ratings", response_model=DetailResponse)
+def ratings(
+    request: Request,
+    date_from: date,
+    date_to: date,
+    data_version: str = Query(min_length=1, max_length=100),
+    shop_ids: Annotated[list[str] | None, Query()] = None,
+):
+    from app.modules.sales.detail_queries import SalesDetails
+
+    return finish(
+        request,
+        SalesDetails(request.app.state.engine).ratings(
+            SalesQuery(date_from, date_to, data_version), shop_ids
+        ),
+    )
+
+
+@router.get("/regions", response_model=DetailResponse)
+def regions(
+    request: Request,
+    date_from: date,
+    date_to: date,
+    data_version: str = Query(min_length=1, max_length=100),
+    shop_id: str | None = None,
+):
+    from app.modules.sales.region_queries import RegionQueries
+
+    return finish(
+        request,
+        RegionQueries(request.app.state.engine).regions(
+            SalesQuery(date_from, date_to, data_version, shop_id)
+        ),
+    )
+
+
+@router.get("/product-regions/filters", response_model=DetailResponse)
+def product_filters(
+    request: Request,
+    data_version: str = Query(min_length=1, max_length=100),
+    category: str = "",
+    search: str = "",
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
+):
+    from app.modules.sales.region_queries import RegionQueries
+
+    return finish(
+        request,
+        RegionQueries(request.app.state.engine).filters(
+            data_version, category, search, offset, limit
+        ),
+    )
+
+
+@router.get("/product-regions", response_model=DetailResponse)
+def product_regions(
+    request: Request,
+    date_from: date,
+    date_to: date,
+    data_version: str = Query(min_length=1, max_length=100),
+    shop_id: str | None = None,
+    category: str = "",
+    product_key: str = "",
+):
+    from app.modules.sales.region_queries import RegionQueries
+
+    return finish(
+        request,
+        RegionQueries(request.app.state.engine).regions(
+            SalesQuery(date_from, date_to, data_version, shop_id),
+            product=True,
+            category=category,
+            product_key=product_key,
+        ),
     )

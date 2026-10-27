@@ -32,6 +32,7 @@ class ShopDailyCandidate:
     rows: tuple[dict[str, Any], ...]
     raw_rows: tuple[dict[str, Any], ...]
     fingerprint: str
+    source_metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)

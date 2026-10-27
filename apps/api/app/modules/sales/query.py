@@ -101,7 +101,8 @@ def meta(snapshot):
     rows, success, attempt = snapshot["rows"], snapshot["success"], snapshot["attempt"]
     dates = [r["business_date"] for r in rows if r["business_date"]]
     return dict(
-        data_version=snapshot["version"]["id"],
+        data_version=snapshot["token"],
+        input_versions=snapshot["versions"],
         observed_from=str(min(dates)) if dates else None,
         observed_through=str(max(dates)) if dates else None,
         completeness_state="unknown",
@@ -138,8 +139,12 @@ class SalesService:
                     )
                 )
                 current = next_month
+            from .datasets import SPECS
+            from .detail_queries import source_info
+
             return dict(
                 data=dict(
+                    sources={code: source_info(snapshot, code) for code in SPECS},
                     shops=[
                         dict(shop_id=id, shop_name=name, display_name=label)
                         for id, name, label in SHOPS.values()
@@ -153,12 +158,12 @@ class SalesService:
                     observed_through=meta(snapshot)["observed_through"],
                     capabilities=dict(
                         shop_daily=True,
-                        targets=False,
-                        refunds=False,
-                        promotion=False,
-                        ratings=False,
-                        regions=False,
-                        product_regions=False,
+                        targets="sales_targets" in snapshot["versions"],
+                        refunds="shop_refunds" in snapshot["versions"],
+                        promotion="shop_channel_product_promotion" in snapshot["versions"],
+                        ratings="shop_ratings" in snapshot["versions"],
+                        regions="shop_regions" in snapshot["versions"],
+                        product_regions="shop_regions" in snapshot["versions"],
                     ),
                 ),
                 meta=meta(snapshot),
@@ -214,6 +219,13 @@ class SalesService:
                     items=items,
                     missing_shop_days=sum(len(item["coverage"]["missing_dates"]) for item in items),
                 )
+            from .detail_queries import enrich_metrics
+
+            if scope == "performance":
+                enrich_metrics(snapshot, query, data, selected)
+            else:
+                for item in data["items"]:
+                    enrich_metrics(snapshot, query, item, [item["shop_id"]])
             return dict(data=data, meta=meta(snapshot))
 
     def performance(self, query):

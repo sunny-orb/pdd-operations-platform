@@ -9,14 +9,11 @@ import {
 } from "@ant-design/icons";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { useSalesData } from "./api/queries";
-import {
-  PendingPromotion,
-  PendingRatings,
-  PendingRegions,
-  PendingTargets,
-  REFUND_SOURCE,
-  TARGET_SOURCE,
-} from "./components/PendingSections";
+import { REFUND_SOURCE, TARGET_SOURCE } from "./sourceLinks";
+import { SalesTargets } from "./components/SalesTargets";
+import { SalesRatings } from "./components/SalesRatings";
+import { SalesRegions } from "./components/SalesRegions";
+import { PromotionDetails } from "./components/PromotionDetails";
 import { ShopTable } from "./components/ShopTable";
 import { count, fixed, localTime, money, percent } from "./format";
 import "./prototype.css";
@@ -24,7 +21,7 @@ import "./sales.css";
 
 /** 原型正文API适配；所有正式指标由后端提供，共享导航保持原组件。 */
 export function SalesPage() {
-  const { filters, scope, result, error, changeScope, retry } = useSalesData();
+  const { filters, scope, result, error, changeScope, retry, invalidateVersion } = useSalesData();
   const selectedName =
     filters?.data.shops.find((s) => s.shop_id === scope.shop)?.display_name ?? "全部店铺";
   const rangeLabel = scope.from
@@ -45,10 +42,10 @@ export function SalesPage() {
     ["店铺访客", count(data?.shop_visitors), "所选日期累计访客", ""],
     ["成交转化率", percent(data?.buyer_conversion), "成交买家 / 店铺访客", ""],
     ["客单价", data?.aov == null ? "—" : `¥${fixed(data.aov)}`, "成交金额 / 成交买家", ""],
-    ["退款率", "—", "退款来源未接入 · 口径待核验", "danger"],
-    ["推广花费", "—", "数仓 6 店 · 官方明星店铺 · 未接入", ""],
-    ["点击率", "—", "推广点击量 / 曝光量 · 未接入", ""],
-    ["ROI", "—", "推广交易额 / 推广花费 · 口径待核验", "success"],
+    ["退款率", percent(data?.refund_rate), "同店同日统计参考 · 日期及订单范围待核", "danger"],
+    ["推广花费", money(data?.promotion_spend), "数仓 6 店 · 官方明星店铺 · 已知值合计", ""],
+    ["点击率", percent(data?.promotion_ctr), "已匹配推广点击量 / 曝光量", ""],
+    ["ROI", fixed(data?.promotion_roi), "单渠道来源参考 · 跨渠道成交归因待核", "success"],
   ];
   return (
     <DashboardLayout
@@ -150,7 +147,7 @@ export function SalesPage() {
               {result
                 ? `所选时段销售缺少 ${result.missingShopDays} 个店铺日记录，仅汇总已观察值；缺失不补零。`
                 : "未收到当前版本前，指标保留为空，不展示旧筛选或样例数据。"}{" "}
-              退款、目标、推广、评分与地区尚未接入。
+              退款、推广、评分及地区按独立来源覆盖展示；目标原入口不可用，完整日未确认。
             </p>
             <details>
               <summary>查看各店铺日期覆盖及退款缺失明细</summary>
@@ -165,7 +162,11 @@ export function SalesPage() {
                           .map((s) => s.slice(s.indexOf(":") + 1))
                           .join("、") || "该窗口未观察到缺日"
                       : "待读取"}{" "}
-                    · 退款金额缺失日期：未接入 · 推广最新：未接入
+                    · 退款缺失日期：{row?.refund_match?.missing_dates.join("、") || "—"} ·
+                    推广最新：
+                    {row?.promotion_channels
+                      ?.map((c) => c.source.observed_through ?? "—")
+                      .join(" / ") || "—"}
                   </p>
                 );
               })}
@@ -188,9 +189,13 @@ export function SalesPage() {
           </aside>
           <p className="target-scope-note">
             目标进度按 {scope.month || "—"}{" "}
-            月累计及经营年度累计计算，不随自定义日期区间变化。目标台账尚未接入，本段不计算目标达成。
+            月累计及经营年度累计计算，不随自定义日期或经营店铺变化。原型所指目标表当前不可用，完成额正常展示。
           </p>
-          <PendingTargets month={scope.month} />
+          <SalesTargets
+            month={scope.month}
+            version={filters?.meta.input_versions ? filters.meta.data_version : undefined}
+            onConflict={invalidateVersion}
+          />
           <section id="performance" className="dashboard-section sales-section">
             <div className="section-heading">
               <div>
@@ -222,7 +227,10 @@ export function SalesPage() {
                   )}
                 </div>
               </div>
-              <p>{rangeLabel} · 店铺级指标随日期与店铺筛选联动；推广覆盖与归因待接入核验。</p>
+              <p>
+                {rangeLabel} ·
+                店铺级指标随日期与店铺筛选联动；推广覆盖独立展示，跨渠道成交归因待核。
+              </p>
             </div>
             <div className="sales-kpis" data-testid="sales-kpis">
               {kpis.map(([title, value, note, state]) => (
@@ -233,12 +241,18 @@ export function SalesPage() {
                 </Card>
               ))}
             </div>
-            <PendingPromotion />
+            <PromotionDetails data={data} />
             <p className="refund-coverage-note">
-              退款率按销售与退款均有值的同店同日记录计算。已匹配退款 — ÷ 对应成交金额 —；匹配店铺日
-              —、销售覆盖率 —、排除店铺日及销售额 —。退款来源尚未接入，当前不计算，未将缺失视为零。
+              退款率按销售与退款均有值的同店同日记录计算。已匹配退款{" "}
+              {money(data?.refund_match?.matched_refunds)} ÷ 对应成交金额{" "}
+              {money(data?.refund_match?.matched_sales)}；匹配店铺日{" "}
+              {data?.refund_match?.matched_days ?? "—"}、销售覆盖率{" "}
+              {percent(data?.refund_match?.sales_coverage)}、排除店铺日{" "}
+              {data?.refund_match?.excluded_days ?? "—"} 及销售额{" "}
+              {money(data?.refund_match?.excluded_sales)}
+              。这是同日统计参考，日期及订单范围待核，缺失不补零。
             </p>
-            <PendingRatings filters={filters} shop={scope.shop} />
+            <SalesRatings filters={filters} shop={scope.shop} onConflict={invalidateVersion} />
           </section>
           <section className="dashboard-section store-split" id="shops">
             <div className="section-heading">
@@ -295,11 +309,11 @@ export function SalesPage() {
                   </div>
                   <div>
                     <dt>推广数据</dt>
-                    <dd>数仓 6 店 + 官方明星店铺 · 未接入</dd>
+                    <dd>数仓 6 店 + 官方明星店铺</dd>
                   </div>
                   <div>
                     <dt>退款 / 目标</dt>
-                    <dd>飞书多维表 · 未接入</dd>
+                    <dd>飞书退款同日参考 · 目标入口不可用</dd>
                   </div>
                 </dl>
                 <p>
@@ -311,13 +325,13 @@ export function SalesPage() {
               </aside>
             </div>
           </section>
-          <PendingRegions />
+          <SalesRegions filters={filters} onConflict={invalidateVersion} />
           <ShopTable shops={shops} selected={scope.shop} onSelect={selectShop} />
           <footer className="sales-footer">
             数据来源：数仓「ods_rpa_pdd_traffic_kanban_overview_f」。本地最近成功：
             {localTime(result?.meta.last_success_at)} · 已观察截至{" "}
             {filters?.meta.observed_through ?? "—"} ·
-            完整截至日未知。飞书统计退款金额、月度目标、店铺推广、评分及两类地区尚未接入 ·
+            完整截至日未知。飞书退款、数仓店铺推广、评分及两类地区已接入；月度目标入口不可用 ·
             本页面不代表实时交易数据。
           </footer>
         </main>

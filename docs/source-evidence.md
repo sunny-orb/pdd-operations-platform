@@ -816,3 +816,22 @@ HAVING COUNT(*) > 1;
 | 36   | 推广   | `docs/validation.md`                                                                                                         | 其他旧资料，待清理               |
 | 37   | 售后   | `docs/validation.md`                                                                                                         | 其他旧资料，待清理               |
 | 38   | 售后   | `source/data/history.js`                                                                                                     | 其他旧资料，待清理               |
+
+<a id="m3-remaining-sources-20261028"></a>
+
+## 2026-10-28：M3其余来源最小投影核验
+
+在用户“完善整页”授权下，继续仅核指定M3源码及必要关联脚本。数仓仍为9030/cubeappdata既有ro连接，PyMySQL按服务端协议文本把DOUBLE转Decimal；未执行ETL/上游写入或访问其他库。完整获准窗口2026-02-01至上海昨日2026-10-27、固定六店day，数仓单连接串行双读投影摘要一致。
+
+| 数据集                         | 位置                                                | 必要投影/实际范围                                                                                                                                                                                                 |
+| ------------------------------ | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| shop_ratings                   | ods_rpa_pdd_evaluation_overview_f                   | id/dt/day/店ID名、shop_rating_score、create_time；1580条，2月1日～10月26日                                                                                                                                        |
+| shop_channel_product_promotion | ods_rpa_pdd_product_promotion_overview_f            | id/dt/day/店ID名/updated_at及JSON花费、交易额、曝光、点击四键；1597条，2月1日～10月26日；recent_7d/recent_30d不收                                                                                                 |
+| shop_channel_star_shop         | pdd_star_shop                                       | 官方店id/dt/day/店ID名/cost/transaction_amount/impression_count/click_count/create_time；268条，2月1日～10月26日；字段注释元，其他源独立单位说明仍有边界                                                          |
+| shop_regions                   | bwd_rpa_pdd_region_sales_summary_pddht_f            | 12列必要投影，7859条，8月24日～10月26日，六店历史可见，最新日不一定齐六店                                                                                                                                         |
+| product_regions                | bwd_rpa_pdd_region_sales_summary_jst_f              | 18列必要投影，223181条，同上范围；经数仓读取，不另直连ERP；原行ID唯一，不擅自认定店日产品地区唯一；两类地区标签均未见合计行，内蒙/内蒙古等保持各自来源标签不跨源合并                                              |
+| shop_refunds                   | Base XGzTbd9xJaASV3soYnycMmf0nY3 / tblISBHrFF4jFJqW | 既有user身份，官方npm CLI 1.0.98；日期/平台/部门/店铺/统计退款金额/统计金额/退款占比七字段和record_id；1614条，2月1日～10月27日，rev3410、Asia/Shanghai、无后页；市场部/拼多多/六核对别名，无重复店铺日，退款18空 |
+
+连接、字段、别名及源表固定在datasets/source_normalization和只读连接器，必要输入/生产者源码/manifest/SHA私有留在var/ingestion，单来源原子发布，不混源。字段/行数/摘要相同不证明上游业务完整日、退款订单归属、推广成交互斥或JST dt含义；M2-01/02及M3-02/03仍保留限制。
+
+目标追溯：当前线上M3 HTML实际入口仍为`tblwEjKpt1k51M3j`；本地最新M3生成脚本从该表平台=拼多多、年份/月、gmv目标直接读取，非由销售后端推算。程序field-list返回not_found；当前Base可见五表无目标金额，F04 GMV完成值lookup也指向该原表，不能当目标。限定数仓base目录名称/注释未见目标候选，飞书标题“拼多多月度销售”“月度销售”搜索无结果；这些结果只证明本次访问范围，不能断言目标全局不存在。保留入口、NULL目标及来源不可用；不搬原型内嵌历史数字，不重复要求用户定位。当前线上页面读取HTML成功，但浏览器远端载入超时；不冒充已完成最新线上全交互视觉验收。

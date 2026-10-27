@@ -1,11 +1,14 @@
 """经营查询只读仓储：同一RR快照固定入口、事实、覆盖及尝试状态。"""
 
+import hashlib
+import json
 from contextlib import contextmanager
 
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
 from .contracts import SalesError
+from .datasets import SPECS
 
 
 @contextmanager
@@ -28,7 +31,22 @@ def read_snapshot(engine, version=None):
             )
             if not current:
                 raise SalesError("SALES_NOT_CONNECTED", 503)
-            if version is not None and current["id"] != version:
+            versions = dict(
+                c.execute(
+                    sa.text(
+                        "SELECT d.dataset_code,d.version_id FROM public.current_datasets d JOIN"
+                        " public.dataset_versions v ON v.id=d.version_id WHERE "
+                        "v.state='published' AND d.dataset_code = ANY(:codes)"
+                    ),
+                    {"codes": ["shop_daily", *SPECS, "sales_targets"]},
+                ).all()
+            )
+            token = (
+                current["id"]
+                if len(versions) == 1
+                else hashlib.sha256(json.dumps(versions, sort_keys=True).encode()).hexdigest()
+            )
+            if version is not None and token != version:
                 raise SalesError("DATA_VERSION_CHANGED", 409)
             facts = (
                 c.execute(
@@ -71,6 +89,15 @@ def read_snapshot(engine, version=None):
                 .mappings()
                 .first()
             )
-            yield dict(version=current, rows=facts, window=window, attempt=attempt, success=success)
+            yield dict(
+                connection=c,
+                versions=versions,
+                token=token,
+                version=current,
+                rows=facts,
+                window=window,
+                attempt=attempt,
+                success=success,
+            )
     except SQLAlchemyError as exc:
         raise SalesError("DATABASE_UNAVAILABLE", 503) from exc

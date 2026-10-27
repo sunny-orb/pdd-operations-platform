@@ -60,14 +60,24 @@ export function ShopTable({
             {
               title: "退款占 GMV",
               key: "refund",
-              render: () => <span title="退款来源尚未接入，口径待核验">—</span>,
+              dataIndex: "refund_rate",
+              render: (value) => (
+                <span title="同店同日统计参考，日期及订单范围待核">{percent(value)}</span>
+              ),
             },
-            { title: "点击率", key: "ctr", render: () => <span title="推广尚未接入">—</span> },
-            { title: "推广花费", key: "spend", render: () => <span title="推广尚未接入">—</span> },
+            { title: "点击率", dataIndex: "promotion_ctr", render: (value) => percent(value) },
+            {
+              title: "推广花费",
+              dataIndex: "promotion_spend",
+              render: (value) => money(value, true),
+            },
             {
               title: "ROI",
               key: "roi",
-              render: () => <span title="推广来源及归因口径待核验">—</span>,
+              dataIndex: "promotion_roi",
+              render: (value) => (
+                <span title="单渠道来源参考；跨渠道成交归因待核">{fixed(value)}</span>
+              ),
             },
           ]}
         />

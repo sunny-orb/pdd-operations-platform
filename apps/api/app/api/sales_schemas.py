@@ -1,6 +1,6 @@
 """M3成功模型；数字字符串、空值和缺失状态作为稳定查询协议。"""
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +9,7 @@ Numeric = Annotated[str, Field(pattern=r"^-?\d+(\.\d+)?$")]
 
 class SalesMeta(BaseModel):
     data_version: str
+    input_versions: dict[str, str] = Field(default_factory=dict)
     observed_from: str | None
     observed_through: str | None
     completeness_state: Literal["unknown"]
@@ -42,6 +43,8 @@ class SalesMetrics(BaseModel):
     promotion_spend: Numeric | None
     promotion_ctr: Numeric | None
     promotion_roi: Numeric | None
+    refund_match: dict[str, Any] | None = None
+    promotion_channels: list[dict[str, Any]] = Field(default_factory=list)
     coverage: Coverage
     field_states: dict[str, str]
 
@@ -67,6 +70,7 @@ class MonthOption(BaseModel):
 
 
 class SalesFilters(BaseModel):
+    sources: dict[str, dict[str, Any]] = Field(default_factory=dict)
     shops: list[ShopOption]
     months: list[MonthOption]
     default_month: str
@@ -95,4 +99,9 @@ class ShopList(BaseModel):
 
 class ShopsResponse(BaseModel):
     data: ShopList
+    meta: SalesMeta
+
+
+class DetailResponse(BaseModel):
+    data: dict[str, Any]
     meta: SalesMeta

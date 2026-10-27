@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -32,7 +33,19 @@ def restore_candidate(folder: Path):
     window = ReadWindow(
         date.fromisoformat(manifest["start"]), date.fromisoformat(manifest["end"]), tuple(SHOPS)
     )
-    candidate = normalize_shop_daily(rows, window)
+    if manifest.get("dataset"):
+        from . import source_normalization
+        from .source_normalization import normalize_source
+
+        if (
+            sources["modules/sales/source_normalization.py"]
+            != Path(source_normalization.__file__).read_text()
+        ):
+            raise SalesError("ARCHIVE_INTERPRETER_MISMATCH")
+        candidate = normalize_source(manifest["dataset"]["code"], rows, window)
+        candidate = replace(candidate, source_metadata=manifest.get("source_metadata"))
+    else:
+        candidate = normalize_shop_daily(rows, window)
     if candidate.fingerprint != manifest["fingerprint"]:
         raise SalesError("ARCHIVE_INTERPRETATION_MISMATCH")
     return candidate

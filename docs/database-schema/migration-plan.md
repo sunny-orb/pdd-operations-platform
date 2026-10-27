@@ -128,3 +128,9 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 受控入口先运行`apps/api/.venv/bin/python scripts/db-v2.py verify`，再用`apps/api/.venv/bin/python scripts/upgrade-sales-local.py`；后者核对验证摘要、固定本地PG17/项目库/revision/既有授权，备份同集群schema后升级。首次接收入口为`apps/api/.venv/bin/python scripts/sync-sales.py --from 2026-02-01 --to 2026-10-27 --publish`；参数必须等于当次完整批准窗口，命令中的日期仅表示首批实际范围。密码隐藏输入，不保存到脚本或日志。只核验用`--verify-only`，同样拒绝批准窗口外读取。
 
 回退先停止M3接收任务，以受控本地连接在事务内降到20261028_01，精确撤销本revision新增GRANT；不删除任何业务数据/版本或当前指针，不回退初始建表revision。回退期间API已有只读授权可继续读取旧成功数据；重启写任务前重新升级02。异常修复保留旧成功指针及失败尝试，先核对权限/归档/解释后重跑完整批准窗口，不能手工改封版事实或清表。权限回退/重建与角色反例须在随机隔离PG执行，结果见validation。
+
+## M3整页运行权限revision（20261028_03）
+
+沿用户整页接入授权，03仅为既有pdd_ingest追加七表SELECT/INSERT：评分、店铺渠道推广、退款、后台地区、产品地区及目标头/成员。不新增字段/索引，不授删除、封版编辑或其他域写入，01/02保持冻结。受控upgrade-sales-local入口当前精确02→03；先重新db-v2 verify并核对摘要、既有授权及同集群schema备份再执行，已是03只报告不重复变更。目标两表授权不表示目标接收已完成。
+
+回退先停止整页接收任务，在受控本地事务降至02，仅撤本次七表授权；保留全部数据、归档、成功指针及API只读权限，不回退初始表结构。批次故障允许保留未发布draft，下一次完整重跑另建候选，绝不手工补写封版或删除来源行。分批每1000行提交/续租，最终逐字段验证后才封版切当前指针；失败旧成功版持续可读。

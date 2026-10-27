@@ -58,14 +58,14 @@ npm run dev
 
 Windows使用`py -3.12 -m venv apps/api/.venv`和`apps/api/.venv/Scripts/python.exe`。可将`apps/api/.env.example`复制为同目录`.env`配置应用数据库；数仓与应用数据库是不同资源。只提交无凭据模板。
 
-| 入口         | 地址 / 行为                                                                              |
-| ------------ | ---------------------------------------------------------------------------------------- |
-| 前端         | http://127.0.0.1:5173                                                                    |
-| API / 文档   | http://127.0.0.1:8000 / http://127.0.0.1:8000/docs                                       |
-| M3店铺销售   | http://127.0.0.1:5173/sales ，`/store-sales`同页；首条真实店铺日链路，其他来源明确待接入 |
-| 存活 / 就绪  | `/health/live` / `/health/ready`；数据库未配置时就绪503是预期，不能冒充业务正常          |
-| M1真实商品页 | `/products`，代码保留；数据库重设计期间真实数据查询暂停                                  |
-| M1开发样例   | `/products?preview=1`，仅DEV合成样例，持续标识非真实经营数据，不接数仓/数据库/AI         |
+| 入口         | 地址 / 行为                                                                                                      |
+| ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| 前端         | http://127.0.0.1:5173                                                                                            |
+| API / 文档   | http://127.0.0.1:8000 / http://127.0.0.1:8000/docs                                                               |
+| M3店铺销售   | http://127.0.0.1:5173/sales ，`/store-sales`同页；店铺日、退款、推广、评分及两类地区真实接入；目标入口当前不可用 |
+| 存活 / 就绪  | `/health/live` / `/health/ready`；数据库未配置时就绪503是预期，不能冒充业务正常                                  |
+| M1真实商品页 | `/products`，代码保留；数据库重设计期间真实数据查询暂停                                                          |
+| M1开发样例   | `/products?preview=1`，仅DEV合成样例，持续标识非真实经营数据，不接数仓/数据库/AI                                 |
 
 本机数据库使用Docker Desktop，整个项目共用`pdd_operations`，使用独立v2结构，容器和数据库本身保留。以下迁移/测试入口是旧实现的运行说明，重新设计期间暂停执行：
 
@@ -110,7 +110,9 @@ npm run dev:api     # 本机API及 http://127.0.0.1:8000/docs
 
 ## 检查与版本保存
 
-M3首条本地链路的三GET为`/api/v1/sales/filters`、`performance`、`shops`，由前端固定版本读取，GET不会访问来源或启动同步。手工接收入口为`apps/api/.venv/bin/python scripts/sync-sales.py --from YYYY-MM-DD --to YYYY-MM-DD --verify-only`；正式发布显式改为`--publish`，必须是完整批准六店窗口，不能用局部窗口覆盖历史。数仓密码隐藏输入；API仍只读，独立任务使用既有本地写入身份。批准范围、单位与完整性限制见[契约](docs/data-contract.md#m3-source-access)，权限升级/回退见[迁移方案](docs/database-schema/migration-plan.md)，源投影→PG→API只读复核用`apps/api/.venv/bin/python scripts/verify-sales-local.py`，须先启动本机API。必要输入、生产者源码及SHA归档在Git忽略的`var/ingestion/shop_daily/`，不自动清理；重放不执行归档代码，解释器不相容时拒绝，需使用归档的对应解释版本单独复核。
+M3首段三GET为`/api/v1/sales/filters`、`performance`、`shops`，由前端固定版本读取，GET不会访问来源或启动同步。手工接收入口为`apps/api/.venv/bin/python scripts/sync-sales.py --from YYYY-MM-DD --to YYYY-MM-DD --verify-only`；正式发布显式改为`--publish`，必须是完整批准六店窗口，不能用局部窗口覆盖历史。数仓密码隐藏输入；API仍只读，独立任务使用既有本地写入身份。批准范围、单位与完整性限制见[契约](docs/data-contract.md#m3-source-access)，权限升级/回退见[迁移方案](docs/database-schema/migration-plan.md)，源投影→PG→API只读复核用`apps/api/.venv/bin/python scripts/verify-sales-local.py`，须先启动本机API。必要输入、生产者源码及SHA归档在Git忽略的`var/ingestion/shop_daily/`，不自动清理；重放不执行归档代码，解释器不相容时拒绝，需使用归档的对应解释版本单独复核。
+
+M3其余六来源手工入口为`apps/api/.venv/bin/python scripts/sync-sales-sources.py --from 2026-02-01 --to 2026-10-27 --publish`（日期须等于当次完整批准窗口）；`--dataset`可单独选已核来源，`--verify-only`不入库。数仓仍隐藏输入密码，飞书用本机已授权user身份及官方CLI；不在GET刷新时触发上游。只读逐字段/聚合复核用`scripts/verify-sales-sources-local.py`，目标不可用及日期/归因限制见[契约7.8](docs/data-contract.md#78-m3整页续段查询契约)。新增targets/ratings/regions/product-regions及其filters，均在`/api/v1/sales`，页面保留原型字段、独立筛选与状态。完整日未知，目标额尚未接通，不能称全页业务验收关闭。
 
 代码检查入口：`npm run check`、`npm test`、`npm run build`、`npm run format:check`。仅文档改动按AGENTS检查文档，不重复声称历史测试是本轮通过。
 

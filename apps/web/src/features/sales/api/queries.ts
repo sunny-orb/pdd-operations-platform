@@ -68,5 +68,20 @@ export function useSalesData() {
     setFilters(null);
     setRefresh((n) => n + 1);
   }, []);
-  return { filters, scope, result: result?.key === key ? result : null, error, changeScope, retry };
+  const invalidateVersion = useCallback(() => {
+    if (!recovered.current) {
+      recovered.current = true;
+      setFilters(null);
+      setResult(null);
+    } else setError("数据版本持续变化，请重新读取本地数据。");
+  }, []);
+  return {
+    invalidateVersion,
+    filters,
+    scope,
+    result: result?.key === key ? result : null,
+    error,
+    changeScope,
+    retry,
+  };
 }

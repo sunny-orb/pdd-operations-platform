@@ -2,6 +2,7 @@
 
 import os
 import time
+from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -10,6 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from .contracts import PublishResult, SalesError
+from .datasets import EXTENDED_REVISION, INSERT_BATCH_SIZE, SPECS
 from .normalization import canonical, fingerprint
 from .source_policy import (
     HEARTBEAT_SECONDS,
@@ -30,20 +32,27 @@ TABLE_NAMES = (
 )
 
 
-def reflect_tables(engine):
+def reflect_tables(engine, fact_table="shop_daily_facts"):
     """只反射实际v2六表的列；不导入历史M1 ORM，不运行DDL。"""
     metadata = sa.MetaData()
     return {
         name: sa.Table(name, metadata, schema="public", autoload_with=engine, resolve_fks=False)
-        for name in TABLE_NAMES
+        for name in dict.fromkeys((*TABLE_NAMES, fact_table))
     }
 
 
 class ShopDailyStore:
-    def __init__(self, engine, *, archive_root: Path, approved=None):
+    def __init__(self, engine, *, archive_root: Path, approved=None, spec=None):
+        if spec is not None and SPECS.get(spec.code) != spec:
+            raise SalesError("UNKNOWN_SALES_DATASET")
+        self.spec = spec
+        self.code = spec.code if spec else "shop_daily"
+        self.fact_table = spec.fact_table if spec else "shop_daily_facts"
+        self.date_column = spec.date_column if spec else "business_date"
+        self.revision = EXTENDED_REVISION if spec else POLICY_REVISION
         self.engine, self.archive_root = engine, Path(archive_root)
         self.approved = approved or approved_window()
-        self.tables = reflect_tables(engine)
+        self.tables = reflect_tables(engine, self.fact_table)
 
     def _lease(self, connection, run_id):
         tasks = self.tables["task_runs"]
@@ -67,7 +76,8 @@ class ShopDailyStore:
         locked = False
         try:
             locked = connection.execute(
-                sa.text("SELECT pg_try_advisory_lock(hashtext('m3-shop-daily'))")
+                sa.text("SELECT pg_try_advisory_lock(hashtext(:key))"),
+                {"key": "m3-" + self.code},
             ).scalar_one()
             connection.commit()
             if not locked:
@@ -77,7 +87,7 @@ class ShopDailyStore:
                 connection.execute(
                     tasks.update()
                     .where(
-                        tasks.c.lock_key == "shop_daily",
+                        tasks.c.lock_key == self.code,
                         tasks.c.status == "running",
                         tasks.c.lease_expires_at <= now,
                     )
@@ -91,7 +101,7 @@ class ShopDailyStore:
                 )
                 existing = connection.execute(
                     sa.select(tasks.c.id).where(
-                        tasks.c.lock_key == "shop_daily", tasks.c.status == "running"
+                        tasks.c.lock_key == self.code, tasks.c.status == "running"
                     )
                 ).first()
                 if existing:
@@ -99,9 +109,9 @@ class ShopDailyStore:
                 connection.execute(
                     tasks.insert().values(
                         id=run_id,
-                        job_code="sync_shop_daily",
+                        job_code="sync_" + self.code,
                         request_ref=f"{self.approved.start}/{self.approved.end}",
-                        lock_key="shop_daily",
+                        lock_key=self.code,
                         status="running",
                         queued_at=now,
                         started_at=now,
@@ -165,7 +175,9 @@ class ShopDailyStore:
             if connection.in_transaction():
                 connection.rollback()
             if locked:
-                connection.execute(sa.text("SELECT pg_advisory_unlock(hashtext('m3-shop-daily'))"))
+                connection.execute(
+                    sa.text("SELECT pg_advisory_unlock(hashtext(:key))"), {"key": "m3-" + self.code}
+                )
                 connection.commit()
             connection.close()
 
@@ -184,7 +196,9 @@ class ShopDailyStore:
         data = ("\n".join(canonical(row) for row in candidate.raw_rows) + "\n").encode()
         policy = canonical(
             dict(
-                policy=POLICY_REVISION,
+                policy=self.revision,
+                dataset=asdict(self.spec) if self.spec else None,
+                source_metadata=candidate.source_metadata,
                 start=str(candidate.window.start),
                 end=str(candidate.window.end),
                 shops=SHOPS,
@@ -209,11 +223,12 @@ class ShopDailyStore:
         return str(folder / "input.ndjson"), str(folder / "interpretation.json")
 
     def _publish(self, connection, run_id, candidate):
+        """草稿分批落库并续租；最终锁版本逐值校验，短事务封版与切入口。"""
         versions, facts, current, tasks, shops, coverage = (
             self.tables[n]
             for n in (
                 "dataset_versions",
-                "shop_daily_facts",
+                self.fact_table,
                 "current_datasets",
                 "task_runs",
                 "shops",
@@ -221,31 +236,31 @@ class ShopDailyStore:
             )
         )
         version_id = str(uuid4())
-        # 留存先于发布事务；失败候选留存不自动删除，不能影响旧版。
         archive, interpretation = self._archive(version_id, candidate)
+        expected = {r["source_row_key"]: r for r in candidate.rows}
         with connection.begin():
             self._lease(connection, run_id)
             old = connection.execute(
                 sa.select(current.c.version_id)
-                .where(current.c.dataset_code == "shop_daily")
+                .where(current.c.dataset_code == self.code)
                 .with_for_update()
             ).scalar_one_or_none()
             if old:
                 old_rows = connection.execute(
-                    sa.select(facts.c.source_row_key, facts.c.shop_id, facts.c.business_date).where(
-                        facts.c.dataset_version_id == old
-                    )
-                ).all()
+                    sa.select(
+                        facts.c.source_row_key, facts.c.shop_id, facts.c[self.date_column]
+                    ).where(facts.c.dataset_version_id == old)
+                )
                 new_keys = {
-                    (r["source_row_key"], r["shop_id"], r["business_date"]) for r in candidate.rows
+                    (r["source_row_key"], r["shop_id"], r[self.date_column]) for r in candidate.rows
                 }
                 if any(tuple(row) not in new_keys for row in old_rows):
                     raise SalesError("SOURCE_OLD_KEY_MISSING")
             reuse = connection.execute(
                 sa.select(versions.c.id).where(
-                    versions.c.dataset_code == "shop_daily",
+                    versions.c.dataset_code == self.code,
                     versions.c.content_fingerprint == candidate.fingerprint,
-                    versions.c.state.in_(["validated", "published"]),
+                    versions.c.state == "published",
                 )
             ).scalar_one_or_none()
             if reuse:
@@ -260,52 +275,85 @@ class ShopDailyStore:
                 connection.execute(
                     versions.insert().values(
                         id=version_id,
-                        dataset_code="shop_daily",
+                        dataset_code=self.code,
                         origin_kind="source",
                         state="draft",
-                        source_system="warehouse",
-                        source_locator="cubeappdata." + SOURCE_TABLE,
-                        row_schema_revision=POLICY_REVISION,
+                        source_system=self.spec.source_system if self.spec else "warehouse",
+                        source_locator=self.spec.locator
+                        if self.spec
+                        else "cubeappdata." + SOURCE_TABLE,
+                        row_schema_revision=self.revision,
                         interpretation_ref=interpretation,
                         producer_revision=producer_revision(),
                         retained_input_ref=archive,
+                        upstream_revision=str(candidate.source_metadata["rev"])
+                        if candidate.source_metadata
+                        and candidate.source_metadata.get("rev") is not None
+                        else None,
                         received_at=sa.func.clock_timestamp(),
                     )
                 )
-                connection.execute(
-                    sa.select(versions.c.id).where(versions.c.id == version_id).with_for_update()
-                )
-                connection.execute(
-                    facts.insert(),
-                    [
-                        dict(row, id=str(uuid4()), dataset_version_id=version_id)
-                        for row in candidate.rows
-                    ],
-                )
-                for source_shop, (shop_id, _, _) in SHOPS.items():
-                    observed = any(r["source_shop_id"] == source_shop for r in candidate.rows)
+        if not reuse:
+            for offset in range(0, len(candidate.rows), INSERT_BATCH_SIZE):
+                with connection.begin():
+                    self._lease(connection, run_id)
+                    connection.execute(
+                        facts.insert(),
+                        [
+                            dict(row, id=str(uuid4()), dataset_version_id=version_id)
+                            for row in candidate.rows[offset : offset + INSERT_BATCH_SIZE]
+                        ],
+                    )
+                    self._lease(connection, run_id)
+                    connection.execute(
+                        tasks.update()
+                        .where(tasks.c.id == run_id)
+                        .values(
+                            lease_expires_at=sa.func.clock_timestamp()
+                            + sa.text(f"interval '{LEASE_SECONDS} seconds'")
+                        )
+                    )
+        with connection.begin():
+            self._lease(connection, run_id)
+            connection.execute(
+                sa.select(versions.c.id).where(versions.c.id == version_id).with_for_update()
+            ).one()
+            if not reuse:
+                # 内容触发器的FOR SHARE锁与这里的FOR UPDATE冲突；封版前拒绝遗漏或改写。
+                count = 0
+                result = connection.execute(
+                    sa.select(facts).where(facts.c.dataset_version_id == version_id),
+                    execution_options={"stream_results": True, "yield_per": 1000},
+                ).mappings()
+                for stored in result:
+                    wanted = expected.get(stored["source_row_key"])
+                    if wanted is None or any(stored[key] != value for key, value in wanted.items()):
+                        raise SalesError("CANDIDATE_CONTENT_MISMATCH")
+                    count += 1
+                if count != len(candidate.rows):
+                    raise SalesError("CANDIDATE_ROW_COUNT_MISMATCH")
+                applicable = self.spec.shop_ids if self.spec else tuple(SHOPS)
+                observed = {r["shop_id"] for r in candidate.rows}
+                for source_shop in applicable:
+                    shop_id = SHOPS[source_shop][0]
                     connection.execute(
                         coverage.insert().values(
                             id=str(uuid4()),
                             dataset_version_id=version_id,
-                            scope_kind="shop",
+                            scope_kind="shop_channel"
+                            if self.spec and self.spec.channel
+                            else "shop",
                             shop_id=shop_id,
+                            channel_code=self.spec.channel if self.spec else None,
                             window_start=candidate.window.start,
                             window_end=candidate.window.end,
-                            availability_state="observed" if observed else "no_records",
+                            availability_state="observed" if shop_id in observed else "no_records",
                             completeness_state="unknown",
                             reason_code="UPSTREAM_COMPLETENESS_UNKNOWN",
                             evidence_ref=interpretation,
                             checked_at=sa.func.clock_timestamp(),
                         )
                     )
-                count = connection.execute(
-                    sa.select(sa.func.count())
-                    .select_from(facts)
-                    .where(facts.c.dataset_version_id == version_id)
-                ).scalar_one()
-                if count != len(candidate.rows):
-                    raise SalesError("CANDIDATE_ROW_COUNT_MISMATCH")
                 connection.execute(
                     versions.update()
                     .where(versions.c.id == version_id)
@@ -321,16 +369,16 @@ class ShopDailyStore:
             self._lease(connection, run_id)
             connection.execute(
                 insert(current)
-                .values(dataset_code="shop_daily", version_id=version_id)
+                .values(dataset_code=self.code, version_id=version_id)
                 .on_conflict_do_update(
                     index_elements=[current.c.dataset_code], set_={"version_id": version_id}
                 )
             )
             source_time = max(
                 (
-                    r["source_updated_time_raw"]
+                    r.get("source_updated_time_raw")
                     for r in candidate.rows
-                    if r["source_updated_time_raw"]
+                    if r.get("source_updated_time_raw")
                 ),
                 default=None,
             )
@@ -355,11 +403,16 @@ def producer_sources():
     root = Path(__file__).resolve().parents[2]
     names = [
         "modules/sales/contracts.py",
+        "modules/sales/datasets.py",
+        "modules/sales/source_normalization.py",
+        "connectors/sales_sources.py",
+        "connectors/sales_feishu.py",
         "modules/sales/source_policy.py",
         "modules/sales/normalization.py",
         "modules/sales/storage.py",
         "connectors/shop_daily.py",
         "jobs/sync_shop_daily.py",
+        "jobs/sync_sales_sources.py",
     ]
     return {name: (root / name).read_text() for name in names}
 

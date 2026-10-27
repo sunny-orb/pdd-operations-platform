@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path.cwd() / "apps/api"))
 import sqlalchemy as sa
+
 from app.core.config import Settings
 from app.db.connection import build_engine
 from app.modules.sales.archive_replay import restore_candidate
@@ -24,7 +25,8 @@ with engine.connect() as c:
     v = (
         c.execute(
             sa.text(
-                "SELECT v.* FROM dataset_versions v JOIN current_datasets d ON d.version_id=v.id WHERE d.dataset_code='shop_daily'"
+                "SELECT v.* FROM dataset_versions v JOIN current_datasets d ON "
+                "d.version_id=v.id WHERE d.dataset_code='shop_daily'"
             )
         )
         .mappings()
@@ -53,16 +55,14 @@ opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def get(path):
-    with opener.open(
-        "http://127.0.0.1:8000/api/v1/sales/" + path, timeout=5
-    ) as response:
+    with opener.open("http://127.0.0.1:8000/api/v1/sales/" + path, timeout=5) as response:
         return json.load(response)
 
 
 f = get("filters")
 checks = 0
 timings = {}
-assert f["meta"]["data_version"] == v["id"]
+assert f["meta"].get("input_versions", {}).get("shop_daily", f["meta"]["data_version"]) == v["id"]
 for start, end in [
     ("2026-10-26", "2026-10-26"),
     ("2026-10-01", "2026-10-27"),
@@ -74,8 +74,7 @@ for start, end in [
         selected = [
             r
             for r in candidate.rows
-            if start <= str(r["business_date"]) <= end
-            and (not shop or shop == r["shop_id"])
+            if start <= str(r["business_date"]) <= end and (not shop or shop == r["shop_id"])
         ]
         sums = {
             key: sum((r[key] for r in selected), Decimal(0))
@@ -98,16 +97,13 @@ for start, end in [
             ("aov", "shop_revenue", "buyers"),
         ]:
             expected = (
-                (sums[num] / sums[den]).quantize(
-                    Decimal("0.000000000001"), rounding=ROUND_HALF_UP
-                )
+                (sums[num] / sums[den]).quantize(Decimal("0.000000000001"), rounding=ROUND_HALF_UP)
                 if sums[den] > 0
                 else None
             )
-            assert (
-                Decimal(actual[key]) if actual[key] is not None else None
-            ) == expected, key
-        assert actual["promotion_spend"] is None
+            assert (Decimal(actual[key]) if actual[key] is not None else None) == expected, key
+        if not f["data"]["capabilities"]["promotion"]:
+            assert actual["promotion_spend"] is None
         checks += 1
     timings[start + ":" + end] = {
         "samples": len(samples),

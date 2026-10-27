@@ -2,6 +2,7 @@
 
 import re
 from datetime import date, timedelta
+from decimal import Decimal
 
 import sqlalchemy as sa
 
@@ -18,16 +19,34 @@ def source_info(snapshot, code):
         return cached[code]
     spec = SPECS[code]
     v = snapshot["versions"].get(code)
+    c = snapshot["connection"]
+    attempt = (
+        c.execute(
+            sa.text(
+                "SELECT status,started_at,queued_at FROM public.task_runs WHERE job_code=:job "
+                "ORDER BY queued_at DESC,id DESC LIMIT 1"
+            ),
+            dict(job="sync_" + code),
+        )
+        .mappings()
+        .first()
+    )
+    attempt_fields = dict(
+        last_attempt_status=attempt["status"] if attempt else None,
+        last_attempt_at=(attempt["started_at"] or attempt["queued_at"]).isoformat()
+        if attempt
+        else None,
+    )
     if not v:
-        return dict(
+        cached[code] = dict(
             state="not_connected",
             observed_from=None,
             observed_through=None,
             source_updated_text=None,
             last_success_at=None,
-            last_attempt_status=None,
+            **attempt_fields,
         )
-    c = snapshot["connection"]
+        return cached[code]
     lo, hi = c.execute(
         sa.text(
             f"SELECT min({spec.date_column}),max({spec.date_column}) FROM "
@@ -47,20 +66,13 @@ def source_info(snapshot, code):
         .mappings()
         .first()
     )
-    attempt = c.execute(
-        sa.text(
-            "SELECT status FROM public.task_runs WHERE job_code=:job ORDER BY "
-            "queued_at DESC,id DESC LIMIT 1"
-        ),
-        dict(job="sync_" + code),
-    ).scalar()
     cached[code] = dict(
         state="observed",
         observed_from=str(lo) if lo else None,
         observed_through=str(hi) if hi else None,
         source_updated_text=success["source_updated_text"] if success else None,
         last_success_at=success["finished_at"].isoformat() if success else None,
-        last_attempt_status=attempt,
+        **attempt_fields,
     )
     return cached[code]
 
@@ -103,15 +115,19 @@ def enrich_metrics(s, q, data, shops):
     denominator = total([r for r, _ in matched], "shop_revenue")
     numerator = total([r for _, r in matched], "reported_refund_amount")
     data["refund_rate"] = ratio(numerator, denominator)
+    matched_keys = {(r["shop_id"], r["business_date"]) for r, _ in matched}
+    excluded_sales = [r for r in sales if (r["shop_id"], r["business_date"]) not in matched_keys]
     data["refund_match"] = dict(
         matched_refunds=number(numerator, money=True),
         matched_sales=number(denominator, money=True),
         matched_days=len(matched),
         sales_coverage=ratio(denominator, total(sales, "shop_revenue")),
         excluded_days=len(sales) - len(matched),
-        excluded_sales=number(total(sales, "shop_revenue") - denominator, money=True)
-        if denominator is not None and sales
-        else None,
+        excluded_sales=number(
+            Decimal(0) if sales and not excluded_sales else total(excluded_sales, "shop_revenue"),
+            money=True,
+        ),
+        source=source_info(s, "shop_refunds"),
         missing_dates=[
             str(r["business_date"])
             for r in sales

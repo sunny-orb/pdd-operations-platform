@@ -1556,16 +1556,16 @@ filters成功读取当前已发布版本；尚无版本返回503 `SALES_NOT_CONN
 
 ### 7.8 M3整页续段查询契约
 
-本节覆盖7.7的首段占位值。`filters`增加逐来源`sources`（状态、实际首/末日、来源更新时间原文、最近成功/尝试），capabilities按已发布输入决定。`meta.input_versions`列出真实版本ID，`data_version`为全部M3当前输入向量摘要；仅店铺日时兼容原ID。任一输入切换使所有后续GET返回409。各来源在同一RR读取中固定本地版本，不能据此称不同来源是同批上游快照。
+本节覆盖7.7的首段占位值。`filters`增加逐来源`sources`（状态、实际首/末日、来源更新时间原文、最近成功/尝试及尝试时间；无发布版本也返回真实失败尝试），capabilities按已发布输入决定。`meta.input_versions`列出真实版本ID，`data_version`为全部M3当前输入向量摘要；仅店铺日时兼容原ID。任一输入切换使所有后续GET返回409。各来源在同一RR读取中固定本地版本，不能据此称不同来源是同批上游快照。
 
 - `performance/shops`原位补`refund_rate`、`promotion_spend/ctr/roi`；`refund_match`返回配对退款、成交额、店铺日、覆盖率、排除金额/日及缺退款日期。仅销售与退款均有值的同店同日参与，率为统计参考，M3-02未决不关闭。`promotion_channels`返回两渠道独立原值/来源比值、空项、缺适用店铺日及来源状态；花费累加、CTR用点击/曝光均有值的集合，官方/全店跨渠道成交包含关系未核时合计ROI为NULL，其他五店单渠道可显示来源参考ROI。
 - `GET /sales/targets?month&data_version`返回月/年度实际累计、缺销售店铺日；年度止于选月cutoff，不随经营自定义日期或经营选店变动。当前目标输入不可用，月/年目标、达成率和缺口NULL、`state=source_unavailable`。该端点尚不支持发布目标台账；取得可核字段、范围、单位后再实现真实目标接收/成员校验，不能将完成额或旧快照当目标。
 - `GET /sales/ratings?date_from&date_to&shop_ids?&data_version`：全局最新日六店卡片、不回找旧日；趋势按独立日期及可选名单返回原分/百分制分/状态。0～1乘100，旧口径/空项/缺日断线。`source`给实际范围，前端默认最新日及前29日、前三店。
 - `GET /sales/regions?date_from&date_to&shop_id?&data_version`：PG按原地区标签分组，返回items、totals、空项计数、无记录店铺日、source。买家按店铺日地区累加；客单价只用成交/买家均有值的集合；与聚水潭不相加。
 - `GET /sales/product-regions/filters?category?&search?&offset=0&limit=100&data_version`：候选由PG全范围搜索，limit上限200。排除分类规范化后的包材/儿童赠品/分类未设置；产品键为JSON数组[分类,style或sku,编码]，同名异码不合并；缺码仍计入全部汇总但不伪造产品身份。同键多个名称保留展示，不任取一条。
-- `GET /sales/product-regions?date_from&date_to&shop_id?&category?&product_key?&data_version`：独立筛选的PG地区汇总，四度量只合计已知值/全空NULL，原缺项计数保留；实退/实发只作来源期间参考比值，部分缺项标星，M3-03不关闭。搜索文本不传此端点，只有选择产品影响汇总。
+- `GET /sales/product-regions?date_from&date_to&shop_id?&category?&product_key?&data_version`：独立筛选的PG地区汇总，四度量只合计已知值/全空NULL，原缺项计数保留；实退/实发只作来源期间参考比值，部分缺项标星，M3-03不关闭。搜索文本不传此端点，只有选择产品影响汇总。四度量部分已知单元格标星，全空保持“—”；份额注明实发分母缺项。
 
-两类地区默认各自最新观察日；评分/地区/目标的失败只影响对应区块，旧参数晚到响应不显示。参数错误422，版本变化409，数据库不可用503，GET不读来源/启动任务。前端仅图坐标和进度条使用Number，金额和提示维持十进制字符串。
+两类地区默认各自最新观察日；评分/地区/目标的失败只影响对应区块，旧参数晚到响应不显示。参数错误422，版本变化409，数据库不可用503，GET不读来源/启动任务。来源同步失败时对应区块显示保留旧成功值与真实成功/尝试时间；底表存在排除店铺日的退款占比标“已匹配”。前端仅图坐标和进度条使用Number，金额和提示维持十进制字符串。
 
 ## 8. 来源接入、切换与更新契约
 

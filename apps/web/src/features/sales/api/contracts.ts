@@ -49,6 +49,14 @@ export const metricsSchema = z.object({
       excluded_sales: numeric,
       missing_dates: z.array(z.string()),
       state: z.string(),
+      source: z
+        .object({
+          state: z.string(),
+          last_success_at: z.string().nullable(),
+          last_attempt_status: z.string().nullable(),
+          last_attempt_at: z.string().nullable().optional(),
+        })
+        .optional(),
     })
     .nullable()
     .optional(),
@@ -66,6 +74,9 @@ export const metricsSchema = z.object({
           state: z.string(),
           observed_through: z.string().nullable(),
           source_updated_text: z.string().nullable(),
+          last_success_at: z.string().nullable().optional(),
+          last_attempt_status: z.string().nullable().optional(),
+          last_attempt_at: z.string().nullable().optional(),
         }),
       }),
     )
@@ -90,8 +101,9 @@ export const filtersSchema = z.object({
           observed_from: z.string().nullable(),
           observed_through: z.string().nullable(),
           source_updated_text: z.string().nullable(),
-          last_success_at: z.string().nullable(),
-          last_attempt_status: z.string().nullable(),
+          last_success_at: z.string().nullable().optional(),
+          last_attempt_status: z.string().nullable().optional(),
+          last_attempt_at: z.string().nullable().optional(),
         }),
       )
       .optional(),

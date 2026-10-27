@@ -14,6 +14,7 @@ import { SalesTargets } from "./components/SalesTargets";
 import { SalesRatings } from "./components/SalesRatings";
 import { SalesRegions } from "./components/SalesRegions";
 import { PromotionDetails } from "./components/PromotionDetails";
+import { SourceState } from "./components/SourceState";
 import { ShopTable } from "./components/ShopTable";
 import { count, fixed, localTime, money, percent } from "./format";
 import "./prototype.css";
@@ -247,10 +248,15 @@ export function SalesPage() {
               {money(data?.refund_match?.matched_refunds)} ÷ 对应成交金额{" "}
               {money(data?.refund_match?.matched_sales)}；匹配店铺日{" "}
               {data?.refund_match?.matched_days ?? "—"}、销售覆盖率{" "}
-              {percent(data?.refund_match?.sales_coverage)}、排除店铺日{" "}
+              {percent(data?.refund_match?.sales_coverage, 4)}、排除店铺日{" "}
               {data?.refund_match?.excluded_days ?? "—"} 及销售额{" "}
               {money(data?.refund_match?.excluded_sales)}
               。这是同日统计参考，日期及订单范围待核，缺失不补零。
+              <br />
+              <SourceState
+                source={data?.refund_match?.source ?? filters?.data.sources?.shop_refunds}
+                label="飞书退款"
+              />
             </p>
             <SalesRatings filters={filters} shop={scope.shop} onConflict={invalidateVersion} />
           </section>

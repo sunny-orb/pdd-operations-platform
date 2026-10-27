@@ -61,8 +61,13 @@ export function ShopTable({
               title: "退款占 GMV",
               key: "refund",
               dataIndex: "refund_rate",
-              render: (value) => (
-                <span title="同店同日统计参考，日期及订单范围待核">{percent(value)}</span>
+              render: (value, row) => (
+                <span
+                  title={`同店同日统计参考；已匹配${row.refund_match?.matched_days ?? 0}个店铺日，排除${row.refund_match?.excluded_days ?? 0}个店铺日；销售覆盖率${percent(row.refund_match?.sales_coverage, 4)}，日期及订单范围待核`}
+                >
+                  {percent(value)}
+                  {(row.refund_match?.excluded_days ?? 0) > 0 ? "（已匹配）" : ""}
+                </span>
               ),
             },
             { title: "点击率", dataIndex: "promotion_ctr", render: (value) => percent(value) },

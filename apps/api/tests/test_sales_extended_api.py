@@ -89,6 +89,7 @@ def test_vector_refund_and_channels(sales_pg, tmp_path):
     d = r.json()["data"]
     assert d["refund_rate"] == "0.200000000000"
     assert d["refund_match"]["matched_sales"] == "100.00" and d["refund_match"]["matched_days"] == 1
+    assert d["refund_match"]["excluded_sales"] == "0.00"
     assert d["promotion_spend"] == "12.00" and d["promotion_ctr"] == "0.054545454545"
     assert d["promotion_roi"] is None and len(d["promotion_channels"]) == 2
     assert len(r.json()["meta"]["input_versions"]) == 4
@@ -264,3 +265,49 @@ def test_selected_products_can_be_found_beyond_first_page(sales_pg, tmp_path):
         "/api/v1/sales/product-regions/filters", params={"data_version": v, "search": "0219"}
     ).json()["data"]
     assert remote["total"] == 1 and remote["products"][0]["code"] == "0219"
+
+
+def test_product_and_shop_region_capabilities_are_independent(sales_pg, tmp_path):
+    c = setup(sales_pg, tmp_path)
+    publish(sales_pg, tmp_path, "product_regions", [sample("product_regions")])
+    caps = c.get("/api/v1/sales/filters").json()["data"]["capabilities"]
+    assert caps["product_regions"] is True and caps["regions"] is False
+
+
+def test_shop_regions_do_not_enable_unpublished_product_regions(sales_pg, tmp_path):
+    c = setup(sales_pg, tmp_path)
+    publish(sales_pg, tmp_path, "shop_regions", [sample("shop_regions")])
+    caps = c.get("/api/v1/sales/filters").json()["data"]["capabilities"]
+    assert caps["regions"] is True and caps["product_regions"] is False
+
+
+def test_first_source_failure_remains_visible_without_published_version(sales_pg, tmp_path):
+    import pytest
+
+    from app.modules.sales.contracts import SalesError
+
+    c = setup(sales_pg, tmp_path)
+    store = ShopDailyStore(
+        sales_pg, archive_root=tmp_path / "refund", approved=window(), spec=SPECS["shop_refunds"]
+    )
+
+    def fail(heartbeat):
+        raise SalesError("SYNTHETIC_SOURCE_FAILURE")
+
+    with pytest.raises(SalesError):
+        store.run(fail)
+    info = c.get("/api/v1/sales/filters").json()["data"]["sources"]["shop_refunds"]
+    assert info["last_attempt_status"] == "failed"
+    assert info["last_attempt_at"] is not None and info["last_success_at"] is None
+
+
+def test_no_refund_match_keeps_known_excluded_sales(sales_pg, tmp_path):
+    c = setup(sales_pg, tmp_path)
+    d = c.get("/api/v1/sales/performance", params=params(c)).json()["data"]
+    assert d["refund_rate"] is None and d["refund_match"]["excluded_sales"] == "100.00"
+
+
+def test_single_star_channel_enables_partial_promotion(sales_pg, tmp_path):
+    c = setup(sales_pg, tmp_path)
+    publish(sales_pg, tmp_path, "shop_channel_star_shop", [sample("shop_channel_star_shop")])
+    assert c.get("/api/v1/sales/filters").json()["data"]["capabilities"]["promotion"] is True

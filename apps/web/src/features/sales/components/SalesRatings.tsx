@@ -1,3 +1,4 @@
+import { SourceState } from "./SourceState";
 import { useMemo, useState } from "react";
 import { Button, Card, Checkbox, DatePicker, Table } from "antd";
 import dayjs from "dayjs";
@@ -97,7 +98,9 @@ export function SalesRatings({
       <p className="rating-source">
         来源：ods_rpa_pdd_evaluation_overview_f · 字段 shop_rating_score · 来源创建时间原文：
         {data?.data.latest.map((r) => r.source_created_time_raw).find(Boolean) ?? "—"}
-        （时区未确认）。0–1 原值乘100展示；旧口径保留原值，空值不补零。
+        （时区未确认）。
+        <SourceState source={data?.data.source ?? source} label="店铺评分" />
+        。0–1 原值乘100展示；旧口径保留原值，空值不补零。
       </p>
       <div className="rating-trend-panel">
         <div className="rating-heading">

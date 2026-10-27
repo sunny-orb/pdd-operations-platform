@@ -160,10 +160,13 @@ class SalesService:
                         shop_daily=True,
                         targets="sales_targets" in snapshot["versions"],
                         refunds="shop_refunds" in snapshot["versions"],
-                        promotion="shop_channel_product_promotion" in snapshot["versions"],
+                        promotion=any(
+                            code in snapshot["versions"]
+                            for code in ("shop_channel_product_promotion", "shop_channel_star_shop")
+                        ),
                         ratings="shop_ratings" in snapshot["versions"],
                         regions="shop_regions" in snapshot["versions"],
-                        product_regions="shop_regions" in snapshot["versions"],
+                        product_regions="product_regions" in snapshot["versions"],
                     ),
                 ),
                 meta=meta(snapshot),

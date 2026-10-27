@@ -9,6 +9,7 @@ export const sourceSchema = z.object({
   source_updated_text: z.string().nullable(),
   last_success_at: z.string().nullable(),
   last_attempt_status: z.string().nullable(),
+  last_attempt_at: z.string().nullable().optional(),
 });
 export const targetsSchema = z.object({
   data: z.object({

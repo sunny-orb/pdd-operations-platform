@@ -266,3 +266,8 @@
   height: calc(12px * 21 / 13 + 8px);
   border: 0;
 }
+
+.m3-sales-scope .source-state-failed {
+  color: #a7342b;
+  font-weight: 600;
+}

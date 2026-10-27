@@ -1,3 +1,4 @@
+import { SourceState } from "./SourceState";
 import { useState } from "react";
 import { Button, DatePicker, Input, Select, Table } from "antd";
 import dayjs from "dayjs";
@@ -132,6 +133,12 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
       label={product ? "产品地区" : "地区交易"}
     />
   );
+  const partial = (value: string | null | undefined, missing: number, rendered: string) =>
+    value != null && missing > 0 ? (
+      <span title={`仅已知值合计，${missing}条来源记录缺此字段`}>{rendered}*</span>
+    ) : (
+      rendered
+    );
   const formatted = (field: string, value: string | null | undefined) =>
     field.includes("amount") ? money(value, true) : count(value);
   return (
@@ -329,24 +336,51 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                     {
                       title: "实发金额",
                       dataIndex: "actual_shipped_amount",
-                      render: (v) => money(v, true),
+                      render: (v, r) =>
+                        partial(v, r.null_counts.actual_shipped_amount ?? 0, money(v, true)),
                     },
-                    { title: "实发金额占比", dataIndex: "share", render: (v) => percent(v, 1) },
-                    { title: "实发件数", dataIndex: "actual_shipped_qty", render: count },
+                    {
+                      title: "实发金额占比",
+                      dataIndex: "share",
+                      render: (v, r) =>
+                        v != null &&
+                        ((r.null_counts.actual_shipped_amount ?? 0) > 0 ||
+                          (d?.null_counts.actual_shipped_amount ?? 0) > 0) ? (
+                          <span
+                            title={`占比按已知实发金额计算；分母缺失${d?.null_counts.actual_shipped_amount ?? 0}条，本地区缺失${r.null_counts.actual_shipped_amount ?? 0}条`}
+                          >
+                            {percent(v, 1)}*
+                          </span>
+                        ) : (
+                          percent(v, 1)
+                        ),
+                    },
+                    {
+                      title: "实发件数",
+                      dataIndex: "actual_shipped_qty",
+                      render: (v, r) => partial(v, r.null_counts.actual_shipped_qty ?? 0, count(v)),
+                    },
                     {
                       title: "实退金额",
                       dataIndex: "actual_returned_amount",
-                      render: (v) => money(v, true),
+                      render: (v, r) =>
+                        partial(v, r.null_counts.actual_returned_amount ?? 0, money(v, true)),
                     },
-                    { title: "实退件数", dataIndex: "actual_returned_qty", render: count },
+                    {
+                      title: "实退件数",
+                      dataIndex: "actual_returned_qty",
+                      render: (v, r) =>
+                        partial(v, r.null_counts.actual_returned_qty ?? 0, count(v)),
+                    },
                     {
                       title: "退款率",
                       dataIndex: "refund_rate",
                       render: (v, r) => (
                         <span title="来源期间参考占比，日期及实退归属待核">
                           {percent(v)}
-                          {r.null_counts.actual_shipped_amount > 0 ||
-                          r.null_counts.actual_returned_amount > 0
+                          {v != null &&
+                          (r.null_counts.actual_shipped_amount > 0 ||
+                            r.null_counts.actual_returned_amount > 0)
                             ? "*"
                             : ""}
                         </span>
@@ -358,7 +392,18 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                     {
                       title: "成交金额",
                       dataIndex: "transaction_amount",
-                      render: (v) => money(v, true),
+                      render: (v, r) => (
+                        <span className="region-sales">
+                          <i>
+                            <em
+                              style={{
+                                width: `${Math.min(100, Math.max(0, Number(r.share ?? 0) * 100))}%`,
+                              }}
+                            />
+                          </i>
+                          {money(v, true)}
+                        </span>
+                      ),
                     },
                     { title: "销售额占比", dataIndex: "share", render: (v) => percent(v, 1) },
                     { title: "成交订单数", dataIndex: "transaction_orders", render: count },
@@ -382,6 +427,8 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
               )
               .join("、")}
             ；仅合计已知值，不补零。
+            <br />
+            <SourceState source={d?.source ?? source} label="聚水潭地区" />
           </p>
         )}
       </div>
@@ -404,6 +451,8 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
         <p className="sales-footer">
           来源：bwd_rpa_pdd_region_sales_summary_pddht_f · 来源更新时间：
           {d?.source.source_updated_text ?? "—"}
+          <br />
+          <SourceState source={d?.source ?? source} label="后台地区" />
           。买家数按店铺、日期、地区累加，不跨日去重。客单价仅用成交金额/买家均有值的记录计算；当前筛选无记录店铺日{" "}
           {d?.missing_shop_days.length ?? "—"}，不补零。
         </p>

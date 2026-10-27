@@ -136,6 +136,13 @@ for lo, hi in [
             else None
         )
         decimal_equal(actual["refund_rate"], divided(num, summed(matched, "shop_revenue")))
+        matched_keys = {(r["shop_id"], r["business_date"]) for r in matched}
+        excluded = [r for r in rows if (r["shop_id"], r["business_date"]) not in matched_keys]
+        decimal_equal(
+            actual["refund_match"]["excluded_sales"],
+            summed(excluded, "shop_revenue") if excluded else Decimal(0) if rows else None,
+            money=True,
+        )
         promotion = [
             r
             for code in ("shop_channel_product_promotion", "shop_channel_star_shop")

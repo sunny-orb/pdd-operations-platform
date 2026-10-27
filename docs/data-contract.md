@@ -353,6 +353,40 @@ M1七指标、辅助链路、窗口/榜单、评分与风险的字段和计算�
 
 SKU身份、订单/售后事件及退款修订所需字段，现需从2.0允许的聚水潭加工和拼多多RPA来源重新定位。尚未取得可用表/字段交付，不列具体订单API字段或假设已有销售—售后事件链；F05和已有期间文件不能据此变成日事件事实。
 
+<a id="m3-source-access"></a>
+
+#### 3.3.1 M3当前来源位置与连接（2026-10-28）
+
+用户本轮提供并已实际只读连通的数仓入口：MySQL协议，`14.103.40.80:9030`，数据库`cubeappdata`，账号`ro`。密码仅用于本轮进程，不写文档、源码、命令行或前端。DBX可见已有`StarRocks_jevs`与本地项目管理连接；本轮未读取其私密配置或改动连接。DBX桌面已连通不代替服务运行身份的部署验收。
+
+保存源码使用`14.103.40.80:23307/starrocks`及Windows包装，属于另一个入口；本轮没有连接该端口，也未证明两个入口全部数据/权限等价。正式方案选本轮已核的9030入口，不照搬旧配置。下列五个视图定义均直投`lake.bi_datalake`中的同名对象，无附加JOIN或过滤；未进入底层目录或ETL。
+
+| M3逻辑输入       | 当前可用位置                                                                                         | 本轮实际证据及生效边界                                                                                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 店铺日经营       | `cubeappdata.ods_rpa_pdd_traffic_kanban_overview_f`，7列视图                                         | 首链唯一生效源；已验六店限定期间必要字段，详见下节；不由商品事实或F01替代                                                                                                                                           |
+| 店铺评分         | `cubeappdata.ods_rpa_pdd_evaluation_overview_f`，7列视图                                             | 字段及近期行可读；`dt`为VARCHAR，评分DOUBLE，`create_time`非修改水位；后续独立验收                                                                                                                                  |
+| 店铺商品推广概览 | `cubeappdata.ods_rpa_pdd_product_promotion_overview_f`，7列视图                                      | 字段及近期行可读；不是BWD商品推广明细，渠道范围及归因沿M2未决                                                                                                                                                       |
+| 明星店铺         | `cubeappdata.pdd_star_shop`，20列表                                                                  | 字段注释有元；近期只观察到一店，原型限官方店；未正式接入                                                                                                                                                            |
+| 店铺后台地区     | `cubeappdata.bwd_rpa_pdd_region_sales_summary_pddht_f`，12列视图                                     | 字段及近期行可读；五店有记录，箱包店该窗口未见行，不填零                                                                                                                                                            |
+| 聚水潭产品地区   | `cubeappdata.bwd_rpa_pdd_region_sales_summary_jst_f`，18列视图                                       | 经数仓取得聚水潭加工结果，不新增ERP直连；近期五店有记录，日期/实退归属仍受M3-03限制                                                                                                                                 |
+| 店铺退款F01      | [飞书销售日报](https://kocotree.feishu.cn/base/XGzTbd9xJaASV3soYnycMmf0nY3?table=tblISBHrFF4jFJqW)   | 浏览器现有用户身份可读；源码为`lark-cli base +record-list --as user`，必要投影为日期/平台/部门/店铺/统计退款金额及record_id。本机本轮PATH无lark-cli，未验证当前程序分页/授权；同店日是否含部门维度须核验，M3-02保留 |
+| 月度目标         | [源码目标表入口](https://kocotree.feishu.cn/base/XGzTbd9xJaASV3soYnycMmf0nY3?table=tblwEjKpt1k51M3j) | 原脚本按平台/年份/月份读取gmv目标；本轮直访再次跳回F01，未取得目标字段/记录。不能认定删除、无权限或目标为零，亦不拿F04完成额lookup充当目标                                                                          |
+| 推广历史补齐     | 原脚本引用的历史补齐清单及其来源说明                                                                 | 代码并非实时读飞书推广；清单仅作待追溯证据，本轮不读经营快照、不启用另一份来源；未来按第8节逐范围切源                                                                                                               |
+
+本轮仅在`base_%`对象注释中按销售/目标/拼多多/同比做限定元数据检索，未命中；不表示数仓没有镜像。F01与目标尚未定位经对账可替代的数仓表，不自动降级或双接。详细查询、源码行号及访问限制统一见[来源证据](source-evidence.md#m3-source-verification-20261028)。
+
+#### 3.3.2 店铺日首链的已核范围与接收契约
+
+- 核验范围固定为六店、`time_granularity='day'`、`2026-02-01 <= dt < 2026-10-28`。合计1,608条，每店268条，观察日均为2月1日至10月26日；该范围内店铺×日与来源id未见重复，dt均零点，六店原名与既有身份映射一致。只支持此窗口，不证明永久唯一键、上游不修订或全历史齐全。
+- 必要四项`成交金额/店铺访客数/成交买家数/成交订单数`全窗口检查未见空值或非法值；金额原表示为非负、最多两位小数，后三项为非负整数字符串。实施读取同时校验其余六键；其中客单价39条为缺值标记，规范为NULL并保留原值，不补零。非核心字段的null、空串、`-`、`--`、`—`视为缺失；其他非法数值拒绝发布，核心四项缺失仍阻断。
+- 完整读取的最小投影为`id,dt,time_granularity,shop_id,shop_name,updated_at`，加JSON上述十个明确键；原始键值保留，不收集`较前1天*`等未用于首链的字段。映射到`shop_daily_facts`既有十个度量列：四项核心及六项必要核对值；源客单/UV值/转化率只核对，不平均为正式率。金额单位沿用户已确认人民币元及M3-01原值约定，本轮未取得独立上游元/分标注，不把两位小数当单位证明。
+- 源id在单次接收投影中必须非空且唯一，作为`source_record_id`及版本内`source_row_key`；重复店铺日、未知店铺、冲突周期、核心字段非法时隔离并阻断该店铺日候选正式发布，不取第一/最后一条。源id跨修订稳定性尚未证明，不作为增量游标。
+- dt仅规范为来源日标签，非支付/发货事件证明；updated_at无时区，先保存原文，规范`source_updated_at=NULL`，不得补造来源时刻。上海时区用于项目业务日/经营日历与本地事件，不能反向证明源DATETIME时区。
+- 未发现来源交付批次、完成标记、可靠修订/删除事件。因此`upstream_revision/source_cursor/complete_through`保持空，完整性unknown；`dataset_versions.period_start/end`不得由请求窗口或min/max填造。日历缺口可显示，不能把记录齐全称上游业务齐全；本轮10月27日六店无观察行。
+- 技术接收建议：受控指定窗口必要投影前后各读一遍，比较全部内容而非只比COUNT/MAX；有限重试后仍不一致则不发布。相同内容观察两次仅证明本次投影稳定，不证明上游事务快照/齐数。范围内缺行不删除旧版事实，发现旧键消失/数值修订先留候选及差异，未解释删除不自动发布替换范围。
+
+首段正式发布固定六店与完整获准窗口，分窗读取不分窗切当前入口；缩小窗口的请求仅允许只读核验。后续局部补跑必须产生保留未覆盖历史的完整新版本，另行设计评审，不能把局部窗口覆盖全局shop_daily。
+
 ### 3.4 天气：与经营事实分开
 
 以下三张表登记为城市天气扩展候选，不能直接等同当前M6的全国天气发布文本；当前页面字段及实际来源只在[3.5.5](#355-m6-运营中心)维护。城市单位、维表、常年值/闰日等未决仅限制确需这些城市指标的扩展，不作为本页现有文本展示的业务必答项，也不授权扩大接入。
@@ -1415,7 +1449,7 @@ M1经营GET已按7.4实现，评分GET及固定基线试算按7.5实现；其他
 | M1诊断/风险    | `/products/diagnosis`、`/products/alerts`                                                                           | 证据、生成方式/时间、优先动作；告警事件ID、优先级、估算影响、规则版本、实际处理状态                                       | 不提供未授权写闭环；AI未接入                                                  |
 | M1明细         | `/products/days`                                                                                                    | 店铺商品日、运营资料匹配状态、基础计数/金额、去年对应值、转化、稳定分页                                                   | 同一逻辑事实，不另复制底表结果                                                |
 | M2推广         | `/promotion/filters`、`/promotion/overview`、`/promotion/trend`、`/promotion/days`、`/promotion/diagnosis`          | 区分店铺/商品模式；八指标、总/净归因额及ROI、实际窗口/覆盖、趋势；店铺渠道十列，商品漏斗/Top5/SOP及每日八列，输出组见下表 | 双模式展示契约见3.5.2；路径/DTO仍为候选，未实现；不新增页面未展示的结算指标   |
-| M3经营         | `/sales/filters`、`/sales/performance`、`/sales/trend`、`/sales/shops`                                              | 当前原型数仓店铺成交、访客/买家、同日匹配F01退款及覆盖、推广、店铺贡献/占比分母；不直接换用F01扣做单额或新增GSV主卡       | 源字段与处理、正式退款规则仍待确认                                            |
+| M3经营         | `/sales/filters`、`/sales/performance`、`/sales/shops`                                                              | 当前原型数仓店铺成交、访客/买家、同日匹配F01退款及覆盖、推广、店铺贡献/占比分母；不直接换用F01扣做单额或新增GSV主卡       | 源字段与处理、正式退款规则仍待确认                                            |
 | M3目标/月度    | `/sales/targets`、`/sales/months`                                                                                   | 月/年目标与实际、缺口/进度；独立月经营/去年比较与范围                                                                     | 目标有历史入口但现行契约未验，月表依赖未齐，不可假装已具备                    |
 | M3评分         | `/sales/ratings`、`/sales/ratings/trend`                                                                            | 店铺、评分日、数值、原始量纲、规则/来源版本及断点                                                                         | 页面已给出ods_rpa_pdd_evaluation_overview_f.shop_rating_score线索，源定义待验 |
 | M3地区         | `/sales/regions`、`/sales/product-regions`                                                                          | 后台地区成交额/订单/买家；聚水潭SKU实发/实退、期间/覆盖、品类/商品候选                                                    | 两资源口径和筛选独立，不能相加                                                |
@@ -1499,6 +1533,26 @@ GET `/products/scores`返回同一评分发布的分页卡片/数量，GET `/pro
 - 候选每次只取前100项，名称/ID搜索可定位其他商品；未出现在当前分页不代表选中商品失效，不据此清除。明确跨店身份才移除，维度变化按实际级联选项清理。清除真实日期恢复接口推荐范围，重置只影响所属范围；风险分页独立于总览条件，明细和评分由服务端分页。
 - 页面标明已观察截至日、未知完整日、覆盖缺口及PG最近成功时间；上游网页时间未采入本批时不冒填。入库失败保留上次发布并明确失败；无记录/未入库/字段缺失/真实0区分。评分待生成、失败、空新品及部分试算分开，不把“完整评分”标成正式模型已验收。即使相容结果仍ready，最近last_attempt_status=failed也单列失败时间/原因，继续保留相容结果。
 - 卡片与详情保留缺项原因、实际窗口、上架日期/首次观察日、固定参照背景及试算限制；建议动作仍是AI预留位置，诊断明确规则生成，处理期限/状态无真实记录仍留空/未启用。
+
+<a id="m3-daily-read-api"></a>
+
+### 7.7 M3首条店铺日查询契约
+
+仅以下三个GET，均在`/api/v1`下；不增加成交趋势、导出、目标编辑或同步HTTP入口。整页后续接口仍见7.2，首链之外字段保留但明确未接入。实施文件和测试见[专用方案](m3-sales-implementation.md)。
+
+| GET                  | 参数                                      | data内容                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/sales/filters`     | 无                                        | `shops[{shop_id,shop_name,display_name}]`、`months[{month,date_from,date_to}]`、`default_month`、`recommended_date_from/to`、`calendar_through`、`observed_from/through`、`capabilities`；months从实际获准经营日历起点至上海昨日/财年末，未有日事实不伪造月份数值。日历上界与观察上界分别给出                                                                               |
+| `/sales/performance` | `date_from,date_to,shop_id?,data_version` | `shop_revenue,shop_visitors,buyers,orders,buyer_conversion,aov`及该选择的`coverage`；八卡剩余四项`refund_rate,promotion_spend,promotion_ctr,promotion_roi`为null，配`field_states`说明not_connected/metric_unconfirmed，不当作零                                                                                                                                            |
+| `/sales/shops`       | `date_from,date_to,data_version`          | 全六店`items[{shop_id,shop_name,display_name,rank,shop_revenue,sales_share,shop_visitors,buyers,orders,buyer_conversion,aov,refund_rate,promotion_ctr,promotion_spend,promotion_roi,coverage,field_states}]`；返回贡献排名与底部十列同一集合，成交额降序、并列按冻结六店顺序；无已知成交额的店铺排末且rank=null，份额分母是六店已知成交额并注明覆盖；不接收单店筛选来缩分母 |
+
+`meta`统一含`data_version`（实际shop_daily版本ID）、`observed_from/through`、`completeness_state`、`complete_through`、`source_updated_text/source_updated_at`、`last_attempt_status/last_attempt_at/last_success_at`和`request_id`。`coverage`含`observed_days,missing_dates,field_null_counts,latest_observed_date,reason_code`及实际窗口，`missing_dates`使用`shop_id:日期`，按原型六店经营日历计算，仅表达未观察到记录；单店最新观察日取本店事实。shops另给`missing_shop_days`供全店缺日提示，前端不重算经营指标。金额/计数/比率均十进制字符串或null；排名、行数、天数为整数。比率统一输出最多12位小数/ROUND_HALF_UP，前端按原型位数格式化；不额外舍入金额中间值。
+
+金额与人次数只累计已知值；无行和全空返回null且分别给状态；真实零保留0；相关比率只用分子分母同时有效的店铺日集合，附字段覆盖，不把缺字段补零。分母≤0为空；不输出无证据的负经营量。名称展示沿原型六店别名，规范店名及原名仍保留。`capabilities`明确首段只启用shop_daily，其余区块保留未接入状态，不伪造可用目标或图表。
+
+filters成功读取当前已发布版本；尚无版本返回503 `SALES_NOT_CONNECTED`。调用者固定filters给出的版本；所有后续GET在REPEATABLE READ只读事务内同时检查当前入口、读事实/任务，版本不符409 `DATA_VERSION_CHANGED`，非法日期/店铺/超过获准窗口422，PG不可用503 `DATABASE_UNAVAILABLE`。前端取消整组旧请求并重取，最多一次自动恢复，连续冲突转明确重试；未知异常500带request_id。最近尝试失败仍可读同条件旧成功版本并说明失败时间，不回退样例或调用上游。
+
+默认月份及日期沿原型经营日历，截止取上海昨日与已配置财年末较早者；不能改成最大观察日以隐藏缺日。本次方案财年沿现行2026-02～2027-01，跨财年参数更新独立核对；不写成永久硬编码。首段不计算目标，即使目标未就绪也能查看基础销售。
 
 ## 8. 来源接入、切换与更新契约
 

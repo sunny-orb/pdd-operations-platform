@@ -8,6 +8,10 @@ const ProductsPage = lazy(() =>
   import("../features/products/ProductsPage").then((module) => ({ default: module.ProductsPage })),
 );
 
+const SalesPage = lazy(() =>
+  import("../features/sales/SalesPage").then((module) => ({ default: module.SalesPage })),
+);
+
 const modules = [
   {
     path: "/",
@@ -43,12 +47,20 @@ const modules = [
 
 /** 统一应用入口；无参数，展示基础导航与真实系统连接状态。 */
 export function App() {
-  const isProductPage = useLocation().pathname === "/products";
+  const pathname = useLocation().pathname;
+  const isProductPage = pathname === "/products";
+  const isSalesPage = pathname === "/sales" || pathname === "/store-sales";
   const status = useQuery({
-    enabled: !isProductPage,
+    enabled: !isProductPage && !isSalesPage,
     queryKey: ["system-status"],
     queryFn: ({ signal }) => getSystemStatus(signal),
   });
+  if (isSalesPage)
+    return (
+      <Suspense fallback={<p role="status">正在加载店铺销售看板…</p>}>
+        <SalesPage />
+      </Suspense>
+    );
   if (isProductPage)
     return (
       <Suspense fallback={<p role="status">正在加载商品看板…</p>}>

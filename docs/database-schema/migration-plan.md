@@ -120,3 +120,11 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 初始基线已应用本地项目库；冻结的versions/20261028_01和baseline_20261028不再为新结构变更改写。之后先新增revision、说明原因与前后兼容/回退，更新字典及相应SQL审阅生成流程，再在获准隔离环境验证、按授权执行。schema.sql目前是初始基线审阅稿，不能被当成未来所有revision的最终schema或直接重复执行。
 
 空结构具有30 PK、50 FK、23普通UQ、435 CHECK、4条件唯一索引、22补充普通索引（含PK/UQ自动索引共79个业务索引）、9函数和58保护触发器；这不是容量/查询时延承诺。完整发布器、同步/来源数据和业务口径验收不在本轮空结构实施范围。
+
+## M3首链运行权限revision（20261028_02）
+
+用户已授权本地M3首链。新增revision仅授予既有`pdd_ingest`六表SELECT/INSERT及必要列UPDATE：shops、shop_daily_facts、dataset_versions、coverage_records、task_runs、current_datasets；不新增业务表/字段/索引，不授DELETE、DDL、shops更新或其他业务域写入。pdd_app仍只读，初始基线20261028_01不改写。
+
+受控入口先运行`apps/api/.venv/bin/python scripts/db-v2.py verify`，再用`apps/api/.venv/bin/python scripts/upgrade-sales-local.py`；后者核对验证摘要、固定本地PG17/项目库/revision/既有授权，备份同集群schema后升级。首次接收入口为`apps/api/.venv/bin/python scripts/sync-sales.py --from 2026-02-01 --to 2026-10-27 --publish`；参数必须等于当次完整批准窗口，命令中的日期仅表示首批实际范围。密码隐藏输入，不保存到脚本或日志。只核验用`--verify-only`，同样拒绝批准窗口外读取。
+
+回退先停止M3接收任务，以受控本地连接在事务内降到20261028_01，精确撤销本revision新增GRANT；不删除任何业务数据/版本或当前指针，不回退初始建表revision。回退期间API已有只读授权可继续读取旧成功数据；重启写任务前重新升级02。异常修复保留旧成功指针及失败尝试，先核对权限/归档/解释后重跑完整批准窗口，不能手工改封版事实或清表。权限回退/重建与角色反例须在随机隔离PG执行，结果见validation。

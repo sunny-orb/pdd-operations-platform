@@ -59,7 +59,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     sql = render_sql()
     if args.check:
-        if not OUTPUT.exists() or OUTPUT.read_text(encoding="utf-8") != sql:
+        if not OUTPUT.exists() or OUTPUT.read_text(encoding="utf-8").rstrip() + "\n" != sql:
             raise SystemExit("schema.sql缺失或与冻结迁移不同，请离线重新生成")
         print("schema.sql与冻结迁移一致；未连接或操作数据库")
     else:

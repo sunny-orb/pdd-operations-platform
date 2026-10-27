@@ -1,0 +1,42 @@
+"""首链值对象；日期为来源标签，金额不经过二进制浮点。"""
+
+from dataclasses import dataclass
+from datetime import date
+from typing import Any
+
+
+class SalesError(Exception):
+    def __init__(self, code: str, status: int = 422):
+        self.code, self.status = code, status
+        super().__init__(code)
+
+
+@dataclass(frozen=True)
+class ReadWindow:
+    start: date
+    end: date
+    shop_ids: tuple[str, ...]
+
+    def __post_init__(self):
+        from .source_policy import APPROVED_START, FISCAL_END, SHOPS
+
+        if not APPROVED_START <= self.start <= self.end <= FISCAL_END:
+            raise SalesError("INVALID_WINDOW")
+        if self.shop_ids != tuple(SHOPS):
+            raise SalesError("INVALID_SHOP_SCOPE")
+
+
+@dataclass(frozen=True)
+class ShopDailyCandidate:
+    window: ReadWindow
+    rows: tuple[dict[str, Any], ...]
+    raw_rows: tuple[dict[str, Any], ...]
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class PublishResult:
+    run_id: str
+    version_id: str | None
+    reused: bool
+    status: str

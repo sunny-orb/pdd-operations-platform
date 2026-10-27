@@ -58,13 +58,14 @@ npm run dev
 
 Windows使用`py -3.12 -m venv apps/api/.venv`和`apps/api/.venv/Scripts/python.exe`。可将`apps/api/.env.example`复制为同目录`.env`配置应用数据库；数仓与应用数据库是不同资源。只提交无凭据模板。
 
-| 入口         | 地址 / 行为                                                                      |
-| ------------ | -------------------------------------------------------------------------------- |
-| 前端         | http://127.0.0.1:5173                                                            |
-| API / 文档   | http://127.0.0.1:8000 / http://127.0.0.1:8000/docs                               |
-| 存活 / 就绪  | `/health/live` / `/health/ready`；数据库未配置时就绪503是预期，不能冒充业务正常  |
-| M1真实商品页 | `/products`，代码保留；数据库重设计期间真实数据查询暂停                          |
-| M1开发样例   | `/products?preview=1`，仅DEV合成样例，持续标识非真实经营数据，不接数仓/数据库/AI |
+| 入口         | 地址 / 行为                                                                              |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| 前端         | http://127.0.0.1:5173                                                                    |
+| API / 文档   | http://127.0.0.1:8000 / http://127.0.0.1:8000/docs                                       |
+| M3店铺销售   | http://127.0.0.1:5173/sales ，`/store-sales`同页；首条真实店铺日链路，其他来源明确待接入 |
+| 存活 / 就绪  | `/health/live` / `/health/ready`；数据库未配置时就绪503是预期，不能冒充业务正常          |
+| M1真实商品页 | `/products`，代码保留；数据库重设计期间真实数据查询暂停                                  |
+| M1开发样例   | `/products?preview=1`，仅DEV合成样例，持续标识非真实经营数据，不接数仓/数据库/AI         |
 
 本机数据库使用Docker Desktop，整个项目共用`pdd_operations`，使用独立v2结构，容器和数据库本身保留。以下迁移/测试入口是旧实现的运行说明，重新设计期间暂停执行：
 
@@ -77,7 +78,7 @@ npm run db:test     # 前后端全套测试，PG合成数据仅进入pdd_operati
 
 连接地址`127.0.0.1:55432`；数据库`pdd_operations`，应用用户`pdd_app`。本地随机凭据保存在Git忽略的`var/local-db/docker.env`，应用连接自动生成到`apps/api/.env`，已有配置不会覆盖；不要粘贴或提交其内容。Docker Desktop的Containers中显示`pdd-operations-platform`项目，数据位于命名卷`pdd-operations-platform_postgres_data`，重启容器会保留。关闭容器无需删除卷；不要执行`down -v`。测试入口会在独立测试库演练迁移回退，不能改为业务库。
 
-本机DBX已添加“拼多多运营平台 · 本地管理”连接，使用现有`pdd_admin`管理账号，按用户要求支持手动查询、编辑数据和管理表结构，密码已获授权保存到DBX。该连接仍保留；`pdd_operations → public → 表`对应当前v2空结构；这是本地人工管理入口，API继续使用只读`pdd_app`，既有数仓连接未改动。项目正式结构变更仍通过Alembic维护。
+本机DBX已添加“拼多多运营平台 · 本地管理”连接，使用现有`pdd_admin`管理账号，按用户要求支持手动查询、编辑数据和管理表结构，密码已获授权保存到DBX。该连接仍保留；`pdd_operations → public → 表`对应当前v2结构，M3事实按不可变版本及当前入口查询；这是本地人工管理入口，API继续使用只读`pdd_app`，既有数仓连接未改动。项目正式结构变更仍通过Alembic维护。
 
 手工/非本地Docker部署仍可在`apps/api`使用具有迁移权限的`DATABASE_URL`执行`python -m alembic upgrade head`；服务启动不自动建表。该命令会按旧迁移重建旧结构；当前暂停，新链使用[独立v2方案](docs/database-schema/migration-plan.md)，不能混用。readiness成功只代表应用库可连接，不代表经营API或页面已完成对账。
 
@@ -108,6 +109,8 @@ npm run dev:api     # 本机API及 http://127.0.0.1:8000/docs
 只看商品前端可运行`npm run dev:web`。前端开发代理`/api`和`/health`，浏览器无需数据库地址。`/products`默认真实模式，失败明确报错并重试，不回退经营样例；开发模式可显式`?preview=1`或`?data=offline`。三套筛选独立，评分绑定自身结果版本；目录只取分页候选，搜索可定位未在前100项的商品。金额/比率保持原串，展示舍入用BigInt，只有图形坐标近似为Number，提示仍读原串。只读实机联调可显式执行`VITE_M1_LIVE_TEST=1 npm exec --workspace @pdd/web -- vitest run src/features/products/api/live.test.ts`，需本机API已启动；测试不写业务库。
 
 ## 检查与版本保存
+
+M3首条本地链路的三GET为`/api/v1/sales/filters`、`performance`、`shops`，由前端固定版本读取，GET不会访问来源或启动同步。手工接收入口为`apps/api/.venv/bin/python scripts/sync-sales.py --from YYYY-MM-DD --to YYYY-MM-DD --verify-only`；正式发布显式改为`--publish`，必须是完整批准六店窗口，不能用局部窗口覆盖历史。数仓密码隐藏输入；API仍只读，独立任务使用既有本地写入身份。批准范围、单位与完整性限制见[契约](docs/data-contract.md#m3-source-access)，权限升级/回退见[迁移方案](docs/database-schema/migration-plan.md)，源投影→PG→API只读复核用`apps/api/.venv/bin/python scripts/verify-sales-local.py`，须先启动本机API。必要输入、生产者源码及SHA归档在Git忽略的`var/ingestion/shop_daily/`，不自动清理；重放不执行归档代码，解释器不相容时拒绝，需使用归档的对应解释版本单独复核。
 
 代码检查入口：`npm run check`、`npm test`、`npm run build`、`npm run format:check`。仅文档改动按AGENTS检查文档，不重复声称历史测试是本轮通过。
 

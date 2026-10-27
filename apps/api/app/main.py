@@ -12,10 +12,12 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from app.api.products import router as products_router
+from app.api.sales import router as sales_router
 from app.api.system import router
 from app.core.config import Settings
 from app.db.connection import build_engine
 from app.modules.products.query import QueryError
+from app.modules.sales.contracts import SalesError
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def handle_validation_error(request: Request, error: RequestValidationError):
         return error_response(request, 422, "VALIDATION_ERROR", "请求参数不符合接口要求")
 
+    @application.exception_handler(SalesError)
+    async def handle_sales_error(request: Request, error: SalesError):
+        return error_response(
+            request, error.status, error.code, "店铺销售暂不可用，请检查来源状态或重试"
+        )
+
     @application.exception_handler(QueryError)
     async def handle_query_error(request: Request, error: QueryError):
         return error_response(request, error.status, error.code, error.message)
@@ -88,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(router)
     application.include_router(products_router)
+    application.include_router(sales_router)
     return application
 
 

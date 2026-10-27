@@ -1,0 +1,268 @@
+/* Ant Design承担控件与表格交互；仅在M3作用域内对齐原型，导航不改动。 */
+.m3-sales-scope {
+  min-height: 100vh;
+  padding: 0;
+  display: flow-root;
+  overflow-x: clip;
+}
+.m3-sales-scope .sales-dashboard {
+  padding-top: 0;
+}
+.m3-sales-scope .dashboard-section {
+  scroll-margin-top: 86px;
+}
+.m3-sales-scope .ant-card {
+  font-family: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+.m3-sales-scope .ant-card .ant-card-body {
+  padding: 0;
+}
+.m3-sales-scope .ant-card .ant-card-body::before,
+.m3-sales-scope .ant-card .ant-card-body::after {
+  display: none;
+}
+
+.m3-sales-scope .store-rating-card .ant-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.m3-sales-scope .target-summary .ant-card-body > span {
+  color: #c9def7;
+  font-size: 12px;
+}
+.m3-sales-scope .target-summary .ant-card-body > strong {
+  display: block;
+  margin: 18px 0 5px;
+  font-size: 24px;
+}
+.m3-sales-scope .target-summary .ant-card-body > p {
+  color: #d6e3f2;
+}
+.m3-sales-scope .prototype-select-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid #d1dbe7;
+  border-radius: 6px;
+  color: #42526b;
+  font-size: 12px;
+  font-weight: 600;
+}
+.m3-sales-scope .ant-select {
+  min-width: 110px;
+  font-size: 12px;
+}
+.m3-sales-scope .sales-filters .ant-select {
+  min-width: 142px;
+}
+.m3-sales-scope .ant-select .ant-select-selector {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 4px !important;
+  font-weight: inherit;
+}
+.m3-sales-scope .ant-select-outlined:not(.ant-select-customize-input) .ant-select-selector {
+  background: transparent;
+}
+.m3-sales-scope .ant-select-selection-item {
+  color: #102f57;
+}
+.m3-sales-scope .ant-picker {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 3px;
+  width: 144px;
+  font-family: inherit;
+}
+.m3-sales-scope .ant-picker .ant-picker-input > input {
+  min-width: 0;
+  font-size: 12px;
+  color: #102f57;
+  font-family: inherit;
+  padding: 0;
+}
+.m3-sales-scope .ant-picker-disabled .ant-picker-input > input {
+  color: #69778b;
+}
+.m3-sales-scope .ant-input-disabled {
+  background: transparent;
+  font-size: 12px;
+}
+.m3-sales-scope .ant-btn.reset-filter {
+  height: auto;
+}
+.m3-sales-scope .target-pending-progress {
+  display: block;
+  line-height: 1;
+  margin: 0;
+}
+.m3-sales-scope .ant-progress-line .ant-progress-outer {
+  display: block;
+}
+.m3-sales-scope .target-pending-progress .ant-progress-inner {
+  height: 9px;
+  background: #e9eef5;
+}
+.m3-sales-scope .sales-rank .ant-progress {
+  flex: 1;
+  margin: 0;
+  min-width: 15px;
+}
+.m3-sales-scope .sales-rank .ant-progress-inner {
+  height: 8px;
+  background: #e8eef7;
+}
+.m3-sales-scope .sales-rank .ant-progress-bg {
+  height: 8px !important;
+  background: #1768d9;
+}
+.m3-sales-scope .sales-rank .pending-rank {
+  padding: 24px 0;
+  color: #69778b;
+}
+.m3-sales-scope .region-date-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #1859af;
+  font-size: 12px;
+}
+.m3-sales-scope .product-region-filters .shop-filter,
+.m3-sales-scope .product-region-filters .product-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid #b8cfee;
+  border-radius: 6px;
+  background: #f8fbff;
+  font-size: 12px;
+  color: #1859af;
+}
+.m3-sales-scope .product-region-filters .product-search .ant-input {
+  width: 180px;
+  border: 0;
+}
+.m3-sales-scope .shop-table .ant-table,
+.m3-sales-scope .region-table .ant-table {
+  font-family: inherit;
+  border-radius: 0;
+  color: #42536c;
+  background: transparent;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table-thead > tr > th {
+  padding: 13px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #50617a;
+  background: #f0f5fb;
+  border-bottom: 1px solid #e3e9f1;
+  white-space: nowrap;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table-thead > tr > th::before {
+  display: none;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table-tbody > tr > td {
+  padding: 14px 12px;
+  border-bottom: 0;
+  border-top: 1px solid #e3e9f1;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table-tbody > tr.ant-table-placeholder > td {
+  padding: 28px 12px;
+  color: #69778b;
+  white-space: normal;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table-tbody > tr.selected > td {
+  background: #f0f6ff;
+}
+.m3-sales-scope .shop-table .ant-btn-link {
+  padding: 0;
+  height: auto;
+  font-size: 12px;
+  font-weight: 700;
+  color: #102f57;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table-container {
+  border-start-start-radius: 0;
+  border-start-end-radius: 0;
+}
+.m3-sales-scope .ant-alert {
+  margin-top: 16px;
+}
+.m3-sales-scope .source-coverage {
+  overflow-wrap: anywhere;
+}
+.m3-sales-scope .rating-trend-controls .ant-checkbox-wrapper {
+  font-size: 12px;
+  color: #69778b;
+}
+@media (max-width: 700px) {
+  .m3-sales-scope .section-heading {
+    flex-wrap: wrap;
+  }
+  .m3-sales-scope .sales-intro > div {
+    min-width: 0;
+  }
+  .m3-sales-scope .sales-filters > .prototype-select-label {
+    flex: 1;
+  }
+  .m3-sales-scope .sales-date-range {
+    max-width: 100%;
+  }
+  .m3-sales-scope .data-status {
+    white-space: normal;
+  }
+  .m3-sales-scope .store-ratings .ant-card {
+    min-width: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .m3-sales-scope * {
+    transition: none !important;
+  }
+}
+
+.m3-sales-scope .ant-card.target-summary {
+  color: #fff;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table.ant-table-small .ant-table-thead > tr > th {
+  padding: 13px 12px;
+  border-radius: 0;
+}
+.m3-sales-scope .ant-table-wrapper .ant-table.ant-table-small .ant-table-tbody > tr > td {
+  padding: 14px 12px;
+}
+
+.m3-sales-scope .ant-select {
+  height: 20px;
+  min-height: 20px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+}
+.m3-sales-scope .ant-select .ant-select-content {
+  padding: 0;
+  font-weight: inherit;
+}
+.m3-sales-scope .ant-select-disabled {
+  opacity: 1;
+  color: #69778b;
+}
+.m3-sales-scope .ant-picker {
+  min-height: 0;
+  /* 原型日期输入：12px字、21/13行高及8px原生内边距空间。 */
+  height: calc(12px * 21 / 13 + 8px);
+  border: 0;
+}

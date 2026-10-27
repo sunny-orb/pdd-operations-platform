@@ -86,3 +86,48 @@ def test_cross_shop_identity_conflicts_and_period_name_fallback(sales_pg, tmp_pa
         assert official["field_status"]["product_name"] == "conflict"
         scoped = options(repo, BoardQuery(q.start, q.end, shop="663599807", category="衣"))
         assert len(scoped["shops"]) == 2
+
+
+def test_real_pg_missing_listing_days_remain_partial(sales_pg, tmp_path):
+    from app.modules.product_board.source import normalize
+
+    end, rows = candidate()
+    rows["product_daily"] = normalize(
+        "product_daily",
+        [
+            dict(
+                z_id=1,
+                shop_id="663599807",
+                spu_id="123",
+                dt="2026-10-26",
+                time_granularity="day",
+                transaction_amount="100",
+            ),
+            dict(
+                z_id=2,
+                shop_id="663599807",
+                spu_id="123",
+                dt="2026-10-19",
+                time_granularity="day",
+                transaction_amount="100",
+            ),
+            dict(
+                z_id=3,
+                shop_id="663599807",
+                spu_id="123",
+                dt="2025-10-26",
+                time_granularity="day",
+                transaction_amount="100",
+            ),
+        ],
+        end,
+    )
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, rows))
+    with snapshot(sales_pg) as repo:
+        lid = repo.rows(end, end)[0]["listing_id"]
+        result = overview(repo, BoardQuery(date(2026, 10, 20), end, products=(lid,)))
+        assert result["metrics"]["revenue"]["value"] == Decimal("100")
+        assert result["metrics"]["revenue"]["status"] == "partial"
+        assert result["metrics"]["revenue"]["mom"] is None
+        assert result["metrics"]["revenue"]["yoy"] is None
+        assert result["health"]["tone"] == "neutral"

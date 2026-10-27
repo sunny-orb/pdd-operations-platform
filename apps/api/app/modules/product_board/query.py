@@ -77,15 +77,22 @@ def matches(item, q):
     )
 
 
-def scope(repo, q):
+def scope(repo, q, *, with_members=False):
     q.validate(repo)
     rows = repo.rows(repo.start, repo.end)
-    info, _ = labels([r for r in rows if q.start <= r["business_date"] <= q.end], repo.profiles())
+    profiles = repo.profiles()
+    info, _ = labels([r for r in rows if q.start <= r["business_date"] <= q.end], profiles)
     groups = defaultdict(list)
     for row in rows:
         groups[row["listing_id"]].append(row)
     selected = {k: v for k, v in info.items() if matches(v, q)}
-    return selected, {k: groups[k] for k in selected}
+    result = selected, {k: groups[k] for k in selected}
+    if with_members:
+        # 固定收到的范围内匹配过的店集合，不随本/比较期缺行收缩。
+        all_info, _ = labels(rows, profiles)
+        members = {k: v["shop_id"] for k, v in all_info.items() if matches(v, q)}
+        return *result, members
+    return result
 
 
 def selected_rows(groups, start, end):
@@ -105,8 +112,45 @@ def comparison(current, baseline, keys, map_day):
     )
 
 
+METRIC_INPUTS = {
+    "revenue": ("product_revenue",),
+    "visitors": ("visitors",),
+    "favorites": ("favorites",),
+    "buyers": ("buyers",),
+    "units": ("units",),
+    "aov": ("product_revenue", "buyers"),
+    "conversion": ("buyers", "visitors"),
+}
+
+
+def calendar_covered(rows, start, end, products, shops):
+    """显式K或固定店集合的日历覆盖；不将缺记录补零或认定来源全集完整。"""
+    members = set(products or shops)
+    key = "listing_id" if products else "source_shop_id"
+    actual = {(r[key], r["business_date"]) for r in rows}
+    expected = {
+        (member, start + timedelta(days=i))
+        for member in members
+        for i in range((end - start).days + 1)
+    }
+    return bool(expected) and actual == expected
+
+
+def mark_calendar(values, covered):
+    if not covered:
+        for value in values.values():
+            if value["status"] == "observed":
+                value.update(status="partial", reason="所选范围缺店铺日或商品日，仅显示已观察小计")
+    return values
+
+
 def overview(repo, q):
-    info, groups = scope(repo, q)
+    info, groups, members = scope(repo, q, with_members=True)
+    shops = set(members.values())
+
+    def covered(rows, start, end):
+        return calendar_covered(rows, start, end, q.products, shops)
+
     current = selected_rows(groups, q.start, q.end)
     n = (q.end - q.start).days + 1
     pstart, pend = q.start - timedelta(days=n), q.start - timedelta(days=1)
@@ -120,19 +164,19 @@ def overview(repo, q):
         aggregate(year, daily=n == 1),
         aggregate(past, daily=n == 1),
     )
+    current_covered = covered(current, q.start, q.end)
+    past_covered = covered(past, pstart, pend)
+    year_covered = bool(ys and ye) and covered(year, ys, ye)
+    mark_calendar(now, current_covered)
     metrics = {}
     for key, label, kind in METRICS:
-        fields = {
-            "revenue": ("product_revenue",),
-            "visitors": ("visitors",),
-            "favorites": ("favorites",),
-            "buyers": ("buyers",),
-            "units": ("units",),
-            "aov": ("product_revenue", "buyers"),
-            "conversion": ("buyers", "visitors"),
-        }[key]
-        yc = comparison(current, year, fields, previous_year)
-        pc = comparison(current, past, fields, lambda d: d - timedelta(days=n))
+        fields = METRIC_INPUTS[key]
+        yc = current_covered and year_covered and comparison(current, year, fields, previous_year)
+        pc = (
+            current_covered
+            and past_covered
+            and comparison(current, past, fields, lambda d: d - timedelta(days=n))
+        )
         value = now[key]
         metrics[key] = dict(
             value,
@@ -155,14 +199,23 @@ def overview(repo, q):
         day = q.start + timedelta(days=i)
         a = aggregate(bydate[day], daily=True)
         b = aggregate(byyear[previous_year(day)], daily=True)
-        ok = comparison(
-            bydate[day], byyear[previous_year(day)], ("product_revenue",), previous_year
+        old_day = previous_year(day)
+        ok = (
+            covered(bydate[day], day, day)
+            and bool(old_day)
+            and covered(byyear[old_day], old_day, old_day)
         )
         series.append(
             dict(
                 date=day,
                 values={k: a[k]["value"] for k, _, _ in METRICS},
-                previous={k: b[k]["value"] if ok else None for k, _, _ in METRICS},
+                previous={
+                    k: b[k]["value"]
+                    if ok
+                    and comparison(bydate[day], byyear[old_day], METRIC_INPUTS[k], previous_year)
+                    else None
+                    for k, _, _ in METRICS
+                },
             )
         )
     windows = []
@@ -170,10 +223,20 @@ def overview(repo, q):
         a = q.end - timedelta(days=days - 1)
         b = a - timedelta(days=days)
         r1, r0 = selected_rows(groups, a, q.end), selected_rows(groups, b, a - timedelta(days=1))
-        good = comparison(
-            r1, r0, ("product_revenue",), lambda d, days=days: d - timedelta(days=days)
-        )
         av, bv = aggregate(r1), aggregate(r0)
+        current_ok = covered(r1, a, q.end)
+        calendar_ok = current_ok and covered(r0, b, a - timedelta(days=1)) and b >= repo.start
+        mark_calendar(av, current_ok)
+        period_metrics = {}
+        for k, _, _ in METRICS:
+            good = calendar_ok and comparison(
+                r1, r0, METRIC_INPUTS[k], lambda d, days=days: d - timedelta(days=days)
+            )
+            period_metrics[k] = dict(
+                av[k],
+                change=compare(av[k]["value"], bv[k]["value"]) if good else None,
+                comparison_status="observed_reference" if good else "missing_comparable_rows",
+            )
         windows.append(
             dict(
                 days=days,
@@ -181,15 +244,7 @@ def overview(repo, q):
                 end=q.end,
                 previous_start=b,
                 previous_end=a - timedelta(days=1),
-                metrics={
-                    k: dict(
-                        value=av[k]["value"],
-                        change=compare(av[k]["value"], bv[k]["value"])
-                        if good and b >= repo.start
-                        else None,
-                    )
-                    for k, _, _ in METRICS
-                },
+                metrics=period_metrics,
             )
         )
     seven = q.end - timedelta(days=6)
@@ -288,26 +343,12 @@ def overview(repo, q):
         unique = {r[field] for r in info.values() if r[field]}
         selection[field] = next(iter(unique)) if len(unique) == 1 else None
 
-    rev, conv, aov = (metrics[k]["yoy"] for k in ("revenue", "conversion", "aov"))
+    # 当前来源没有完整日证明：数值观察可展示，健康度不越过来源门禁。
     health = dict(
         title="增长待验证",
         tone="neutral",
-        detail="去年同期缺少可比基数，结合环比和近7/14/30日趋势判断。",
+        detail="来源完整性尚未确认；同比、环比仅在日历与必需字段齐备时显示观察比较，暂不发布健康度定性。",
     )
-    if rev is not None and rev > 0 and any(v is not None and v < 0 for v in (conv, aov)):
-        health = dict(
-            title="规模增长、效率承压",
-            tone="watch",
-            detail="交易额同比增长，但转化率或客单价下降，优先复核效率。",
-        )
-    elif rev is not None and rev < 0:
-        health = dict(
-            title="规模承压", tone="risk", detail="交易额同比下滑，结合风险清单优先处理高影响问题。"
-        )
-    elif rev is not None and rev > 0 and conv is not None and aov is not None:
-        health = dict(
-            title="增长健康", tone="healthy", detail="交易额增长，转化率与客单价未出现同步下滑。"
-        )
     return dict(
         metrics=metrics,
         comparison_series=comparison_series,
@@ -501,15 +542,7 @@ def options(repo, q, selected_ids=(), new_only=False):
     info, _ = scope(
         repo, replace(q, shop="", operator="", category="", level="", products=(), keyword="")
     )
-    values = [
-        r
-        for r in info.values()
-        if (not new_only or r["level"] == "新品")
-        and (
-            not q.keyword
-            or q.keyword.casefold() in f"{r['product_name'] or ''} {r['product_id']}".casefold()
-        )
-    ]
+    values = [r for r in info.values() if (not new_only or r["level"] == "新品")]
     selected = [
         dict(
             value=lid,
@@ -523,10 +556,28 @@ def options(repo, q, selected_ids=(), new_only=False):
     ]
     shops = sorted({(r["shop_id"], r["shop_name"]) for r in values})
     shop_rows = [r for r in values if not q.shop or r["shop_id"] == q.shop]
-    operator_rows = [r for r in shop_rows if not q.operator or r["operator"] == q.operator]
-    category_rows = [r for r in operator_rows if not q.category or r["category"] == q.category]
-    candidates = [r for r in category_rows if not q.level or r["level"] == q.level]
+    operator = q.operator if any(r["operator"] == q.operator for r in shop_rows) else ""
+    operator_rows = [r for r in shop_rows if not operator or r["operator"] == operator]
+    category = q.category if any(r["category"] == q.category for r in operator_rows) else ""
+    category_rows = [r for r in operator_rows if not category or r["category"] == category]
+    level = q.level if any(r["level"] == q.level for r in category_rows) else ""
+    candidates = [r for r in category_rows if not level or r["level"] == level]
+    candidate_ids = {r["listing_id"] for r in candidates}
+    selection = dict(
+        operator=operator,
+        category=category,
+        level=level,
+        products=[lid for lid in selected_ids if lid in candidate_ids],
+    )
+    # 搜索及分页只缩小当前商品候选，不删除仍有效的上游/已选范围。
+    candidates = [
+        r
+        for r in candidates
+        if not q.keyword
+        or q.keyword.casefold() in f"{r['product_name'] or ''} {r['product_id']}".casefold()
+    ]
     return dict(
+        selection=selection,
         selected_products=selected,
         shops=[dict(value=k, label=v) for k, v in shops],
         operators=sorted({r["operator"] for r in shop_rows if r["operator"]}),

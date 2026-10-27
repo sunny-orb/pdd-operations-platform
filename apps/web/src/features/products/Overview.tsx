@@ -1,9 +1,16 @@
 import { Empty, Table, Tag } from "antd";
 import type { Board } from "./contracts";
+import type { Scope } from "./scope";
 import { change, format } from "./format";
 import { MiniTrend, Trend } from "./Chart";
 
-export function Brief({ data }: { data?: Board }) {
+export function Brief({
+  data,
+  onSelect,
+}: {
+  data?: Board;
+  onSelect?: (patch: Partial<Scope>) => void;
+}) {
   const brief = data?.brief;
   const window = brief ? `${brief.start} 至 ${brief.end}` : "等待来源期间";
   return (
@@ -36,14 +43,19 @@ export function Brief({ data }: { data?: Board }) {
             <small>{window}</small>
             <div className="conclusion-list">
               {brief?.categories.map((r, i) => (
-                <div className="conclusion-row" key={r.category}>
+                <button
+                  type="button"
+                  className="conclusion-row"
+                  key={r.category}
+                  onClick={() => onSelect?.({ category: r.category, products: [] })}
+                >
                   <b>
                     {i + 1}. {r.category}
                   </b>
                   <small>
                     {format(r.revenue, "currency")} · 较前7日 {change(r.growth)}
                   </small>
-                </div>
+                </button>
               ))}
               {!brief?.categories.length && <p>暂无可排序的品类数据</p>}
             </div>
@@ -53,7 +65,12 @@ export function Brief({ data }: { data?: Board }) {
             <small>{window}</small>
             <div className="conclusion-list">
               {brief?.products.map((r, i) => (
-                <div className="conclusion-row" key={r.listing_id}>
+                <button
+                  type="button"
+                  className="conclusion-row"
+                  key={r.listing_id}
+                  onClick={() => onSelect?.({ products: [r.listing_id] })}
+                >
                   <b>
                     {i + 1}. {r.product_name ?? r.product_id}
                   </b>
@@ -63,7 +80,7 @@ export function Brief({ data }: { data?: Board }) {
                   <small>
                     {format(r.revenue, "currency")} · 较前7日 {change(r.growth)}
                   </small>
-                </div>
+                </button>
               ))}
               {!brief?.products.length && <p>暂无可排序的商品数据</p>}
             </div>
@@ -73,7 +90,12 @@ export function Brief({ data }: { data?: Board }) {
             <small>所选期间累计交易额 · 风险截至 {brief?.end ?? "—"}</small>
             <div className="conclusion-list">
               {brief?.risks.map((r) => (
-                <div className="conclusion-row" key={r.listing_id}>
+                <button
+                  type="button"
+                  className="conclusion-row"
+                  key={r.listing_id}
+                  onClick={() => onSelect?.({ products: [r.listing_id] })}
+                >
                   <b>{r.product_name ?? r.product_id}</b>
                   <small>
                     <span className={`priority ${r.alert.priority.toLowerCase()}`}>
@@ -81,7 +103,7 @@ export function Brief({ data }: { data?: Board }) {
                     </span>{" "}
                     {r.alert.label} · 累计交易 {format(r.period_revenue, "currency")}
                   </small>
-                </div>
+                </button>
               ))}
               {!brief?.risks.length && (
                 <p>{data ? "当前观察范围暂无满足条件的异常" : "等待风险输入"}</p>
@@ -93,7 +115,12 @@ export function Brief({ data }: { data?: Board }) {
             <small>相邻两个7日观察窗 · {window}</small>
             <div className="conclusion-list">
               {brief?.rising.map((r) => (
-                <div className="conclusion-row" key={r.listing_id}>
+                <button
+                  type="button"
+                  className="conclusion-row"
+                  key={r.listing_id}
+                  onClick={() => onSelect?.({ products: [r.listing_id] })}
+                >
                   <b>{r.product_name ?? r.product_id}</b>
                   <small>
                     {format(r.revenue, "currency")} · 支付转化 {format(r.conversion, "percent")}
@@ -101,7 +128,7 @@ export function Brief({ data }: { data?: Board }) {
                   <small>
                     前7日 {format(r.previous_revenue, "currency")} · 环比 {change(r.growth)}
                   </small>
-                </div>
+                </button>
               ))}
               {!brief?.rising.length && <p>暂无具备正基数且观察齐全的起势新品</p>}
             </div>
@@ -126,7 +153,7 @@ export function Health({ data }: { data?: Board }) {
       </div>
       <p>{data?.health.detail ?? "等待相容本期与去年同期数据。"}</p>
       <small>
-        判定规则：交易额同比增长但转化率或客单价下降，标记为“规模增长、效率承压”。比较仅为已匹配观察记录。
+        判定规则：来源完整性和所选日历、必需字段齐备后，才启用“规模增长、效率承压”。当前仅展示观察数值。
       </small>
     </section>
   );
@@ -205,7 +232,12 @@ export function Trends({ data, active }: { data?: Board; active: string[] }) {
             <div className="period-stat" key={days}>
               <span>近 {days} 日</span>
               <b>{format(period?.metrics[metric]?.value, definition?.type ?? "currency")}</b>
-              <small>{change(period?.metrics[metric]?.change)}</small>
+              <small title={period?.metrics[metric]?.reason ?? "相邻等长观察窗"}>
+                {change(period?.metrics[metric]?.change)}
+              </small>
+              {period?.metrics[metric]?.status === "partial" && (
+                <small>已观察小计 · 覆盖不全</small>
+              )}
             </div>
           );
         })}
@@ -335,7 +367,12 @@ export function Risks({ data }: { data?: Board }) {
         </>
       ),
     },
-    { title: "异常指标", key: "label", width: 135, render: (_: unknown, r: Row) => r.alert.label },
+    {
+      title: "异常指标",
+      key: "label",
+      width: 135,
+      render: (_: unknown, r: Row) => <span title={r.alert.basis}>{r.alert.label}</span>,
+    },
     {
       title: "当前值",
       key: "now",
@@ -358,7 +395,11 @@ export function Risks({ data }: { data?: Board }) {
       title: "近7日趋势",
       key: "trend",
       width: 120,
-      render: (_: unknown, r: Row) => <MiniTrend values={r.alert.trend} />,
+      render: (_: unknown, r: Row) => (
+        <span title={r.alert.basis}>
+          <MiniTrend values={r.alert.trend} />
+        </span>
+      ),
     },
     {
       title: "累计交易额",
@@ -404,16 +445,16 @@ export function Risks({ data }: { data?: Board }) {
           <span>可执行风险清单</span>
           <b>异常、影响金额与行动闭环</b>
           <small>
-            仅纳入最小样本达标且近8日观察齐全商品；预计损失为规则估算，人工期限/状态尚未启用。
+            仅纳入最小样本达标且近8日观察齐全商品；转化率为订单÷访客，区别于主卡买家转化；预计损失为规则估算，人工期限/状态尚未启用。
           </small>
         </div>
         <div className="priority-policy">
           <b>P0</b>
           <span>爆品且严重流量下滑</span>
           <b>P1</b>
-          <span>有流量无成交、严重转化/流量下滑</span>
+          <span>有流量无成交、严重订单转化/流量下滑</span>
           <b>P2</b>
-          <span>中度转化或流量下滑</span>
+          <span>中度订单转化或流量下滑</span>
         </div>
       </div>
       <Table

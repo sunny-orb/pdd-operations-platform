@@ -162,7 +162,7 @@ def _risk(rows, end, top):
         action = "核查价格、优惠、评价、详情页和商品可售状态。"
     elif v >= 100 and cb and cv is not None and cv <= cb * D(".7"):
         label, priority, score, now, baseline, kind, field = (
-            "严重转化下滑",
+            "严重订单转化下滑",
             "P1",
             90,
             cv,
@@ -170,7 +170,7 @@ def _risk(rows, end, top):
             "percent",
             "conversion",
         )
-        reasons = ["转化率下滑", "价格/详情页待核查"]
+        reasons = ["订单转化率下滑", "价格/详情页待核查"]
         action = "优先复核价格、优惠、主图、评价与详情页承接。"
     elif avg >= 30 and drop is not None and drop <= D("-.4") and avg - v >= 30:
         priority = "P0" if top and po >= 10 else "P1"
@@ -186,7 +186,7 @@ def _risk(rows, end, top):
         action = "检查活动状态、素材、推广计划与自然流量入口变化。"
     elif v >= 100 and cb and cv is not None and cv <= cb * D(".85"):
         label, priority, score, now, baseline, kind, field = (
-            "中度转化下滑",
+            "中度订单转化下滑",
             "P2",
             70,
             cv,
@@ -194,7 +194,7 @@ def _risk(rows, end, top):
             "percent",
             "conversion",
         )
-        reasons = ["转化率下滑", "商品承接待优化"]
+        reasons = ["订单转化率下滑", "商品承接待优化"]
         action = "复核优惠、详情页承接和商品可售状态，隔日复盘。"
     elif avg >= 30 and drop is not None and drop <= D("-.2") and avg - v >= 20:
         label, priority, score, now, baseline, kind, field = (
@@ -245,5 +245,5 @@ def _risk(rows, end, top):
         action=action,
         deadline=None,
         status="未启用",
-        basis="规则估算，来源完整性未知",
+        basis="订单转化=支付订单数÷商品访客数；规则估算，来源完整性未知",
     )

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, DatePicker, Input, Select, Space } from "antd";
 import dayjs from "dayjs";
-import type { Scope, ScopeName } from "./scope";
+import { validDate, type Scope, type ScopeName } from "./scope";
 import { useOptions, type ProductsState } from "./data";
 
 export function Filters({
@@ -16,6 +16,20 @@ export function Filters({
   const [needle, setNeedle] = useState("");
   const result = useOptions(scope, state, needle, name);
   const first = result.data?.pages[0];
+  useEffect(() => {
+    const selection = first?.selection;
+    if (
+      !result.isFetching &&
+      !result.error &&
+      selection &&
+      (selection.operator !== scope.operator ||
+        selection.category !== scope.category ||
+        selection.level !== scope.level ||
+        selection.products.join() !== scope.products.join())
+    ) {
+      state.change(name, { ...selection, page: 1 });
+    }
+  }, [first, result.isFetching, result.error, scope, state, name]);
   const products = result.data?.pages.flatMap((p) => p.products) ?? [];
   const change = (patch: Partial<Scope>) => state.change(name, { ...patch, page: 1 });
   const label = name === "main" ? "总览" : name === "score" ? "评分" : "明细";
@@ -31,19 +45,7 @@ export function Filters({
       placeholder={`全部${placeholder}`}
       options={values}
       loading={result.isFetching}
-      onChange={(value) =>
-        change({
-          [field]: value ?? "",
-          products: [],
-          ...(field === "shop"
-            ? { operator: "", category: "", level: "" }
-            : field === "operator"
-              ? { category: "", level: "" }
-              : field === "category"
-                ? { level: "" }
-                : {}),
-        })
-      }
+      onChange={(value) => change({ [field]: value ?? "" })}
     />
   );
   const strings = (values: string[] | undefined) =>
@@ -67,27 +69,27 @@ export function Filters({
         <>
           <DatePicker
             aria-label={`${label}开始日期`}
-            value={scope.from ? dayjs(scope.from) : null}
+            value={validDate(scope.from) ? dayjs(scope.from) : null}
             allowClear={false}
             minDate={state.metadata.data ? dayjs(state.metadata.data.date_from) : undefined}
             maxDate={state.metadata.data ? dayjs(state.metadata.data.date_to) : undefined}
             onChange={(value) => {
               if (value) {
                 const from = value.format("YYYY-MM-DD");
-                change({ from, ...(from > scope.to ? { to: from } : {}) });
+                change({ from });
               }
             }}
           />
           <DatePicker
             aria-label={`${label}结束日期`}
-            value={scope.to ? dayjs(scope.to) : null}
+            value={validDate(scope.to) ? dayjs(scope.to) : null}
             allowClear={false}
             minDate={state.metadata.data ? dayjs(state.metadata.data.date_from) : undefined}
             maxDate={state.metadata.data ? dayjs(state.metadata.data.date_to) : undefined}
             onChange={(value) => {
               if (value) {
                 const to = value.format("YYYY-MM-DD");
-                change({ to, ...(to < scope.from ? { from: to } : {}) });
+                change({ to });
               }
             }}
           />

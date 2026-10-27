@@ -14,11 +14,11 @@ export type Scope = {
 export type ScopeName = "main" | "score" | "detail";
 export function readScope(p: URLSearchParams, name: ScopeName, from: string, to: string): Scope {
   const get = (key: string) => p.get(`${name}_${key}`) ?? "";
-  const start = get("from") || from,
-    end = get("to") || to;
+  const start = get("from") || get("to") || from,
+    end = get("to") || get("from") || to;
   return {
-    from: start <= end ? start : end,
-    to: start <= end ? end : start,
+    from: start,
+    to: end,
     shop: get("shop"),
     operator: get("operator"),
     category: get("category"),
@@ -34,6 +34,18 @@ export function readScope(p: URLSearchParams, name: ScopeName, from: string, to:
           : 25,
     judgement: get("judgement"),
   };
+}
+export function validDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+}
+export function scopeError(scope: Scope, min?: string, max?: string): string | null {
+  if (!validDate(scope.from) || !validDate(scope.to)) return "请输入有效日期（YYYY-MM-DD）。";
+  if (scope.to < scope.from) return "结束日期不能早于开始日期，请修改后再查询。";
+  if ((min && scope.from < min) || (max && scope.to > max))
+    return "日期超出当前已接收范围，请修改后再查询。";
+  return null;
 }
 export function writeScope(params: URLSearchParams, name: ScopeName, scope: Scope) {
   const next = new URLSearchParams(params);

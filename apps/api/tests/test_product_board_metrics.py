@@ -86,3 +86,21 @@ def test_year_mapping_is_linear_in_observed_rows(monkeypatch):
     monkeypatch.setattr(query, "previous_year", counted)
     query.overview(repo, query.BoardQuery(start, end))
     assert calls < 15000, "同比日期映射不得对每条去年记录重复扫描全部本期记录"
+
+
+def test_risk_conversion_labels_name_order_numerator():
+    end = date(2026, 10, 26)
+    rows = [
+        dict(
+            business_date=end - timedelta(days=i),
+            visitors=200,
+            orders=20,
+            product_revenue=Decimal("100"),
+        )
+        for i in range(8)
+    ]
+    for orders, label in ((10, "严重订单转化下滑"), (16, "中度订单转化下滑")):
+        rows[0]["orders"] = orders
+        value = risk(rows, end, False)
+        assert value["label"] == label
+        assert "订单" in value["basis"] and "访客" in value["basis"]

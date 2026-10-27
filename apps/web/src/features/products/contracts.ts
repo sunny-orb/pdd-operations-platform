@@ -147,7 +147,16 @@ export const board = z.object({
       days: z.number(),
       start: z.string(),
       end: z.string(),
-      metrics: z.record(z.string(), z.object({ value: decimal, change: decimal })),
+      metrics: z.record(
+        z.string(),
+        z.object({
+          value: decimal,
+          change: decimal,
+          status: z.string(),
+          reason: z.string().nullable(),
+          comparison_status: z.string(),
+        }),
+      ),
     }),
   ),
   health: z.object({ title: z.string(), tone: z.string(), detail: z.string() }),
@@ -210,6 +219,12 @@ export const dayPage = z.object({
   }),
 });
 export const options = z.object({
+  selection: z.object({
+    operator: z.string(),
+    category: z.string(),
+    level: z.string(),
+    products: z.array(z.string()),
+  }),
   selected_products: z.array(z.object({ value: z.string(), label: z.string() })),
   shops: z.array(z.object({ value: z.string(), label: z.string().nullable() })),
   operators: z.array(z.string()),

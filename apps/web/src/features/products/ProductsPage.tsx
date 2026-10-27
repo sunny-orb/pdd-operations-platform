@@ -97,7 +97,15 @@ export function ProductsPage() {
               description={`成功时间 ${localTime(meta.success_at)}；完整日未知。`}
             />
           )}
-          <Brief data={data} />
+          <Brief
+            data={data}
+            onSelect={(patch) => {
+              state.change("main", { ...patch, page: 1 });
+              document
+                .getElementById("overview")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
           <Health data={data} />
           <Scores state={state} scope={state.scope("score")} />
           <section id="overview" className="m1-overview">

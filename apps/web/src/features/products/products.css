@@ -331,3 +331,19 @@ body:has(.m1-products-scope) {
     overflow-wrap: anywhere;
   }
 }
+
+/* 榜单行保留原型排版，使用原生按钮支持键盘定位。 */
+.m1-products-scope button.conclusion-row {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.m1-products-scope button.conclusion-row:focus-visible {
+  outline: 2px solid #1768d9;
+  outline-offset: 2px;
+}

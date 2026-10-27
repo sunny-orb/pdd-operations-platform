@@ -5,7 +5,7 @@ import { z } from "zod";
 import dayjs from "dayjs";
 import { ApiError, get, params } from "./api";
 import { meta, options } from "./contracts";
-import { readScope, writeScope, type Scope, type ScopeName } from "./scope";
+import { readScope, scopeError, writeScope, type Scope, type ScopeName } from "./scope";
 
 export function useProducts() {
   const [search, setSearch] = useSearchParams();
@@ -59,16 +59,22 @@ export function useResource<T>(
   scope: Scope,
   state: ProductsState,
 ) {
+  const invalid = scopeError(scope, state.metadata.data?.date_from, state.metadata.data?.date_to);
   const query = useQuery({
     queryKey: ["m1", path, state.version, scope],
-    enabled: !!state.version && !!scope.from,
-    queryFn: ({ signal }) => get(path, schema, params(scope, state.version), signal),
+    enabled: !!state.version && !invalid,
+    queryFn: ({ signal }) => {
+      if (invalid) throw new ApiError(422, invalid);
+      return get(path, schema, params(scope, state.version), signal);
+    },
     retry: false,
   });
   useEffect(() => {
     if (query.error) state.stale(query.error);
   }, [query.error, state]);
-  return query;
+  return invalid && state.version
+    ? { ...query, data: undefined, isPending: false, error: new ApiError(422, invalid) }
+    : query;
 }
 export function useDebounced(value: string) {
   const [current, setCurrent] = useState(value);
@@ -81,11 +87,13 @@ export function useDebounced(value: string) {
 export function useOptions(scope: Scope, state: ProductsState, needle: string, name: ScopeName) {
   const keyword = useDebounced(needle);
   const base = { ...scope, products: [], keyword: keyword || scope.keyword, size: 100 };
+  const invalid = scopeError(scope, state.metadata.data?.date_from, state.metadata.data?.date_to);
   const query = useInfiniteQuery({
     queryKey: ["m1", "options", name, state.version, base, scope.products],
-    enabled: !!state.version && !!scope.from,
+    enabled: !!state.version && !invalid,
     initialPageParam: 1,
     queryFn: ({ pageParam, signal }) => {
+      if (invalid) throw new ApiError(422, invalid);
       const p = params({ ...base, page: pageParam }, state.version);
       scope.products.forEach((id) => p.append("selected_listing_ids", id));
       p.set("scope", name);

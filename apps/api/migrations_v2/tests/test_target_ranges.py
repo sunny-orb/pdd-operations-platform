@@ -16,6 +16,7 @@ from sqlalchemy.exc import DBAPIError
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "apps/api"))
 from migrations_v2.local import local_url, migrate  # noqa: E402
+from migrations_v2.tests.test_offline_baseline import dictionary_columns  # noqa: E402
 
 
 def load_upgrade_entry():
@@ -36,6 +37,28 @@ def alembic_config(connection=None):
 
 
 class TargetRangeOfflineTests(unittest.TestCase):
+    def test_current_dictionary_exact_08_extensions_and_nullable_original_rate(self):
+        fields = dictionary_columns()["refund_targets"]
+        self.assertEqual(
+            [
+                (name, fields[name][2:5])
+                for name in (
+                    "target_rate",
+                    "metric_code",
+                    "lower_rate",
+                    "upper_rate",
+                    "application_policy_code",
+                )
+            ],
+            [
+                ("target_rate", ["NUMERIC", "是", "CHECK"]),
+                ("metric_code", ["TEXT", "否", "CHECK"]),
+                ("lower_rate", ["NUMERIC", "是", "CHECK"]),
+                ("upper_rate", ["NUMERIC", "是", "CHECK"]),
+                ("application_policy_code", ["TEXT", "是", "CHECK"]),
+            ],
+        )
+
     def test_derived_review_sql_is_exact_08_migration_output(self):
         config = alembic_config()
         output = io.StringIO()

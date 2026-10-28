@@ -65,6 +65,17 @@ class OfflineBaselineTests(unittest.TestCase):
         self.assertEqual(sum(len(table.columns) for table in actual.values()), 494)
         for table_name, fields in expected.items():
             target = actual[table_name]
+            if table_name == "refund_targets":
+                # 当前字典已到08；只逆投影本次明确变化，不改01已执行冻结结构。
+                # 新列/当前可空规则由test_target_ranges独立严格核验。
+                fields = fields.copy()
+                for name in ("metric_code", "lower_rate", "upper_rate", "application_policy_code"):
+                    fields.pop(name)
+                rate = fields["target_rate"].copy()
+                self.assertEqual(rate[1], "既有单值目标")
+                self.assertEqual(rate[3], "是")
+                rate[1], rate[3] = "本组总退款率目标", "否"
+                fields["target_rate"] = rate
             self.assertEqual(list(target.c.keys()), list(fields), table_name)
             for column_name, cells in fields.items():
                 column = target.c[column_name]

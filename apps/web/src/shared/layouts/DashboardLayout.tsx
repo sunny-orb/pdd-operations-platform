@@ -1,5 +1,5 @@
-import { App as AntApp, ConfigProvider, Space } from "antd";
-import { ArrowLeftOutlined } from "@ant-design/icons";
+import { App as AntApp, ConfigProvider } from "antd";
+import { AppstoreOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import type { CSSProperties, ReactNode } from "react";
 import { DashboardSections, type DashboardSectionLink } from "../components/DashboardSections";
@@ -25,19 +25,21 @@ export function DashboardLayout({
 }) {
   const header = (
     <header className="dashboard-topbar" aria-label="看板导航">
-      <Link to="/">
-        <ArrowLeftOutlined aria-hidden /> 返回运营看板中心
+      <Link className="dashboard-brand" to="/" aria-label="返回运营看板中心">
+        <AppstoreOutlined aria-hidden /> <span>拼多多运营平台</span>
       </Link>
+      <nav className="dashboard-page-tabs" aria-label="看板切换">
+        {dashboardPages.map((page) => (
+          <Link
+            key={page.id}
+            to={page.path}
+            aria-current={page.id === currentPage ? "page" : undefined}
+          >
+            {page.title}
+          </Link>
+        ))}
+      </nav>
       {context && <span className="dashboard-topbar-context">{context}</span>}
-      <Space>
-        {dashboardPages
-          .filter((page) => page.id !== "overview" && page.id !== currentPage)
-          .map((page) => (
-            <Link key={page.id} to={page.path}>
-              {page.title} ↗
-            </Link>
-          ))}
-      </Space>
     </header>
   );
   return (

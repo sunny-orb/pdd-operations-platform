@@ -40,12 +40,16 @@ it.each(dashboardPages)("$title可独立使用共享壳且不依赖商品页", (
   const destinations = within(header)
     .getAllByRole("link")
     .map((link) => link.getAttribute("href"));
-  expect(destinations).toEqual([
-    "/",
-    ...dashboardPages
-      .filter((page) => page.id !== "overview" && page.id !== id)
-      .map((page) => page.path),
-  ]);
+  expect(destinations).toEqual(["/", ...dashboardPages.map((page) => page.path)]);
+  const switcher = within(header).getByRole("navigation", { name: "看板切换" });
+  const current = within(switcher).getByRole("link", { name: title });
+  expect(current.getAttribute("aria-current")).toBe("page");
+  expect(
+    within(switcher)
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("aria-current") === "page"),
+  ).toHaveLength(1);
+
   expect(screen.getByRole("navigation", { name: "本页目录" })).toBeTruthy();
   expect(screen.getByRole("heading", { name: title })).toBeTruthy();
 });

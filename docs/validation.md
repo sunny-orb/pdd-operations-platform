@@ -816,3 +816,35 @@ PYTHONPATH=apps/api apps/api/.venv/bin/python -m app.jobs.score_product_board
 本轮本地浏览器工具返回“Local browser use is disabled in Work settings”，没有绕过设置或用其他自动化工具接管；`open_in_codex`仅返回queued，不冒充实际显示确认。真实浏览器交互、窄屏矩阵及线上同条件全页对照尚未执行，已记M5-ISS-06。原型字段/布局迁移及组件测试不充当视觉验收。
 
 最终已实际通过npm run check、npm test（前端55项、后端185通过/72旧结构历史跳过）、npm run build、npm run format:check；新增脚本ruff亦通过。另行隔离PG售后16项、v2迁移38项及上述真实API对账通过，不用旧结构跳过用例充当真实PG验收。构建仍有既有共享图表大包提示。无上游写入、业务消息、推送或生产发布；其他预存推广代码/文档改动保持独立。
+
+<a id="m6-live-implementation-20261028"></a>
+
+## M6中心真实复用、天气发布与共享导航（2026-10-28）
+
+本轮按用户明确授权接通运营中心，专用方案为[m6-overview-implementation](m6-overview-implementation.md)。只读sites-current中心必要页面/直接依赖，不搬快照、旧环境或固定经营数字。中心正文保留日期/摘要、四状态、四域、预警、八列建议、天气和五段折叠说明；共享DashboardLayout改为品牌返回中心及五页稳定入口/当前页标识，左目录折叠/拖宽职责不改。Ant Design复用卡片/控件/表格/提示，局部CSS限定m6作用域，App根入口移除初始化样例页并懒加载真实中心。
+
+### 结构、权限与天气真实发布
+
+在原30经营表外追加07的一张weather_publications（8字段/1真实父FK）；01/schema.sql冻结不改。`scripts/db-v2.py verify`首次遇到既有test13应用时钟早于DB queued_at约51ms的时序失败，改测试状态转换使用真实DB clock_timestamp后再次执行38项全部通过，项目结构快照未变。新增天气触发器单独计数，原pdd_v2保护58条仍验证，不因新增表放宽旧基线。证据为Git忽略var/m6/migration-verify2.log。
+
+随后`upgrade-weather-local.py`校验同文件指纹/隔离结果、备份同Docker集群结构与权限，在project-source-sync锁下只对本机06→07迁移并核8列/只读app/仅插writer。原30表字段与数据不改，没有服务启动DDL。存在天气记录时downgrade明确拒绝删除归档；后续停用/修复走专用方案，不清库绕过。
+
+实际先`sync-project.py --run-now --only weather`成功：发布与父版本同为272f380a-05f5-41fc-91f4-1585e0262b75，公报2026-10-28 08:00+08、中期2026-10-27 10:00+08，各自时间不改成抓取日。天气状态partial，今日气温unidentified，不说无气温风险；天气13项（含8项真实隔离PG）覆盖大风误命中/实况与全球段/空正文/真实发布时间/图注/中期相对日期、真实writer/app权限、父子封版、幂等/修订/历史、失败保旧、并发锁、租约过期及TRUNCATE拒绝。私有文档/manifest原文不入Git，无群消息或发送行为。
+
+### 中心域接口及异步反例
+
+`scripts/verify-overview-local.mjs`在Vite SSR中直接加载同一前端适配器（不是浏览器），同时调用四域真实meta→同版结果并与原响应逐字段比较：M1交易额/环比/同比/风险条数，M2原ROI/花费/归因额，M3默认月实际/目标/达成和最新日值，M5总率/总额/建议/观察条数；不计算另一套业务口径。第一次四域均成功，最慢M5约3.952秒，有限本机开发样本不等于并发容量/P95。
+
+最后以同一`sync-project.py --run-now`串行补跑14个来源/派生步骤，全部succeeded；各步骤累计约360.810秒。M1三源/关系及试行评分刷新成功，数仓商品/推广最新观察仍10/26；店铺日/评分/渠道/地区复用未变内容版，退款发布新修订；JST三角色均复用27日结束的真实输入，三份报告相同身份保留，天气重跑reused=true且发布ID不变。没有把语义无变化说成新经营数据，或把最新观察日说成完整日。
+
+补跑后再次四域并行加载及逐字段断言全部通过（最慢M5约4.091秒）；中心实际观察日为M1/M2/M3=2026-10-26、M5=2026-10-27。最新单日店铺389,506.07元、商品389,484.07元均与各自负责API精确相等，跨源差22.00未擅自归并/调平，解释边界记issues。天气DB document、父版本/current、HTTP、私有归档及语义SHA完全一致；GET前后task_runs均54，无接口触发同步。证据在忽略的var/m6/accepted-weather-live.json、accepted-live-adapters.json及final-source-refresh.log；预览根页与实际中心模块HTTP可取，但这不是浏览器渲染验收。
+
+组件及契约反例覆盖单域失败隔离、真实零/NULL/大数、45秒元信息/同版失败不重拉、变版取消旧请求/拒绝晚到覆盖、409有界恢复、正式数与结构数分开、P0筛选不改变原卡片/建议、原八列及未指派状态、完整K/真实report_id跳转、天气自选历史及新默认独立；共享导航检查五页入口、当前页、品牌和旧目录行为。源规则/目标缺口沿负责域，未填原型固定3人/3异常/78分。
+
+一次独立只读复核为0 Critical/1 Important/2 Minor，已以反例一次修复：事实缓存加入同版default_month/calendar_through，跨月/跨日重新读正确范围；M5逐源失败/error_code/待重算进入顶部和附注；天气HTTP200的partial和失败保旧/原因中文提示。没有启动第二轮递归复核。
+
+### 本轮检查与未执行范围
+
+实际`npm run check`、`npm test`（前端25文件68项通过；后端199通过/72历史旧结构跳过）、`npm run build`通过；新增Python脚本ruff及npm run format:check通过；11份变更文档本地文件链接无缺失。真实PG迁移38项及天气PG反例另行验证，不用跳过用例充当数据库验收。构建仍有既有共享依赖大包提示，未因本轮通过宣称公司性能验收。其他预存推广四文件和M2文档记录及schema尾空行保留独立。
+
+本轮浏览器工具返回“Local browser use is disabled in Work settings”；未改用别的浏览器自动化绕过。`open_in_codex`仅queued，不作为已显示证明。真实交互/窄屏/同条件线上像素对照尚未执行，M6-ISS-05开放；现行目标、规则、M3 URL范围和天气解析/历史缺口各列统一issues，未宣称整页所有业务/视觉验收完成。无推送、业务消息或生产发布。

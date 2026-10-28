@@ -37,13 +37,17 @@ def build_steps(engine, password):
     from app.modules.sales.source_policy import approved_window
     from app.modules.sales.storage import ShopDailyStore
 
+    def warehouse_password():
+        # 仅真正接仓的步骤读取私有凭据；天气/评分等只读本地步骤不需要。
+        return password() if callable(password) else password
+
     def products():
         reader = None
         try:
 
             def receive(hb):
                 nonlocal reader
-                reader = ProductBoardReader(password=password, heartbeat=hb)
+                reader = ProductBoardReader(password=warehouse_password(), heartbeat=hb)
                 return reader.read_stable()
 
             return ProductBoardStore(
@@ -61,11 +65,11 @@ def build_steps(engine, password):
             def receive(hb):
                 nonlocal reader
                 reader = (
-                    ShopDailyReader(password=password, heartbeat=hb)
+                    ShopDailyReader(password=warehouse_password(), heartbeat=hb)
                     if code == "shop_daily"
                     else FeishuRefundReader(root=ROOT, heartbeat=hb)
                     if code == "shop_refunds"
-                    else SalesSourceReader(password=password, heartbeat=hb)
+                    else SalesSourceReader(password=warehouse_password(), heartbeat=hb)
                 )
                 return (
                     reader.read_stable(window)
@@ -99,7 +103,7 @@ def build_steps(engine, password):
 
             def receive(hb):
                 nonlocal reader
-                reader = AftersalesReader(password=password, heartbeat=hb)
+                reader = AftersalesReader(password=warehouse_password(), heartbeat=hb)
                 end = reader.latest(code)
                 raw, rows = reader.read_stable(code, end)
                 return end, raw, rows
@@ -116,6 +120,11 @@ def build_steps(engine, password):
 
         return publish_reports(engine, ROOT / "var/ingestion/aftersales")
 
+    def weather():
+        from app.jobs.sync_weather import run_weather
+
+        return run_weather(engine, ROOT / "var/ingestion/weather")
+
     return {
         "products": products,
         "product_scores": scores,
@@ -125,6 +134,7 @@ def build_steps(engine, password):
             for code in ("jst_returns", "jst_shipped_sales", "jst_cancelled_sales")
         },
         "aftersales_report": reports,
+        "weather": weather,
     }
 
 
@@ -171,7 +181,7 @@ def main():
             return 0
         engine = runtime_engine()
         # 凭据仅当前进程；闭包不打印；由用户授权的完整分页双读接收。
-        steps = build_steps(engine, source_password())
+        steps = build_steps(engine, source_password)
         if args.only:
             if args.scheduled or not set(args.only) <= steps.keys():
                 raise ValueError("INVALID_SYNC_DATASETS")

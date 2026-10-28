@@ -329,7 +329,8 @@ class PostgreSQLBaselineTests(unittest.TestCase):
         inspector = sa.inspect(self.conn)
         self.assertEqual(
             set(inspector.get_table_names(schema="public")),
-            {t.name for t in self.metadata.tables.values()} | {"alembic_version_v2"},
+            {t.name for t in self.metadata.tables.values()}
+            | {"alembic_version_v2", "weather_publications"},
         )
         for table in self.metadata.tables.values():
             with self.subTest(table=table.name):
@@ -372,7 +373,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
                 sa.text(
                     "SELECT count(*) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid "
                     "JOIN pg_namespace n ON n.oid=c.relnamespace "
-                    "WHERE n.nspname='public' AND NOT t.tgisinternal"
+                    "WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgname LIKE 'pdd_v2_%'"
                 )
             ).scalar_one(),
             58,
@@ -399,12 +400,12 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             0,
         )
         migrate(self.conn)
-        self.assertEqual(len(sa.inspect(self.conn).get_table_names(schema="public")), 31)
+        self.assertEqual(len(sa.inspect(self.conn).get_table_names(schema="public")), 32)
         self.assertEqual(
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_06",
+            "20261028_07",
         )
 
     def test_02_all_numeric_columns_reject_nonfinite_values(self):
@@ -618,9 +619,9 @@ class PostgreSQLBaselineTests(unittest.TestCase):
         self.conn.execute(
             table.update().values(
                 status="running",
-                started_at=datetime.now(UTC),
+                started_at=sa.func.clock_timestamp(),
                 worker_ref="synthetic",
-                lease_expires_at=datetime.now(UTC),
+                lease_expires_at=sa.func.clock_timestamp() + sa.text("interval '1 second'"),
             )
         )
         row = dict(self.conn.execute(sa.select(table)).mappings().one())
@@ -671,7 +672,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_06",
+            "20261028_07",
         )
 
     def test_18_locking_seal_blocks_content_and_rejects_after_commit(self):

@@ -111,6 +111,31 @@ def test_manual_cli_shares_the_project_source_lock(sales_pg):
     assert run_guarded(sales_pg, lambda: 0) == 0
 
 
+def test_weather_step_never_reads_warehouse_credentials(tmp_path, monkeypatch):
+    import runpy
+    from pathlib import Path
+
+    from app.jobs import sync_weather
+
+    calls = []
+
+    def no_credentials():
+        raise AssertionError("天气不得读取数仓凭据")
+
+    def weather(engine, archive):
+        calls.append((engine, archive))
+        return {"version_id": "local-weather-version"}
+
+    monkeypatch.setattr(sync_weather, "run_weather", weather)
+    script = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/sync-project.py"))
+    build = script["build_steps"]
+    build.__globals__["ROOT"] = tmp_path
+    engine = object()
+    steps = build(engine, no_credentials)
+    assert steps["weather"]() == {"version_id": "local-weather-version"}
+    assert calls == [(engine, tmp_path / "var/ingestion/weather")]
+
+
 @pytest.mark.parametrize(
     "name,job",
     [

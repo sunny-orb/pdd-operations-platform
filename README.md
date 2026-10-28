@@ -2,7 +2,7 @@
 
 公司内部拼多多运营看板的独立重构项目。采用React/TypeScript前端、FastAPI后端和PostgreSQL查询库。当前模块进度与授权统一见[TODO](TODO.md)，实际验证见[验证记录](docs/validation.md)。
 
-**数据库采用独立v2迁移链。** 新设计及[实施方案](docs/database-schema/migration-plan.md)覆盖30张业务表；实际执行进度见[TODO](TODO.md#当前任务与范围)，证据见[验证记录](docs/validation.md#database-v2-local-created)。旧M1模型/迁移、旧解析及评分任务保留历史且继续停用；M1新版三来源、查询和前端已迁到v2，不运行旧`db:upgrade`或默认`alembic upgrade head`。任何结构变更先改migration并说明原因，schema.sql仅为派生审阅稿；已执行revision不改写，未来追加新revision。
+**数据库采用独立v2迁移链。** 新设计及[实施方案](docs/database-schema/migration-plan.md)覆盖30张经营业务表，天气在独立[专用设计](docs/m6-overview-implementation.md)中追加1张发布归档表；实际执行进度见[TODO](TODO.md#当前任务与范围)，证据见[验证记录](docs/validation.md#database-v2-local-created)。旧M1模型/迁移、旧解析及评分任务保留历史且继续停用；M1新版三来源、查询和前端已迁到v2，不运行旧`db:upgrade`或默认`alembic upgrade head`。任何结构变更先改migration并说明原因，schema.sql仅为派生审阅稿；已执行revision不改写，未来追加新revision。
 
 <a id="refactor-principles"></a>
 
@@ -65,6 +65,7 @@ Windows使用`py -3.12 -m venv apps/api/.venv`和`apps/api/.venv/Scripts/python.
 | API / 文档   | http://127.0.0.1:8000 / http://127.0.0.1:8000/docs                                                               |
 | M3店铺销售   | http://127.0.0.1:5173/sales ，`/store-sales`同页；店铺日、退款、推广、评分及两类地区真实接入；目标入口当前不可用 |
 | 存活 / 就绪  | `/health/live` / `/health/ready`；数据库未配置时就绪503是预期，不能冒充业务正常                                  |
+| M6运营中心   | `/`，复用四域真实接口；全国天气独立归档，日期/失败/待核按来源显示                                                |
 | M1真实商品页 | `/products`，新版三来源真实查询；新试行标准/参考部分分已接入，缺项及待验证原因保留                               |
 
 本机数据库使用Docker Desktop，整个项目共用`pdd_operations`，使用独立v2结构，容器和数据库本身保留。以下迁移/测试入口是旧实现的运行说明，重新设计期间暂停执行：
@@ -127,3 +128,9 @@ apps/api/.venv/bin/python scripts/install-sync-schedule.py --remove # 只移除�
 `/aftersales`使用共享顶部/左侧目录，原售后筛选移到正文。报告、九指标、折叠整改/阶段、两图和六分析表只经`/api/v1/aftersales`读取本地固定版本；数据来自允许的JST加工必要投影。当前观察量与未核金额分开，A/缺sfje依赖率、分类/词典及物流阶段有明确门禁，不以旧报告数字补值。详见[运行契约](docs/data-contract.md#m5-runtime-contract)、[统一问题](docs/issues.md#m5-售后分析)。
 
 项目每日10/14/18点编排已包括`jst_returns`、`jst_shipped_sales`、`jst_cancelled_sales`及依赖成功后的`aftersales_report`；单次手动可用`sync-project.py --run-now --only`选择它们。报告固定当前/前一期滚动30日和覆盖完整的上个自然月，默认最新、自选保留；没有真实去年输入则同比不可比。06仅追加既有三表的最小运行权限，受控本机升级入口为`scripts/upgrade-aftersales-local.py`，先执行`db-v2.py verify`；无新增数据表或服务启动DDL。
+
+## 运营中心与天气入口
+
+中心`/`按sites-current正文保留摘要、四域卡片、预警、本日动作、天气和口径说明；共享顶栏统一五页入口及当前页状态，左侧继续使用共享目录。中心直接调用已接通的四域API，不复制业务计算或建立摘要快照。各域观察日、完整日、来源失败与查询失败分开展示；计数和规则缺口见[统一问题台账](docs/issues.md#m6-运营中心)。
+
+天气为`/api/v1/weather/meta`及`/api/v1/weather/publication`，只读本地不可变发布。独立同步步骤`weather`只读NMC官网公报和中期预报，加入现有每日10/14/18入口；不读取群消息、不发送天气卡，不在页面刷新时拉上游。历史归档从本次真实接入起保存，两份源分别显示实际发布时间，未识别气温标待核。数据/接口唯一见[运行契约](docs/data-contract.md#m6-runtime-contract)，07结构/回退见[专用设计](docs/m6-overview-implementation.md)。本机06→07用`scripts/upgrade-weather-local.py`受控升级，不能用旧迁移重建项目库。

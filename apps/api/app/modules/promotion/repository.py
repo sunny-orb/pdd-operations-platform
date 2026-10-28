@@ -184,7 +184,7 @@ class Repository:
                     business_date_basis="payment_date"
                     if code in (*STORE_CODES, "product_promotion")
                     else None,
-                    attribution_state="window_pending"
+                    attribution_state="source_reported_payment_date"
                     if code in (*STORE_CODES, "product_promotion")
                     else None,
                     last_success_at=success.isoformat() if success else None,
@@ -199,7 +199,7 @@ class Repository:
         return dict(
             mode=self.mode,
             business_date_basis="payment_date",
-            attribution_state="window_pending",
+            attribution_state="source_reported_payment_date",
             attribution_window_days=None,
             data_version=self.token,
             definition_revision=definition_revision(),

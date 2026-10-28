@@ -19,6 +19,8 @@ class Metric(Record):
     type: str
     previous: str | None = None
     change: str | None = None
+    business_date_basis: Literal["payment_date"] | None = None
+    attribution_state: Literal["source_reported_payment_date"] | None = None
 
 
 class MetaData(Record):
@@ -30,6 +32,9 @@ class MetaData(Record):
     observed_rows: str
     complete_through: str | None
     completeness: str
+    business_date_basis: Literal["payment_date"]
+    attribution_state: Literal["source_reported_payment_date"]
+    attribution_window_days: None
     sources: list[Record]
 
 

@@ -159,7 +159,7 @@ def enrich_metrics(s, q, data, shops):
             dict(
                 code=code,
                 business_date_basis="payment_date",
-                attribution_state="window_pending",
+                attribution_state="source_reported_payment_date",
                 spend=number(total(rows, "spend"), money=True),
                 revenue=number(total(rows, "attributed_revenue"), money=True),
                 ctr=ratio(

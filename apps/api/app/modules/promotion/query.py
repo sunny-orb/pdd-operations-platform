@@ -251,9 +251,9 @@ def aggregate(rows, *, strict=False, cross=False):
             )
     for key in ("revenue", "net_revenue", "deals", "roi", "net_roi", "cvr"):
         result[key]["business_date_basis"] = "payment_date"
-        result[key]["attribution_state"] = "window_pending"
+        result[key]["attribution_state"] = "source_reported_payment_date"
         if result[key]["status"] == "observed":
-            result[key]["reason"] = "按支付日统计；点击后归因窗口天数待来源补证，当前为来源参考"
+            result[key]["reason"] = "沿用来源已归因的支付日汇总；不重算点击归因，完整日仍未知"
     return result
 
 

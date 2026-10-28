@@ -49,7 +49,7 @@ export type DomainPayload = {
   card: DomainCard;
   observations: Observation[];
   actions: SuggestedAction[];
-  observationState: "observed" | "not_available" | "not_implemented";
+  observationState: "observed" | "pending_validation" | "not_available" | "not_implemented";
 };
 export type DomainMeta<M = unknown> = {
   id: DomainId;
@@ -94,7 +94,14 @@ export function localTime(value: string | null | undefined) {
 }
 export type ObservationCoverage = {
   domain: DomainId;
-  status: "observed" | "retained" | "failed" | "loading" | "not_connected" | "not_implemented";
+  status:
+    | "observed"
+    | "retained"
+    | "failed"
+    | "loading"
+    | "not_connected"
+    | "not_implemented"
+    | "pending_validation";
 };
 /** 观察列表的读取覆盖与业务完整日分开；失败保旧明确标为retained。 */
 export function observationCoverage(
@@ -116,9 +123,11 @@ export function observationCoverage(
           ? "loading"
           : state.error
             ? "failed"
-            : state.data?.observationState === "not_implemented"
-              ? "not_implemented"
-              : "not_connected",
+            : state.data?.observationState === "pending_validation"
+              ? "pending_validation"
+              : state.data?.observationState === "not_implemented"
+                ? "not_implemented"
+                : "not_connected",
   }));
 }
 /** M6-01：只计已映射观察对象；标题不参与身份，正式分级与负责人继续未知。 */

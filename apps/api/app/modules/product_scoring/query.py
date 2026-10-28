@@ -159,7 +159,7 @@ def published_scores(repo):
             complete_score=None,
             decision="pending_validation" if scored else "unscored",
             decision_label="先补验证 · 暂不放量" if scored else "暂未评分",
-            reason="新试行标准已启用；收藏按日新增累计未扣取消，参照效果、完整日及推广归因窗口仍待核",
+            reason="新试行标准已启用；收藏按日新增累计未扣取消，推广沿来源支付日汇总，参照效果与完整日仍待核",
             action="按新试行标准观察表现，先补验证，暂不放量",
             score_status="partial" if scored else "unscored",
             standard_status="trial",

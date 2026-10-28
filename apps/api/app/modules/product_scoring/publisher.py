@@ -98,7 +98,7 @@ def _persist(c, t, b, evidence):
             source_locator=REF,
             confirmation_ref=REF,
             content_sha256=rule_hash,
-            evidence_note="用户2026-10-28启用新试行标准及M1-01日新增收藏定义；来源完整性、归因窗口与参照效果未验证；正式放量关闭",
+            evidence_note="用户2026-10-28启用新试行标准及M1-01日新增收藏定义；推广沿来源已归因支付日汇总；来源完整性与参照效果未验证，正式放量关闭",
         )
         .on_conflict_do_nothing()
     )

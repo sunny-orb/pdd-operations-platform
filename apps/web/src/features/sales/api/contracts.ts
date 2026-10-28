@@ -64,6 +64,8 @@ export const metricsSchema = z.object({
     .array(
       z.object({
         code: z.string(),
+        business_date_basis: z.literal("payment_date").optional(),
+        attribution_state: z.literal("source_reported_payment_date").optional(),
         spend: numeric,
         revenue: numeric,
         ctr: numeric,

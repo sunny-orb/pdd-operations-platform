@@ -477,14 +477,17 @@ def classified_returns(suffix="1"):
     ]
 
 
-def test_fixed_dictionary_quality_focus_selects_full_objects_and_preserves_amount_gates(sales_pg):
+@pytest.mark.parametrize("revision", ["m5-jst-current-sku-v2", "m5-jst-current-style-consensus-v3"])
+def test_fixed_dictionary_quality_focus_selects_full_objects_and_preserves_amount_gates(
+    sales_pg, revision
+):
     from app.modules.aftersales.classification import rule_parameters
 
     publish(
         sales_pg,
         rules=rule_parameters(),
         returns=classified_returns(),
-        source_revision="m5-jst-current-sku-v2",
+        source_revision=revision,
     )
     with client_for(sales_pg) as client:
         board = client.get("/api/v1/aftersales/overview").json()["data"]
@@ -537,7 +540,11 @@ def test_old_report_dictionary_is_frozen_when_new_report_enables_classification(
 
 @pytest.mark.parametrize(
     "revision,partial_missing",
-    [("m5-jst-partial-v1", False), ("m5-jst-current-sku-v2", True)],
+    [
+        ("m5-jst-partial-v1", False),
+        ("m5-jst-current-sku-v2", True),
+        ("m5-jst-current-style-consensus-v3", True),
+    ],
 )
 def test_refusal_requires_verified_source_revision_and_whole_window_field_coverage(
     sales_pg, revision, partial_missing

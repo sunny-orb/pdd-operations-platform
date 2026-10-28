@@ -137,7 +137,7 @@ export function DiagnosisView({
         诊断：{data?.current_window.start ?? "—"} — {data?.current_window.end ?? "—"}；对比：
         {data?.previous_window.start ?? "—"} — {data?.previous_window.end ?? "—"}
         。沿用页面的店铺、商品、品类、等级和运营筛选；以所选结束日为锚点，固定比较两个 7
-        天日历周期。
+        天日历周期。成交沿用来源已归因的支付日汇总，不重算点击归因；同日花费与成交并非同批点击。
       </p>
       {pending && <Spin size="small" />}
       {error && (

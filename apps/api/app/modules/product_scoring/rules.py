@@ -72,7 +72,7 @@ def parameters():
                     branch_codes=[code],
                     text="保留原值，先补相容输入及标准"
                     if code == "unscored"
-                    else "新试行参照效果、完整性与推广归因窗口仍待核，暂不放量",
+                    else "推广沿来源支付日汇总；新试行参照效果与完整性仍待核，暂不放量",
                     verification_metric_codes=[],
                     execution_mode="display_only",
                 )
@@ -94,6 +94,7 @@ def parameters():
                 roi_basis_code="total_attributed_revenue_over_total_cost",
                 require_source_completeness=True,
                 require_verified_reference=True,
+                # 来源/支付日证据要求；当前使用已归因日汇总，不要求点击级窗口重算。
                 require_attribution_evidence=True,
             ),
             tier_policy_code="highest_inclusive_quarter_weight",

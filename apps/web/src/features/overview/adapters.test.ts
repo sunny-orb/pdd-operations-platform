@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { aftersalesSpec, salesSpec } from "./adapters";
-import { aftersalesObjectKey, centerCounts } from "./model";
+import { aftersalesSpec, promotionSpec, salesSpec } from "./adapters";
+import { aftersalesObjectKey, centerCounts, observationCoverage } from "./model";
 import { testFilters } from "../sales/testFixtures";
 afterEach(() => vi.unstubAllGlobals());
 it("基础目标同版本失败与恢复改变中心查询状态，避免保留旧成功说明", async () => {
@@ -100,6 +100,25 @@ it("售后只用明确报告和对象层级映射，不由同名标题补异常�
     detail: "原证据",
     verification: "复核",
   };
+  let decisionStatus = "partial";
+  let priorities = [
+    { ...priority, object_level: "overview", object_key: "all", report_id: "report" },
+    {
+      ...priority,
+      id: "category",
+      object_level: "category",
+      object_key: "帽子",
+      report_id: "report",
+    },
+    { ...priority, id: "unknown" },
+    {
+      ...priority,
+      id: "wrong-report",
+      object_level: "overview",
+      object_key: "all",
+      report_id: "other",
+    },
+  ];
   vi.stubGlobal(
     "fetch",
     vi.fn(async () => ({
@@ -120,31 +139,14 @@ it("售后只用明确报告和对象层级映射，不由同名标题补异常�
           risk_metrics: [],
           decision: {
             title: "观察",
-            status: "partial",
+            status: decisionStatus,
             rate: null,
             amount: null,
             amount_share: null,
             change_pp: null,
             note: "待核",
           },
-          priorities: [
-            { ...priority, object_level: "overview", object_key: "all", report_id: "report" },
-            {
-              ...priority,
-              id: "category",
-              object_level: "category",
-              object_key: "帽子",
-              report_id: "report",
-            },
-            { ...priority, id: "unknown" },
-            {
-              ...priority,
-              id: "wrong-report",
-              object_level: "overview",
-              object_key: "all",
-              report_id: "other",
-            },
-          ],
+          priorities,
           actions: [],
           stages: [],
           size_breakdown: [],
@@ -189,4 +191,114 @@ it("售后只用明确报告和对象层级映射，不由同名标题补异常�
   expect(counts.exceptionCount).toBe(2);
   expect(counts.unmappedObservations).toBe(2);
   expect(payload.actions).toEqual([]);
+  // 当前真实接口的金额/正式风险待核分支不能把空占位数组包装成可评估零。
+  priorities = [];
+  decisionStatus = "pending_validation";
+  const pending = await aftersalesSpec.load(
+    {
+      id: "aftersales",
+      version: "v",
+      date: "2026-10-27",
+      completeThrough: null,
+      success: null,
+      attempt: null,
+      attemptStatus: null,
+      status: "partial",
+      notes: [],
+      raw: source,
+    },
+    new AbortController().signal,
+  );
+  expect(pending.observationState).toBe("pending_validation");
+  expect(pending.card.pairs.find((p) => p.label === "观察异常对象")?.value).toBeNull();
+  expect(pending.card.heading).toBe("退货分析看板");
+  const coverage = observationCoverage([
+    { id: "aftersales", data: pending, error: null, loading: false },
+  ]);
+  expect(centerCounts(pending.observations, pending.actions, coverage).exceptionCount).toBeNull();
+});
+
+it("推广未完成证据校验的空清单为待核，已有真实观察不会因整体状态待核而丢失", async () => {
+  let hasObservation = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => ({
+      ok: true,
+      json: async () => ({
+        data: path.includes("/diagnosis?")
+          ? {
+              current_window: { start: "2026-10-21", end: "2026-10-27" },
+              previous_window: { start: "2026-10-14", end: "2026-10-20" },
+              flagged_products: hasObservation
+                ? [
+                    {
+                      object_key: "listing",
+                      object_type: "product",
+                      label: "真实观察对象",
+                      listing_id: "listing",
+                      product_id: "product",
+                      product_name: null,
+                      shop_id: "shop",
+                      shop_name: null,
+                      category: null,
+                      level: null,
+                      operator: null,
+                      focus: false,
+                      current: {},
+                      previous: {},
+                      findings: [
+                        {
+                          level: "观察",
+                          rule: "有花费无成交，归因完整性待核实",
+                          evidence: "花费300，成交0笔",
+                          action: "核查归因",
+                          status: "attribution_pending",
+                        },
+                      ],
+                      clues: [],
+                      notes: [],
+                      priority: "观察",
+                      current_days: 7,
+                      previous_days: 7,
+                      current_record_count: "7",
+                      previous_record_count: "7",
+                    },
+                  ]
+                : [],
+              status: "insufficient_evidence",
+            }
+          : { metrics: {} },
+        meta: { data_version: "v" },
+      }),
+    })),
+  );
+  const meta = {
+    id: "promotion" as const,
+    version: "v",
+    date: "2026-10-27",
+    completeThrough: null,
+    success: null,
+    attempt: null,
+    attemptStatus: null,
+    status: "unknown",
+    notes: [],
+    raw: {
+      mode: "product" as const,
+      date_from: "2026-08-29",
+      date_to: "2026-10-27",
+      recommended_from: "2026-10-21",
+      recommended_to: "2026-10-27",
+      observed_rows: "14",
+      complete_through: null,
+      completeness: "unknown",
+      sources: [],
+    },
+  };
+  const pending = await promotionSpec.load(meta, new AbortController().signal);
+  expect(pending.observationState).toBe("pending_validation");
+  hasObservation = true;
+  const observed = await promotionSpec.load(meta, new AbortController().signal);
+  expect(observed.observationState).toBe("observed");
+  expect(observed.observations).toHaveLength(1);
+  expect(observed.observations[0].level).toBe("observation");
 });

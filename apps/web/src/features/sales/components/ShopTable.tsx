@@ -81,7 +81,9 @@ export function ShopTable({
               key: "roi",
               dataIndex: "promotion_roi",
               render: (value) => (
-                <span title="单渠道来源参考；跨渠道成交归因待核">{fixed(value)}</span>
+                <span title="按支付日日报成交额与花费计算；缺少渠道时保留覆盖提示">
+                  {fixed(value)}
+                </span>
               ),
             },
           ]}

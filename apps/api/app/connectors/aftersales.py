@@ -10,10 +10,13 @@ from app.modules.aftersales.ingestion import (
     MASTER_COLUMNS,
     MASTER_TABLE,
     NUMBERS,
+    STYLE_CATEGORY_COLUMNS,
+    STYLE_CATEGORY_ROW_LIMIT,
     TABLES,
     enrich_current_master,
     normalize,
     source_code,
+    style_consensus_eligible,
 )
 from app.modules.sales.datasets import REFUND_SHOPS
 from app.modules.sales.normalization import fingerprint
@@ -42,48 +45,124 @@ class AftersalesReader(ProductBoardReader):
         return min(value.date(), yesterday)
 
     def read(self, code, end):
+        """固定六店60日按源数值ID游标完整读取；ID输出字符串，独立源计数防稳定漏行。"""
         time_col = "confirm_date" if code == "jst_returns" else "pay_time"
         projection = ",".join(
-            f"CAST(`{c}` AS CHAR) AS `{c}`" if c in NUMBERS else f"`{c}`" for c in COLUMNS[code]
+            f"CAST(s.`{c}` AS CHAR) AS `{c}`" if c in NUMBERS else f"s.`{c}`" for c in COLUMNS[code]
         )
-        clause = "channel=%s AND shop_name IN (%s,%s,%s,%s,%s,%s)"
+        clause = "s.channel=%s AND s.shop_name IN (%s,%s,%s,%s,%s,%s)"
         params = ("拼多多", *REFUND_SHOPS)
         if code != "jst_returns":
-            clause += " AND order_status=%s"
+            clause += " AND s.order_status=%s"
             params += ("已发货" if code == "jst_shipped_sales" else "取消",)
+        scope_sql = (
+            f"FROM `{TABLES[code]}` AS s WHERE {clause} "
+            f"AND s.`{time_col}`>=%s AND s.`{time_col}`<%s"
+        )
+        scope_params = (*params, end - timedelta(days=59), end + timedelta(days=1))
+
+        def source_scope():
+            with self.connection.cursor() as c:
+                execute_read(
+                    c,
+                    "SELECT COUNT(*) AS row_count, MIN(s.__id) AS min_id, "
+                    f"MAX(s.__id) AS max_id {scope_sql}",
+                    scope_params,
+                    self.retry_budget,
+                    self.heartbeat,
+                )
+                row = c.fetchone()
+            return {key: int(value) if value is not None else None for key, value in row.items()}
+
+        expected = source_scope()
+        if expected["row_count"] > 600000:
+            raise ValueError("SOURCE_ROW_LIMIT")
         result, after = [], -1
         while True:
             self.heartbeat()
             with self.connection.cursor() as c:
                 execute_read(
                     c,
-                    f"SELECT {projection} FROM `{TABLES[code]}` WHERE {clause} "
-                    f"AND `{time_col}`>=%s AND `{time_col}`<%s "
-                    "AND __id>%s ORDER BY __id LIMIT 5000",
-                    (*params, end - timedelta(days=59), end + timedelta(days=1), after),
+                    f"SELECT {projection} {scope_sql} AND s.__id>%s ORDER BY s.__id LIMIT 5000",
+                    (*scope_params, after),
                     self.retry_budget,
                     self.heartbeat,
                 )
                 page = c.fetchall()
+            for row in page:
+                current_id = int(row["__id"])
+                if current_id <= after:
+                    raise ValueError("SOURCE_ID_ORDER_INVALID")
+                after = current_id
             result.extend(page)
             if len(result) > 600000:
                 raise ValueError("SOURCE_ROW_LIMIT")
             if len(page) < 5000:
+                if source_scope() != expected:
+                    raise ValueError("SOURCE_CHANGED_DURING_READ")
+                if len(result) != expected["row_count"]:
+                    raise ValueError("SOURCE_ROW_COUNT_MISMATCH")
+                if result and (
+                    int(result[0]["__id"]) != expected["min_id"]
+                    or int(result[-1]["__id"]) != expected["max_id"]
+                ):
+                    raise ValueError("SOURCE_ID_COVERAGE_MISMATCH")
                 return result
-            after = int(page[-1]["__id"])
 
     def read_stable(self, code, end):
         """两遍事实与必要当前资料一致后，交付归档证据和既有规范行。"""
         first = self.read(code, end)
         snapshot, master = self.read_current_master(first)
+        styles = self.read_current_style_categories(first, master, snapshot)
         second = self.read(code, end)
         next_snapshot, next_master = self.read_current_master(second)
-        if fingerprint((first, snapshot, master)) != fingerprint(
-            (second, next_snapshot, next_master)
+        next_styles = self.read_current_style_categories(second, next_master, next_snapshot)
+        if fingerprint((first, snapshot, master, styles)) != fingerprint(
+            (second, next_snapshot, next_master, next_styles)
         ):
             raise ValueError("SOURCE_CHANGED_DURING_READ")
-        raw = enrich_current_master(first, master, snapshot)
+        raw = enrich_current_master(first, master, snapshot, styles)
         return raw, normalize(code, raw, end)
+
+    def read_current_style_categories(self, raw, master, snapshot):
+        """精确SKU未找到时，另读该款同dt全部普通SKU；总计5000上限，绝不截断共识。"""
+        checked = enrich_current_master(raw, master, snapshot)
+        styles = sorted(
+            {
+                source_code(row.get("product_code"))
+                for row in checked
+                if style_consensus_eligible(row)
+            }
+        )
+        result = {style: [] for style in styles}
+        projection = ",".join(
+            "CAST(`__id` AS CHAR) AS `__id`" if col == "__id" else f"`{col}`"
+            for col in STYLE_CATEGORY_COLUMNS
+        )
+        count = 0
+        for offset in range(0, len(styles), 500):
+            selected = styles[offset : offset + 500]
+            placeholders = ",".join(["%s"] * len(selected))
+            with self.connection.cursor() as c:
+                execute_read(
+                    c,
+                    f"SELECT {projection} FROM `{MASTER_TABLE}` WHERE product_type=%s "
+                    "AND (suite_code IS NULL OR suite_code='') "
+                    f"AND dt=%s AND product_code IN ({placeholders}) ORDER BY __id LIMIT 5001",
+                    ("普通商品", snapshot, *selected),
+                    self.retry_budget,
+                    self.heartbeat,
+                )
+                page = c.fetchall()
+            count += len(page)
+            if count > STYLE_CATEGORY_ROW_LIMIT:
+                raise ValueError("SOURCE_STYLE_CATEGORY_ROW_LIMIT")
+            for item in page:
+                style = source_code(item.get("product_code"))
+                if style not in selected:
+                    raise ValueError("SOURCE_STYLE_CATEGORY_SCOPE_MISMATCH")
+                result[style].append(item)
+        return result
 
     def read_current_master(self, raw):
         """只读当前dt的必要普通SKU资料；按SKU取所有候选，跨款或重复由归一化拒绝。"""

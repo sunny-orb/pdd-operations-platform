@@ -208,7 +208,10 @@ def overview(repo, q):
 
     # 旧v1此列实际承载product_aftersale_type；不能将旧“退货”重解释成真实售后分类。
     source = repo.inputs().get("j1_returns") or {}
-    verified_refusal_field = source.get("row_schema_revision") == "m5-jst-current-sku-v2"
+    verified_refusal_field = source.get("row_schema_revision") in {
+        "m5-jst-current-sku-v2",
+        "m5-jst-current-style-consensus-v3",
+    }
     full_window = repo.rows("j1_returns") if verified_refusal_field else None
     refusal_available = bool(blocks[0] and full_window) and all(
         isinstance(r.get("source_aftersale_type"), str) and r["source_aftersale_type"].strip()

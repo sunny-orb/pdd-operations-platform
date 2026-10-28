@@ -56,7 +56,7 @@
 | `category/season/lifecycle`                    | 模型品类及有来源的标准上下文；不以运营标签、当前日期或默认“平季”猜季节/阶段                                                        |
 | `uv_7/gmv_7/items_7/fav_7`                     | 同K同窗的商品UV、金额、支付件数、累计新增收藏量（未扣取消）；收藏缺日/NULL不补零，用同定义新试行参照计参考分，非净增或跨日去重人数 |
 | `cvr_7/uv_value_7`                             | 合计订单÷合计UV；合计金额÷合计UV；与总览买家转化分开                                                                               |
-| `ad_impressions_7/ad_roi_7/ad_ctr_7/ad_cvr_7`  | 曝光合计；总归因额÷总花费；点击÷曝光；成交笔数÷点击；保留推广归因门禁                                                              |
+| `ad_impressions_7/ad_roi_7/ad_ctr_7/ad_cvr_7`  | 曝光合计；总归因额÷总花费；点击÷曝光；成交笔数÷点击；沿来源支付日汇总，不重算点击归因；保留覆盖/质量门禁                           |
 | `roi_invalid_7/ctr_invalid_7/ad_cvr_invalid_7` | 必须由逐指标覆盖/质量校验产生；引擎缺省0，适配层不能省略后默认有效                                                                 |
 | `gmv_growth_7/gmv_prev7/orders_prev7`          | 两个完整7日金额之比、前期金额/订单；需要明确增长基数线和完整性                                                                     |
 | `age_days`                                     | 经确认日期依据下的天数；不能把有限导入窗口的首次观察日当真实上架日。阶段未知按现行契约局部处理                                     |
@@ -95,7 +95,7 @@
 
 `trial_baseline.py`复用原十项权重及“达到最高档×四分之一权重”算法，以Decimal实现精确比较；它不是原`fit()`的重写。原V6 `fit()`要求真实历史爆款`hit`和未来28日结果，再按品类/季节/阶段12/24样本加权回退。新候选不使用未来结果和爆款标签，是明确命名的阶段无关分布参照：历史窗口结束≤T−14，每K的完整7日特征先取中位数，同品类≥12款取四分位；不足则全品类≥24款硬回退，仍不足不出标准。不做类别借用、不按单独product_id跨店合并、不补缺日、不把真实0当缺失。
 
-新适配显式接受`complete_7d`、独立`complete_ad_7d`、逐项推广质量和`source_complete_14d`。来源完整日未知时增长14分不计；M1-01收藏输入按完整7日日新增累计，只有同定义参照满足既有12/24款样本门槛才计入参考分，缺日/NULL或缺参照不计分；无品类/无适用标准保留未评分行。缺商品7日不阻断独立齐备的推广试算。候选结果的`formal_scaling_eligible`恒为false，不能变成正式放量依据。推广支付日已确认，点击后归因天数仍未知，不推定为1/7/14天。
+新适配显式接受`complete_7d`、独立`complete_ad_7d`、逐项推广质量和`source_complete_14d`。来源完整日未知时增长14分不计；M1-01收藏输入按完整7日日新增累计，只有同定义参照满足既有12/24款样本门槛才计入参考分，缺日/NULL或缺参照不计分；无品类/无适用标准保留未评分行。缺商品7日不阻断独立齐备的推广试算。候选结果的`formal_scaling_eligible`恒为false，不能变成正式放量依据。推广支付日已确认，输入为来源已归因日汇总，不需要点击时间或点击窗口天数即可计算源额/花费与源笔数/点击；未知点击天数不推定为1/7/14天，也不再作为这些日汇总的额外阻断项。规则包`require_attribution_evidence=True`继续要求来源和日期口径证据，不解释成必须重做平台点击归因；来源完整性和试行参照效果门禁继续关闭正式放量。
 
 运行命令（从项目根目录）：
 
@@ -130,7 +130,7 @@ python3 runtime/m1-v6/test_trial_baseline.py
 1. 新建独立`score_standards`派生版本，`rule_set_id=NULL`，冻结算法版本/参数与输入SHA、当期历史范围/T−14、样本规则及未验证边界。使用当前完整K与已有`listing_id`建立每K绑定的标准头；`basis_kind=proposed`，能核身份的头`identity_match_status=matched`，不猜原线上对象店铺。不适用/未知日期保持NULL，当前季节/生命周期不填假标签。
 2. 每个标准头恰有十个`score_standard_items`。可用四线存完整NUMERIC、`precision_kind=full_precision`，保留样本数/单位、linear分位、真实品类或全品类硬回退、实际历史范围。收藏使用日新增累计的相容历史特征重建参照，增长依赖未证或其他参照样本不足时四线NULL、`threshold_status=missing`并写原因。业务候选状态与“计算样本数已经在当前范围核过”分别表达，不因采样计算通过改成`verified_reference`。
 3. `product_scores`使用独立派生版及相容的`product_scoring`规则包。通过`version_inputs`绑定真实`product_current[T−6,T]`、`product_previous[T−13,T−7]`、`ad_current[T−6,T]`、`profile`关系版及`standard`标准版；标准生成另绑定其真实历史商品、推广及资料输入，历史角色与窗口解释在实施设计中冻结。146款均保留，按既有字段存十三项实际聚合输入；不从JSON搬旧总分。
-4. `product_score_items`保存十项`valid/partial/missing/not_computable`及缺项证据，只允许已有受限`evidence_context`键。表本身没有总分/points列：按冻结的输入、标准和规则重演Decimal分项与总分，由只读查询适配展示；无有效项总分NULL，部分分不归一。候选标准效果、完整性/归因窗口缺口仍使建议停留在`unscored`或`pending_validation`。查询同时检查标准/评分的`producer_revision`与当前评分定义指纹；定义变更后旧结果显示待重算，须追加发布新相容标准及评分，不原地改旧行。
+4. `product_score_items`保存十项`valid/partial/missing/not_computable`及缺项证据，只允许已有受限`evidence_context`键。表本身没有总分/points列：按冻结的输入、标准和规则重演Decimal分项与总分，由只读查询适配展示；无有效项总分NULL，部分分不归一。候选标准效果和完整性缺口仍使建议停留在`unscored`或`pending_validation`。查询同时检查标准/评分的`producer_revision`与当前评分定义指纹；定义变更后旧结果显示待重算，须追加发布新相容标准及评分，不原地改旧行。
 5. 在独立真实PG完成十项集合、K唯一、标准归属、输入相容、精确分值、幂等/失败恢复和事务发布验证后，受控短事务切换`current_datasets`。GET只读已发布相容DB版本，版本不合返回明确状态/409；私有候选JSON只是核验材料，不是临时读取快照的发布替代。
 
 现有四张表可承载本次内容，无须新增字段；真实writer需要追加下述05列权限。用户试行启用决定、规则和血缘的正式正文仍由主任务写回负责文档，本报告保存实际核查及实施证据。

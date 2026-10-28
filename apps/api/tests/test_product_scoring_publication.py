@@ -67,6 +67,8 @@ def test_published_trial_is_atomic_idempotent_and_keeps_unknown_category(sales_p
         assert all(int(item["pending_weight"]) >= 14 for item in page["items"])
         assert page["items"][-1]["product_id"] == "13"
         assert str(page["items"][0]["score"]) == "76"
+        assert "归因窗口" not in page["items"][0]["reason"]
+        assert "完整日" in page["items"][0]["reason"]
         from app.api.product_board_schemas import ScoresData
         from app.modules.product_board.repository import wire
 

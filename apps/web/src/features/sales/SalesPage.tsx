@@ -58,7 +58,7 @@ export function SalesPage() {
     ["退款率", percent(data?.refund_rate), "退款发生期 / 同期支付成交 · 经营金额占比", "danger"],
     ["推广花费", money(data?.promotion_spend), "数仓 6 店 · 官方明星店铺 · 已知值合计", ""],
     ["点击率", percent(data?.promotion_ctr), "已匹配推广点击量 / 曝光量", ""],
-    ["ROI", fixed(data?.promotion_roi), "渠道独立 · 支付日统计 · 归因窗口待补证", "success"],
+    ["ROI", fixed(data?.promotion_roi), "渠道独立 · 来源支付日汇总", "success"],
   ];
   return (
     <DashboardLayout
@@ -249,7 +249,7 @@ export function SalesPage() {
               </div>
               <p>
                 {rangeLabel} ·
-                店铺级指标随日期与店铺筛选联动；两推广渠道独立、按支付日统计，归因窗口天数待来源补证。
+                店铺级指标随日期与店铺筛选联动；两推广渠道独立，沿用来源已归因的支付日汇总，不重算点击归因。
               </p>
             </div>
             <div className="sales-kpis" data-testid="sales-kpis">

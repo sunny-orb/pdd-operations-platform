@@ -53,13 +53,20 @@ const empty = (
   card: DomainCard,
   observationState: DomainPayload["observationState"] = "not_available",
 ): DomainPayload => ({ card, observations: [], actions: [], observationState });
-const observedCount = (domain: DomainId, observations: Observation[]) => {
-  const count = centerCounts(observations, [], [{ domain, status: "observed" }]);
+const observedCount = (
+  domain: DomainId,
+  observations: Observation[],
+  state: "observed" | "pending_validation" = "observed",
+) => {
+  const count = centerCounts(observations, [], [{ domain, status: state }]);
   return {
     label: "观察异常对象",
     value: count.exceptionCount === null ? null : String(count.exceptionCount),
     type: "number" as const,
-    note: `已接范围；列表${observations.length}条，未映射${count.unmappedObservations}条；非完整正式总数`,
+    note:
+      state === "pending_validation"
+        ? "异常证据待核；空占位清单不代表零异常，原值及分类观察仍按来源显示"
+        : `已接范围；列表${observations.length}条，未映射${count.unmappedObservations}条；非完整正式总数`,
   };
 };
 const dailyNote = "最新观察日；完整截至日未知，不能视为完整日。";
@@ -223,7 +230,7 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
       detail:
         [...r.findings.map((f) => f.evidence), ...r.clues.map((c) => c.evidence), ...r.notes].join(
           "；",
-        ) || "归因与记录完整性待核验",
+        ) || "记录完整性及规则证据待核验",
       scope: `${r.shop_name ?? r.shop_id ?? "未提供店铺"} · ${window}（诊断窗）`,
       impact: r.current.spend?.value ?? null,
       impactKind: "诊断窗花费，非损失金额",
@@ -243,10 +250,13 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
           },
           { label: "最近更新", value: m.date, type: "text" },
         ],
-        note: `来源：商品推广 · 最新观察单日。诊断另按 ${window}，不等于当日结果；归因/完整性待核验。`,
+        note: `来源：商品推广 · 最新观察单日。诊断另按 ${window}，不等于当日结果；来源完整性及正式评级待核验。`,
       },
       observations,
-      observationState: "observed",
+      observationState:
+        !observations.length && di.status === "insufficient_evidence"
+          ? "pending_validation"
+          : "observed",
       actions: observations.map((o, i) => {
         const r = di.flagged_products[i];
         return actionFromObservation(
@@ -428,6 +438,10 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
       verification: r.verification,
       link: aftersalesLink(report),
     }));
+    const observationState =
+      !observations.length && d.decision.status === "pending_validation"
+        ? "pending_validation"
+        : "observed";
     return {
       card: {
         ...base,
@@ -436,7 +450,7 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
         pairs: [
           { label: "退款总额", value: amount?.value ?? null, type: "currency" },
           { label: "售后退款", value: metric("inbound_amount")?.value ?? null, type: "currency" },
-          observedCount("aftersales", observations),
+          observedCount("aftersales", observations, observationState),
           {
             label: "最近更新",
             value: d.report?.generated_at ? localTime(d.report.generated_at) : null,
@@ -447,7 +461,7 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
         note: `${base.note} ${d.scope_note} ${d.quality_note}`,
       },
       observations,
-      observationState: "observed",
+      observationState,
       actions,
     };
   },

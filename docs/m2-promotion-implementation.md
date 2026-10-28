@@ -8,7 +8,7 @@ Goal：按requirements6和data-contract3.5.2还原店铺推广总览/商品推�
 
 扩M3相同来源必要投影：商品推广JSON净交易额/成交笔数，明星transaction_count；明星净额仍NULL。提升生产解释版本并重发源版，原四指标/M3回归对账。来源位置只用已核ODS商品推广概览、pdd_star_shop、BWD商品推广及数仓资料，不叠加ADS子集/旧补齐。只读RR固定本模式实际依赖，不受无关域版本变化牵连。
 
-NUMERIC/Decimal汇总；API十进制字符串/null。比率仅用同一行成对有效分子/分母。两店铺渠道独立、按支付日统计，移除旧“是否互相包含”门禁；归因窗口天数仍待来源补证。相同店铺/支付日/日粒度的金额及成交笔数可加，ROI/CVR使用合计后的分子分母，不平均来源率。
+NUMERIC/Decimal汇总；API十进制字符串/null。比率仅用同一行成对有效分子/分母。两店铺渠道独立、按支付日统计，移除旧“是否互相包含”门禁。三类推广源均已交付归因金额/笔数，本项目沿用来源支付日日汇总，不重新按点击窗口分配订单；来源点击观察天数未知也不阻断日汇总。相同店铺/支付日/日粒度的金额及成交笔数可加，ROI/CVR使用合计后的分子分母，不平均来源率。支付日并不代表当天点击，当日花费和当日支付成交也不是同批点击的终态转化。
 
 店铺所选范围缺适用渠道日或字段时，已知金额/笔数小计标partial；合计ROI/CVR只有全部适用店铺渠道日及各自必要字段齐备才返回，否则NULL并说明缺覆盖/输入。各渠道原观察保留并附覆盖；明星净额字段缺失或整行缺失均不能将商品渠道净额拼成完整净额。当前无上游业务完整日证明，行覆盖齐备仍只表示来源参考，不改unknown完整性。M3现有推广区复用相同渠道覆盖边界，其合计ROI采用总成交额/总花费，单渠道观察保留。
 
@@ -18,7 +18,9 @@ SOP按同对象相邻两个7日历窗及必需字段判断。花费增长≥20%�
 
 /api/v1/promotion下meta/options/overview/days/diagnosis，mode=store|product。meta含各来源截至/成功/尝试/版本及推荐日期；其它请求显式data_version，409/422/503统一协议。overview合并趋势以同快照返回，days服务端分页。options级联有界商品候选，完整listing_id。店铺固定25行、商品25/50/100；商品模式不得依赖M1经营事实是否有同日行。
 
-业务答复以[data-contract 3.5.6](data-contract.md#business-metric-questions)为准。meta及成交指标明确payment_date/window_pending，两店铺来源分别保留日期角色；不填写未经来源证明的归因天数。规则版本为`sop-v1.4-m2-20261028-confirmed-growth`，查询定义指纹随实现更新；口径实施及隔离PG合成反例通过不等于真实来源完整性/上游归因窗口验收。
+业务答复以[data-contract 3.5.6](data-contract.md#business-metric-questions)为准。meta及成交指标明确`payment_date/source_reported_payment_date`，两店铺来源分别保留日期角色；`attribution_window_days=NULL`，不填写未经来源证明的归因天数。规则版本为`sop-v1.4-m2-20261028-source-payment-date`，查询定义指纹随实现更新；口径实施及隔离PG合成反例通过不等于真实来源完整性或点击级归因算法验收。
+
+本次最小实施顺序：先在`test_promotion_api.py`补支付日边界/无点击输入仍保留源额、NULL及完整日门禁反例，在M3推广渠道测试核对同义状态；随后仅改推广`repository/query/diagnosis`元信息和说明、M1评分提示及M3推广提示/DTO，保持金额与评分算法不变；定向真实PG与前端测试确认后由主任务统一对账与重发相容评分。本段不授权上游查询、迁移或业务库重算。
 
 ## 实施步骤
 

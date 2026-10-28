@@ -170,8 +170,15 @@ def test_store_independent_channels_sum_payment_day_and_preserve_missing_net(sal
         assert Decimal(data["metrics"]["cvr"]["numerator"]) == 5
         assert Decimal(data["metrics"]["cvr"]["denominator"]) == 30
         assert data["metrics"]["revenue"]["business_date_basis"] == "payment_date"
-        assert data["metrics"]["roi"]["attribution_state"] == "window_pending"
+        assert data["metrics"]["roi"]["attribution_state"] == "source_reported_payment_date"
         assert meta.json()["data"]["business_date_basis"] == "payment_date"
+        assert meta.json()["data"]["attribution_state"] == "source_reported_payment_date"
+        assert meta.json()["data"]["attribution_window_days"] is None
+        assert all(
+            source["attribution_state"] == "source_reported_payment_date"
+            for source in meta.json()["data"]["sources"]
+        )
+        assert data["coverage"]["completeness"] == "unknown"
         assert data["net"]["net_revenue"]["value"] is None
         single = client.get(
             "/api/v1/promotion/overview", params={**q, "channel": "product_promotion"}
@@ -228,6 +235,38 @@ def test_sop_net_zero_and_confirmed_growth_keep_separate_sample_thresholds():
     confirmed_growth = assess(growth, previous, complete=True)
     assert any(f["level"] == "P2" and "花费增长" in f["rule"] for f in confirmed_growth["findings"])
     assert not any(c["status"] == "rule_pending" for c in confirmed_growth["clues"])
+
+
+def test_source_payment_days_do_not_reallocate_revenue_to_click_day_or_require_click_window():
+    """周一有点击、周三来源有支付成交：保留各日原值，不推1日窗或移动成交。"""
+    from app.modules.promotion.query import aggregate
+
+    base = dict(
+        spend=Decimal("10"),
+        attributed_revenue=Decimal("0"),
+        net_attributed_revenue=None,
+        attributed_deals=Decimal("0"),
+        impressions=Decimal("100"),
+        clicks=Decimal("5"),
+    )
+    monday = dict(base, date=date(2026, 10, 19))
+    wednesday = dict(
+        base,
+        date=date(2026, 10, 21),
+        spend=Decimal("0"),
+        clicks=Decimal("0"),
+        attributed_revenue=Decimal("40"),
+        attributed_deals=Decimal("2"),
+    )
+    assert aggregate([monday])["revenue"]["value"] == 0
+    paid_day = aggregate([wednesday])
+    assert paid_day["revenue"]["value"] == 40
+    assert paid_day["deals"]["value"] == 2
+    assert paid_day["revenue"]["attribution_state"] == "source_reported_payment_date"
+    assert paid_day["cvr"]["value"] is None  # 当日无点击不能证明源成交错误，也不能补分母。
+    assert paid_day["roi"]["value"] is None
+    assert paid_day["net_revenue"]["value"] is None
+    assert aggregate([monday, wednesday])["roi"]["value"] == 4
 
 
 def growth_windows(

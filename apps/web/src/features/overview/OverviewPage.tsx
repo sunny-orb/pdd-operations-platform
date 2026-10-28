@@ -154,6 +154,7 @@ export function OverviewPage() {
     loading: "读取中",
     not_connected: "观察来源未接收",
     not_implemented: "未接异常接口",
+    pending_validation: "异常证据待核，空清单不计作零",
   };
   const hasResults = states.some((s) => s.data);
   const actionCount = hasResults ? counts.actionRows : "—";

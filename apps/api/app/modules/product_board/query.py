@@ -444,7 +444,7 @@ def score_cards(repo, q, listing_id=None):
             if code == "favorites_7d" and inputs[code] is None:
                 reason = "收藏新增缺日或字段缺值；不补零，不发布7日评分输入"
             elif code.startswith("ad_"):
-                reason = "推广归因窗口待核；原值比率仅参考；四档标准未接入"
+                reason = "推广沿来源支付日汇总；原值比率仅参考；四档标准未接入"
             signals.append(
                 dict(
                     code=code,
@@ -485,7 +485,7 @@ def score_cards(repo, q, listing_id=None):
                 coverage="observed_reference"
                 if observed_days(values, start, end, ("visitors", "product_revenue", "units"))
                 else "partial",
-                reason="相容四档标准未接入；推广归因窗口和完整性仍待核",
+                reason="相容四档标准未接入；来源完整性仍待核",
                 action="先核对资料、原值和参照标准，保留评分位置",
             )
         )

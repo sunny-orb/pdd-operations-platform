@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import { usePromotion } from "./data";
+import { metadata, metric } from "./contracts";
 
 afterEach(() => {
   cleanup();
@@ -33,6 +34,24 @@ const wrapper = () => {
     </MemoryRouter>
   );
 };
+it("保留来源支付日语义与未知点击天数，不把未知天数改成1天", () => {
+  const basis = {
+    business_date_basis: "payment_date",
+    attribution_state: "source_reported_payment_date",
+  };
+  const parsed = metadata.parse({ ...meta, ...basis, attribution_window_days: null });
+  expect(parsed).toMatchObject({ ...basis, attribution_window_days: null });
+  expect(
+    metric.parse({
+      ...basis,
+      value: "40",
+      status: "observed",
+      reason: null,
+      label: "交易额",
+      type: "currency",
+    }),
+  ).toMatchObject(basis);
+});
 it("409仅重取一次元信息，不循环重试同一版本", async () => {
   const fetch = vi.fn(async (url: string) =>
     url.includes("/meta?")

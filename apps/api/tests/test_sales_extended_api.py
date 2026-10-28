@@ -348,7 +348,10 @@ def test_confirmed_channels_roi_uses_complete_same_shop_payment_day(sales_pg, tm
     assert data["promotion_roi"] == "2.500000000000"
     assert data["field_states"]["promotion_roi"] == "source_reference"
     assert all(c["business_date_basis"] == "payment_date" for c in data["promotion_channels"])
-    assert all(c["attribution_state"] == "window_pending" for c in data["promotion_channels"])
+    assert all(
+        c["attribution_state"] == "source_reported_payment_date"
+        for c in data["promotion_channels"]
+    )
     partial = c.get("/api/v1/sales/performance", params={**q, "date_to": "2026-10-27"}).json()[
         "data"
     ]

@@ -7,6 +7,8 @@ export const metric = z.object({
   type: z.string(),
   previous: z.string().nullable().optional(),
   change: z.string().nullable().optional(),
+  business_date_basis: z.literal("payment_date").nullish(),
+  attribution_state: z.literal("source_reported_payment_date").nullish(),
 });
 export type Metric = z.infer<typeof metric>;
 export const metricMap = z.record(z.string(), metric);
@@ -20,6 +22,9 @@ export const metadata = z.object({
   observed_rows: z.string(),
   complete_through: z.string().nullable(),
   completeness: z.string(),
+  business_date_basis: z.literal("payment_date").optional(),
+  attribution_state: z.literal("source_reported_payment_date").optional(),
+  attribution_window_days: z.null().optional(),
   sources: z.array(source),
 });
 const option = z.object({ value: z.string(), label: z.string() });

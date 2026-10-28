@@ -339,7 +339,7 @@ export function Trends({ data, active }: { data?: Board; active: string[] }) {
           </div>
           <small>
             {data?.basis ?? "数据状态待核"}
-            。收藏按日新增累计、未扣取消；推广归因窗口和完整日仍待补证。
+            。收藏按日新增累计、未扣取消；推广沿来源已归因的支付日汇总，完整日仍待补证。
           </small>
         </aside>
       </section>

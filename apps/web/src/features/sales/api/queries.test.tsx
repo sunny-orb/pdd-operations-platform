@@ -6,11 +6,36 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useSalesData } from "./queries";
 import { getSalesFilters, getSalesResult } from "./salesApi";
 import { testFilters, testMeta, testMetrics, testShops } from "../testFixtures";
+import { metricsSchema } from "./contracts";
 
 vi.mock("./salesApi", () => ({ getSalesFilters: vi.fn(), getSalesResult: vi.fn() }));
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+});
+it("渠道DTO保留来源支付日汇总状态，完整性仍由覆盖字段表达", () => {
+  const basis = {
+    business_date_basis: "payment_date",
+    attribution_state: "source_reported_payment_date",
+  };
+  const parsed = metricsSchema.parse({
+    ...testMetrics,
+    promotion_channels: [
+      {
+        ...basis,
+        code: "shop_channel_product_promotion",
+        spend: "10",
+        revenue: "40",
+        ctr: null,
+        roi: "4",
+        missing_shop_days: 0,
+        null_counts: {},
+        source: { state: "observed", observed_through: "2026-10-26", source_updated_text: null },
+      },
+    ],
+  });
+  expect(parsed.promotion_channels?.[0]).toMatchObject(basis);
+  expect(parsed.coverage).toEqual(testMetrics.coverage);
 });
 it("updates same-version source status and clears recovered polling errors without fetching facts", async () => {
   const initial = {

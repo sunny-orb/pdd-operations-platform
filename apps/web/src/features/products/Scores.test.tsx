@@ -66,4 +66,6 @@ it("shows enabled trial partial points and pending weight without claiming compl
   expect(screen.getByText(/待验证权重 24/)).toBeTruthy();
   expect(screen.getAllByText(/新试行标准已启用/).length).toBeGreaterThan(0);
   expect(screen.queryByText("暂未评分 · 缺少相容四档标准")).toBeNull();
+  expect(screen.getByText(/推广沿来源支付日汇总/)).toBeTruthy();
+  expect(screen.queryByText(/推广归因窗口及完整日待验证/)).toBeNull();
 });

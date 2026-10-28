@@ -12,12 +12,12 @@ from app.modules.product_board.metrics import compare
 
 from .query import aggregate, coverage, dates_between, labels, matches
 
-RULE_VERSION = "sop-v1.4-m2-20261028-confirmed-growth"
+RULE_VERSION = "sop-v1.4-m2-20261028-source-payment-date"
 RULE_STATES = dict(
     roi_drop="confirmed_threshold_inputs_pending",
     net_roi_drop="confirmed_threshold_inputs_pending",
     spend_growth="confirmed_no_minimum_sample_inputs_pending",
-    attribution="payment_date_confirmed_window_pending_M1_02",
+    attribution="source_reported_payment_date",
     human_actions="not_connected",
     ai="not_connected",
 )
@@ -144,10 +144,10 @@ def assess(current, previous, *, complete=False):
         findings.append(
             dict(
                 level="观察",
-                rule="有花费无成交，归因完整性待核实",
+                rule="支付日有花费无成交，仅作观察",
                 evidence=f"花费 {now['spend']['value']}，成交0笔",
-                action="核对归因延迟、可售状态及新品测试阶段，不直接停投",
-                status="attribution_pending",
+                action="当日花费与成交并非同批点击；核对来源修订、可售状态及新品测试阶段，不直接停投",
+                status="observation_only",
             )
         )
     if any(m["net_roi"]["value"] is None for m in (now, before)):

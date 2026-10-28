@@ -18,6 +18,7 @@ const payload = (value: string): DomainPayload => ({
     status: "partial",
   },
   observations: [],
+  observationState: "observed",
   actions: [],
 });
 const meta = (id: DomainId, version = "v1", attemptStatus = "succeeded"): DomainMeta => ({

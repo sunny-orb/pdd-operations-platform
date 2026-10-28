@@ -12,6 +12,8 @@ export type Observation = {
   domain: DomainId;
   level: "observation";
   sourcePriority: string | null;
+  objectKey: string | null;
+  objectLevel: "listing" | "overview" | "category" | "style" | "unknown";
   title: string;
   detail: string;
   scope: string;
@@ -47,6 +49,7 @@ export type DomainPayload = {
   card: DomainCard;
   observations: Observation[];
   actions: SuggestedAction[];
+  observationState: "observed" | "not_available" | "not_implemented";
 };
 export type DomainMeta<M = unknown> = {
   id: DomainId;
@@ -89,10 +92,53 @@ export function localTime(value: string | null | undefined) {
     ? value
     : new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 }
-/** M6-01尚未裁决；列表/建议长度仅是当前呈现结构数，不发布正式异常总数。 */
-export function centerCounts(observations: readonly unknown[], actions: readonly unknown[]) {
+export type ObservationCoverage = {
+  domain: DomainId;
+  status: "observed" | "retained" | "failed" | "loading" | "not_connected" | "not_implemented";
+};
+/** 观察列表的读取覆盖与业务完整日分开；失败保旧明确标为retained。 */
+export function observationCoverage(
+  states: readonly {
+    id: DomainId;
+    data: DomainPayload | undefined;
+    error: string | null;
+    loading: boolean;
+  }[],
+): ObservationCoverage[] {
+  return states.map((state) => ({
+    domain: state.id,
+    status:
+      state.data?.observationState === "observed"
+        ? state.error
+          ? "retained"
+          : "observed"
+        : state.loading
+          ? "loading"
+          : state.error
+            ? "failed"
+            : state.data?.observationState === "not_implemented"
+              ? "not_implemented"
+              : "not_connected",
+  }));
+}
+/** M6-01：只计已映射观察对象；标题不参与身份，正式分级与负责人继续未知。 */
+export function centerCounts(
+  observations: readonly Observation[],
+  actions: readonly unknown[],
+  coverage: readonly ObservationCoverage[],
+) {
+  const mapped = observations.filter((o) => o.objectKey && o.objectLevel !== "unknown");
+  const objects = new Set(mapped.map((o) => o.objectKey));
+  const unmapped = observations.length - mapped.length;
+  const available = coverage.filter(
+    (c) => c.status === "observed" || c.status === "retained",
+  ).length;
   return {
-    exceptionCount: null,
+    exceptionCount: objects.size || (available && !unmapped ? 0 : null),
+    countStatus: unmapped ? "partial_mapping" : available ? "observed" : "unavailable",
+    unmappedObservations: unmapped,
+    availableDomains: available,
+    unavailableDomains: coverage.length - available,
     p0: null,
     p1: null,
     p2: null,
@@ -100,6 +146,24 @@ export function centerCounts(observations: readonly unknown[], actions: readonly
     observations: observations.length,
     actionRows: actions.length,
   };
+}
+const hasIdentity = (value: string | null | undefined): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+/** 完整店铺+链接在M1/M2共用身份命名空间，不将同品类或同商品裸ID合并。 */
+export function listingObjectKey(object: { shop_id: string | null; listing_id: string | null }) {
+  return hasIdentity(object.shop_id) && hasIdentity(object.listing_id)
+    ? JSON.stringify(["listing", object.shop_id, object.listing_id])
+    : null;
+}
+/** 报告与层级都参与身份；总览和所属品类分别计项，不据此合计金额。 */
+export function aftersalesObjectKey(
+  report: string,
+  level: "overview" | "category" | "style",
+  object: string | null,
+) {
+  return hasIdentity(report) && hasIdentity(object)
+    ? JSON.stringify(["aftersales", report, level, object])
+    : null;
 }
 export function shownAlerts<T extends { level: string }>(items: readonly T[], level: string): T[] {
   return level === "全部" ? [...items] : items.filter((item) => item.level === level);
@@ -125,6 +189,14 @@ export function aftersalesLink(reportId: string, category?: string) {
   const q = new URLSearchParams({ report_id: reportId });
   if (category) q.set("category", category);
   return `/aftersales?${q}#aftersales-analysis`;
+}
+export function salesLink(month: string, date: string | null) {
+  const q = new URLSearchParams({ month });
+  if (date) {
+    q.set("from", date);
+    q.set("to", date);
+  }
+  return `/sales?${q}#performance`;
 }
 export function actionFromObservation(
   item: Observation,

@@ -87,3 +87,41 @@ class LocalExecutionTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(RuntimeError, "55432"):
                 local_url("pdd_operations")
+
+    def test_target_upgrade_refuses_stale_evidence_before_any_database_access(self):
+        spec = importlib.util.spec_from_file_location(
+            "target_upgrade_guard_test", ROOT / "scripts/upgrade-targets-local.py"
+        )
+        entry = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(entry)
+        runner = MagicMock()
+        runner.EVIDENCE.read_text.return_value = '{"result":"passed","fingerprint":"old"}'
+        runner.fingerprint.return_value = "current"
+        with (
+            patch.object(entry, "_runner", return_value=runner),
+            patch.object(
+                entry.sa, "create_engine", side_effect=AssertionError("指纹不符不得连接项目库")
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "隔离验证"):
+                entry.main()
+
+    def test_verification_fingerprint_binds_target_entry_and_review_sql(self):
+        runner = self.runner()
+        before = runner.fingerprint()
+        original = Path.read_bytes
+        for path in (
+            ROOT / "scripts/upgrade-targets-local.py",
+            ROOT / "docs/database-schema/target-ranges.sql",
+        ):
+            with (
+                self.subTest(path=path.name),
+                patch.object(
+                    Path,
+                    "read_bytes",
+                    lambda current, changing=path: (
+                        original(current) + (b"synthetic-change" if current == changing else b"")
+                    ),
+                ),
+            ):
+                self.assertNotEqual(runner.fingerprint(), before)

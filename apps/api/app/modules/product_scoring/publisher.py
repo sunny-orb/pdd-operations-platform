@@ -98,7 +98,7 @@ def _persist(c, t, b, evidence):
             source_locator=REF,
             confirmation_ref=REF,
             content_sha256=rule_hash,
-            evidence_note="用户2026-10-28启用新试行标准；收藏、来源完整性、归因未验证；正式放量分支关闭",
+            evidence_note="用户2026-10-28启用新试行标准及M1-01日新增收藏定义；来源完整性、归因窗口与参照效果未验证；正式放量关闭",
         )
         .on_conflict_do_nothing()
     )
@@ -209,7 +209,7 @@ def _persist(c, t, b, evidence):
                     decision_code="unscored"
                     if row["score_status"] == "unscored"
                     else "pending_validation",
-                    decision_evidence="新试行标准已启用但仍待验证；收藏10分、完整日未知增长14分不计，正式放量关闭",
+                    decision_evidence="新试行标准已启用；收藏按7日新增累计未扣取消及同定义参照试算；完整日未知增长14分不计，正式放量关闭",
                 )
             )
             c.execute(

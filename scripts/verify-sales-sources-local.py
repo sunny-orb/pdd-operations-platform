@@ -5,14 +5,14 @@ import re
 import sys
 import time
 from collections import defaultdict
-from decimal import ROUND_HALF_UP, Decimal
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import ProxyHandler, build_opener
 
 sys.path.insert(0, str(Path.cwd() / "apps/api"))
 import sqlalchemy as sa
-
 from app.core.config import Settings
 from app.db.connection import build_engine
 from app.modules.sales.archive_replay import restore_candidate
@@ -26,11 +26,13 @@ def summed(rows, key):
 
 
 def divided(a, b):
-    return (
-        (a / b).quantize(Decimal("0.000000000001"), rounding=ROUND_HALF_UP)
-        if a is not None and b is not None and b > 0
-        else None
-    )
+    with localcontext() as ctx:
+        ctx.prec = 50
+        return (
+            (a / b).quantize(Decimal("0.000000000001"), rounding=ROUND_HALF_UP)
+            if a is not None and b is not None and b > 0
+            else None
+        )
 
 
 def decimal_equal(actual, expected, money=False):
@@ -101,6 +103,11 @@ with engine.connect().execution_options(isolation_level="REPEATABLE READ") as c,
     c.execution_options(stream_results=False)
 filters = get("filters")
 version = filters["meta"]["data_version"]
+head_versions = {head["dataset_code"]: head["id"] for head in heads}
+assert all(
+    filters["meta"]["input_versions"].get(code) == head_versions[code]
+    for code in inputs
+), "INPUT_VERSION_CHANGED"
 checks = 0
 for lo, hi in [
     ("2026-10-26", "2026-10-26"),
@@ -146,8 +153,9 @@ for lo, hi in [
         promotion = [
             r
             for code in ("shop_channel_product_promotion", "shop_channel_star_shop")
-            for r in inputs[code]
-            if lo <= str(r["business_date"]) <= hi and (not shop or r["shop_id"] == shop)
+            for r in inputs.get(code, [])
+            if lo <= str(r["business_date"]) <= hi
+            and (not shop or r["shop_id"] == shop)
         ]
         decimal_equal(actual["promotion_spend"], summed(promotion, "spend"), money=True)
         paired = [r for r in promotion if r["clicks"] is not None and r["impressions"] is not None]
@@ -155,8 +163,63 @@ for lo, hi in [
             actual["promotion_ctr"],
             divided(summed(paired, "clicks"), summed(paired, "impressions")),
         )
-        if not shop or shop == "spigf":
-            assert actual["promotion_roi"] is None
+        channel_checks = []
+        selected_shops = [shop] if shop else [x[0] for x in SHOPS.values()]
+        expected_days = (date.fromisoformat(hi) - date.fromisoformat(lo)).days + 1
+        api_channels = {item["code"]: item for item in actual["promotion_channels"]}
+        for code in ("shop_channel_product_promotion", "shop_channel_star_shop"):
+            applicable = [
+                sid
+                for sid in selected_shops
+                if code != "shop_channel_star_shop" or sid == SHOPS["663599807"][0]
+            ]
+            if not applicable:
+                continue
+            channel_rows = [
+                r
+                for r in inputs.get(code, [])
+                if lo <= str(r["business_date"]) <= hi and r["shop_id"] in applicable
+            ]
+            observed_keys = {(r["shop_id"], r["business_date"]) for r in channel_rows}
+            assert len(observed_keys) == len(channel_rows), "DUPLICATE_SHOP_CHANNEL_DAY"
+            missing = expected_days * len(applicable) - len(observed_keys)
+            channel_actual = api_channels[code]
+            assert channel_actual["missing_shop_days"] == missing
+            decimal_equal(
+                channel_actual["spend"], summed(channel_rows, "spend"), money=True
+            )
+            decimal_equal(
+                channel_actual["revenue"],
+                summed(channel_rows, "attributed_revenue"),
+                money=True,
+            )
+            roi_rows = [
+                r
+                for r in channel_rows
+                if r["attributed_revenue"] is not None and r["spend"] is not None
+            ]
+            channel_roi = divided(
+                summed(roi_rows, "attributed_revenue"), summed(roi_rows, "spend")
+            )
+            decimal_equal(channel_actual["roi"], channel_roi)
+            channel_checks.append(
+                (missing, len(roi_rows) != len(channel_rows), channel_roi)
+            )
+        # 以归档原行独立配对；多渠道只有所选店铺日和必要字段均齐备才发布合计ROI。
+        roi_rows = [
+            r
+            for r in promotion
+            if r["attributed_revenue"] is not None and r["spend"] is not None
+        ]
+        expected_roi = (
+            divided(summed(roi_rows, "attributed_revenue"), summed(roi_rows, "spend"))
+            if len(channel_checks) > 1
+            and all(not missing and not nulls for missing, nulls, _ in channel_checks)
+            else channel_checks[0][2]
+            if len(channel_checks) == 1
+            else None
+        )
+        decimal_equal(actual["promotion_roi"], expected_roi)
         for code, endpoint, fields in [
             (
                 "shop_regions",

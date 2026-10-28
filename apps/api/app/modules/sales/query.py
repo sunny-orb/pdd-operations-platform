@@ -144,10 +144,14 @@ class SalesService:
 
             return dict(
                 data=dict(
-                    sources={code: source_info(snapshot, code) for code in SPECS},
+                    sources={
+                        code: source_info(snapshot, code) for code in (*SPECS, "sales_targets")
+                    },
                     shops=[
-                        dict(shop_id=id, shop_name=name, display_name=label)
-                        for id, name, label in SHOPS.values()
+                        dict(
+                            source_shop_id=source_id, shop_id=id, shop_name=name, display_name=label
+                        )
+                        for source_id, (id, name, label) in SHOPS.items()
                     ],
                     months=months,
                     default_month=months[-1]["month"],

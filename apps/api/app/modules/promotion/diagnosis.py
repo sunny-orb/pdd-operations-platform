@@ -5,18 +5,19 @@ from collections import defaultdict
 from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
+from fractions import Fraction
 from zoneinfo import ZoneInfo
 
 from app.modules.product_board.metrics import compare
 
 from .query import aggregate, coverage, dates_between, labels, matches
 
-RULE_VERSION = "sop-v1.4-m2-20261028"
+RULE_VERSION = "sop-v1.4-m2-20261028-confirmed-growth"
 RULE_STATES = dict(
     roi_drop="confirmed_threshold_inputs_pending",
     net_roi_drop="confirmed_threshold_inputs_pending",
-    spend_growth="minimum_sample_pending_M2_03",
-    attribution="pending_M1_02",
+    spend_growth="confirmed_no_minimum_sample_inputs_pending",
+    attribution="payment_date_confirmed_window_pending_M1_02",
     human_actions="not_connected",
     ai="not_connected",
 )
@@ -25,6 +26,14 @@ RULE_STATES = dict(
 def assess(current, previous, *, complete=False):
     """输入同一对象的相邻7日原行，输出精确指标/线索及有门禁的规则证据。"""
     now, before = aggregate(current), aggregate(previous)
+    end = max((r["date"] for r in current), default=None)
+    calendar_covered = bool(
+        end
+        and {r["date"] for r in current} == set(dates_between(end - timedelta(days=6), end))
+        and {r["date"] for r in previous}
+        == set(dates_between(end - timedelta(days=13), end - timedelta(days=7)))
+    )
+    complete = complete and calendar_covered
     findings = []
     notes = []
     if not complete:
@@ -85,25 +94,45 @@ def assess(current, previous, *, complete=False):
             )
     spend_delta = compare(now["spend"]["value"], before["spend"]["value"])
     revenue_delta = compare(now["revenue"]["value"], before["revenue"]["value"])
-    if (
-        current
-        and previous
+    growth_inputs = (
+        bool(current and previous)
+        and all(
+            m[key]["status"] == "observed" for m in (now, before) for key in ("spend", "revenue")
+        )
         and spend_delta is not None
         and revenue_delta is not None
-        and spend_delta >= Decimal(".2")
-        and revenue_delta < spend_delta / 2
-    ):
-        clues.append(
-            dict(
-                label="花费增长组合（最低样本门槛待确认）",
-                current=now["spend"]["value"],
-                previous=before["spend"]["value"],
-                change=spend_delta,
-                evidence=f"花费变化 {spend_delta}；交易额变化 {revenue_delta}",
-                action="核查新增花费的成交承接，M2-03确认前不作已确认异常评级",
-                status="rule_pending",
+    )
+    growth_matches = False
+    if growth_inputs:
+        # 用精确分数判断严格边界，避免循环小数舍入把“恰好一半”判成不足。
+        spend_ratio = Fraction(now["spend"]["value"]) / Fraction(before["spend"]["value"]) - 1
+        revenue_ratio = Fraction(now["revenue"]["value"]) / Fraction(before["revenue"]["value"]) - 1
+        growth_matches = spend_ratio >= Fraction(1, 5) and revenue_ratio * 2 < spend_ratio
+    if growth_matches:
+        evidence = f"花费变化 {spend_delta}；交易额变化 {revenue_delta}"
+        action = "核查新增花费的成交承接，复核流量与转化变化后评估预算"
+        if complete:
+            findings.append(
+                dict(
+                    level="P1" if any(f["level"] == "P1" for f in findings) else "P2",
+                    rule="花费增长≥20%，成交承接不足花费增幅一半",
+                    evidence=evidence,
+                    action=action,
+                    status="threshold_observed",
+                )
             )
-        )
+        else:
+            clues.append(
+                dict(
+                    label="花费增长组合（覆盖待核，观察）",
+                    current=now["spend"]["value"],
+                    previous=before["spend"]["value"],
+                    change=spend_delta,
+                    evidence=evidence,
+                    action=action + "；完整性未证，仅供观察",
+                    status="observation_only",
+                )
+            )
     if (
         complete
         and current

@@ -372,7 +372,7 @@ def overview(repo, q):
             for key, label in (
                 ("views", "商品浏览量"),
                 ("visitors", "商品访客"),
-                ("favorites", "收藏用户"),
+                ("favorites", "累计新增收藏量（未扣取消）"),
                 ("buyers", "支付买家"),
                 ("units", "支付件数"),
             )
@@ -422,7 +422,9 @@ def score_cards(repo, q, listing_id=None):
             visitors_7d=a["visitors"]["value"],
             product_revenue_7d=a["revenue"]["value"],
             units_7d=a["units"]["value"],
-            favorites_7d=None,
+            favorites_7d=a["favorites"]["value"]
+            if observed_days(values, start, end, ("favorites",))
+            else None,
             score_conversion_rate_7d=a["score_conversion"]["value"],
             revenue_per_visitor_7d=a["uv_value"]["value"],
             ad_roi_7d=adratio("attributed_revenue", "spend"),
@@ -439,8 +441,8 @@ def score_cards(repo, q, listing_id=None):
         signals = []
         for code, label, weight, kind in WEIGHTS:
             reason = "未取得与当前商品身份/品类相容的四档标准；不复用历史评分当前值"
-            if code == "favorites_7d":
-                reason = "收藏日值可加性待核；不发布区间合计或得分"
+            if code == "favorites_7d" and inputs[code] is None:
+                reason = "收藏新增缺日或字段缺值；不补零，不发布7日评分输入"
             elif code.startswith("ad_"):
                 reason = "推广归因窗口待核；原值比率仅参考；四档标准未接入"
             signals.append(
@@ -483,7 +485,7 @@ def score_cards(repo, q, listing_id=None):
                 coverage="observed_reference"
                 if observed_days(values, start, end, ("visitors", "product_revenue", "units"))
                 else "partial",
-                reason="四档标准未接入；收藏定义、归因和完整性仍待核",
+                reason="相容四档标准未接入；推广归因窗口和完整性仍待核",
                 action="先核对资料、原值和参照标准，保留评分位置",
             )
         )

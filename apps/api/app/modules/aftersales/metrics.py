@@ -2,6 +2,7 @@
 
 from decimal import Decimal, localcontext
 
+from .classification import observations
 from .repository import IDENTITY_FIELDS
 
 
@@ -25,12 +26,15 @@ def ratio(a, b):
         return a / b if a is not None and b is not None and b > 0 else None
 
 
-def summarize(returns, shipped, cancelled):
+def summarize(returns, shipped, cancelled, parameters=None):
     q = total(returns, "actual_returned_qty")
     a = total(returns, "actual_inbound_amount")
     s = total(shipped, "sales_amount")
     p = total(cancelled, "sales_amount")
-    return from_values(q, a, s, p, str(len(returns)) if returns is not None else None)
+    result = from_values(q, a, s, p, str(len(returns)) if returns is not None else None)
+    observed = observations(returns, parameters)
+    result.update(size_qty=observed["size_qty"], quality_qty=observed["quality_qty"])
+    return result
 
 
 def from_values(q, a, s, p, records):
@@ -66,8 +70,7 @@ def matches(row, q):
         text = " ".join(str(row.get(k) or "") for k in (*IDENTITY_FIELDS, "source_return_reason"))
         if q.keyword.casefold() not in text.casefold():
             return False
-    # 未发布分类词典时不能把原原因猜成已证尺码/质量。
-    return q.focus == "all"
+    return True
 
 
 def complete_key(row):
@@ -82,7 +85,7 @@ def complete_key(row):
     )
 
 
-def groups(roles, level="style"):
+def groups(roles, level="style", parameters=None):
     """按完整原生组键配对，不以款号降级；保留三角色组并集及缺行。"""
     by_role = []
     for rows in roles:
@@ -105,5 +108,12 @@ def groups(roles, level="style"):
                     block[i] = None
         elif not complete_key(exemplar):
             block[1] = block[2] = None
-        result.append(dict(key=key, example=exemplar, roles=block, metrics=summarize(*block)))
+        result.append(
+            dict(
+                key=key,
+                example=exemplar,
+                roles=block,
+                metrics=summarize(*block, parameters=parameters),
+            )
+        )
     return result

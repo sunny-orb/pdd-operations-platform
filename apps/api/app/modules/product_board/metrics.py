@@ -7,7 +7,7 @@ D = Decimal
 METRICS = (
     ("revenue", "交易金额", "currency"),
     ("visitors", "商品访客数", "number"),
-    ("favorites", "收藏数", "number"),
+    ("favorites", "累计新增收藏量（未扣取消）", "number"),
     ("buyers", "支付买家数", "number"),
     ("units", "支付件数", "number"),
     ("aov", "客单价", "currency"),
@@ -26,7 +26,7 @@ WEIGHTS = (
     ("visitors_7d", "商品访客数", 12, "number"),
     ("product_revenue_7d", "交易额", 18, "currency"),
     ("units_7d", "支付件数", 12, "number"),
-    ("favorites_7d", "收藏数", 10, "number"),
+    ("favorites_7d", "7日累计新增收藏量（未扣取消）", 10, "number"),
     ("score_conversion_rate_7d", "支付转化率", 8, "percent"),
     ("revenue_per_visitor_7d", "UV价值", 10, "currency"),
     ("ad_roi_7d", "投产比", 8, "ratio"),
@@ -68,14 +68,13 @@ def total(rows, field):
 
 
 def aggregate(rows, *, daily=False):
+    """累计已知商品日原值；收藏为日新增，未扣取消且不作跨日人数去重。"""
     output = {}
     for key, field in FIELDS.items():
         count = sum(r.get(field) is not None for r in rows)
         value = total(rows, field)
         status = "observed" if rows and count == len(rows) else "partial" if count else "missing"
         reason = None if status == "observed" else "字段缺失或无记录"
-        if key == "favorites" and not daily:
-            value, status, reason = None, "definition_pending", "收藏日值可加性待核"
         output[key] = dict(
             value=value,
             status=status,

@@ -10,7 +10,8 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
-from app.modules.aftersales.ingestion import NOTE, REVISION, TABLES
+from app.modules.aftersales.classification import rule_parameters
+from app.modules.aftersales.ingestion import MASTER_TABLE, NOTE, REVISION, TABLES
 from app.modules.sales.source_policy import SHOPS
 
 FACTS = dict(
@@ -40,6 +41,7 @@ def producer():
             for p in (
                 Path(__file__),
                 Path(__file__).with_name("ingestion.py"),
+                Path(__file__).with_name("classification.py"),
                 Path(__file__).parents[2] / "connectors/aftersales.py",
             )
         }
@@ -176,7 +178,10 @@ def publish_source(engine, code, receive, root):
                             origin_kind="source",
                             state="draft",
                             source_system="warehouse",
-                            source_locator="cubeappdata." + TABLES[code],
+                            source_locator="cubeappdata."
+                            + TABLES[code]
+                            + " | cubeappdata."
+                            + MASTER_TABLE,
                             row_schema_revision=REVISION,
                             interpretation_ref=evidence,
                             producer_revision=producer(),
@@ -305,17 +310,14 @@ def publish_reports(engine, root):
                 }
                 if set(heads) != set(FACTS):
                     raise ValueError("M5_INPUTS_MISSING")
+                target_version = c.scalar(
+                    sa.select(current.c.version_id)
+                    .join(v, v.c.id == current.c.version_id)
+                    .where(current.c.dataset_code == "refund_targets", v.c.state == "published")
+                )
                 end = min(x["period_end"] for x in heads.values())
                 start = max(x["period_start"] for x in heads.values())
-                params = dict(
-                    policy=dict(
-                        comparison_policy_code="frozen_report_periods",
-                        grouping_policy_code="full_source_groups_unique_denominator",
-                    ),
-                    branches=[],
-                    dictionaries=[],
-                    suggestions=[],
-                )
+                params = rule_parameters(targets_available=bool(target_version))
                 rhash = fingerprint(params)
                 rules = t["rule_sets"]
                 rule_id = c.execute(
@@ -333,7 +335,7 @@ def publish_reports(engine, root):
                             domain="aftersales",
                             schema_revision="v1",
                             parameters=params,
-                            confirmation_status="pending_confirmation",
+                            confirmation_status="partially_confirmed",
                             source_locator="docs/m5-aftersales-implementation.md",
                             content_sha256=rhash,
                             evidence_note=NOTE,
@@ -367,6 +369,7 @@ def publish_reports(engine, root):
                             start=begin,
                             end=stop,
                             inputs={k: x["id"] for k, x in heads.items()},
+                            targets=target_version,
                             rule=rule_id,
                             previous=previous,
                         )
@@ -390,6 +393,7 @@ def publish_reports(engine, root):
                             dict(
                                 fingerprint=digest,
                                 inputs={k: x["id"] for k, x in heads.items()},
+                                targets=target_version,
                                 start=begin,
                                 end=stop,
                                 note=NOTE,
@@ -422,6 +426,19 @@ def publish_reports(engine, root):
                                 window_start=begin,
                                 window_end=stop,
                                 usage_note="J1确认日/J2J3支付日；参考部分报告；不可视为同批订单",
+                            )
+                        )
+                    if target_version:
+                        c.execute(
+                            t["version_inputs"]
+                            .insert()
+                            .values(
+                                output_version_id=vid,
+                                input_role="targets",
+                                input_version_id=target_version,
+                                window_start=begin,
+                                window_end=stop,
+                                usage_note="用户共享周期区间目标；新报告固定当前目标，非历史当时目标",
                             )
                         )
                     revision = (

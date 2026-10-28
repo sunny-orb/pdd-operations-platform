@@ -1,4 +1,4 @@
-"""推广筛选与汇总：Decimal、NULL及两渠道成交门禁，API不回源。"""
+"""推广筛选与汇总：Decimal、支付日及相容渠道覆盖，API不回源。"""
 
 from collections import defaultdict
 from dataclasses import dataclass, replace
@@ -182,7 +182,7 @@ def metric(value, key, status="observed", reason=None, **extra):
 
 
 def aggregate(rows, *, strict=False, cross=False):
-    """分母只配对同一原行；商品缺值保留小计与partial，店铺缺项完整字段留空。"""
+    """分母只配对同一原行；缺值留小计，店铺净额/比率缺项不可冒充完整值。"""
     result = {}
     for key, field in FIELDS.items():
         valid = [r for r in rows if r.get(field) is not None]
@@ -196,7 +196,7 @@ def aggregate(rows, *, strict=False, cross=False):
             else "no_records"
         )
         value = total(valid, field)
-        if strict and len(valid) != len(rows):
+        if strict and key == "net_revenue" and len(valid) != len(rows):
             value = None
         result[key] = metric(
             value,
@@ -243,12 +243,6 @@ def aggregate(rows, *, strict=False, cross=False):
             observed_rows=str(len(rows)),
         )
     if cross:
-        for key in ("revenue", "deals", "roi", "cvr"):
-            result[key].update(
-                value=None,
-                status="cross_channel_unconfirmed",
-                reason="两渠道成交是否互相包含待确认；请分渠道查看",
-            )
         for key in ("net_revenue", "net_roi"):
             result[key].update(
                 value=None,
@@ -256,9 +250,10 @@ def aggregate(rows, *, strict=False, cross=False):
                 reason="明星店铺未提供净交易额；不以商品渠道部分净额冒充合计",
             )
     for key in ("revenue", "net_revenue", "deals", "roi", "net_roi", "cvr"):
-        result[key]["attribution_state"] = "pending_definition"
+        result[key]["business_date_basis"] = "payment_date"
+        result[key]["attribution_state"] = "window_pending"
         if result[key]["status"] == "observed":
-            result[key]["reason"] = "来源归因日期与窗口待补；当前数值为来源参考"
+            result[key]["reason"] = "按支付日统计；点击后归因窗口天数待来源补证，当前为来源参考"
     return result
 
 
@@ -308,9 +303,25 @@ def cross_channel(q):
 
 
 def all_metrics(repo, q, rows):
-    return aggregate(
+    """渠道独立可加；合计比率要求所选店铺支付日的全部适用渠道齐备。"""
+    result = aggregate(
         rows, strict=repo.mode == "store", cross=repo.mode == "store" and cross_channel(q)
     )
+    if repo.mode == "store":
+        missing = coverage(repo, q, rows)["missing_count"]
+        if missing:
+            for m in result.values():
+                m["missing_shop_channel_days"] = missing
+                if m["status"] == "observed":
+                    m.update(status="partial", reason="适用店铺渠道日缺记录；当前为已知记录小计")
+            if cross_channel(q):
+                for key in ("roi", "cvr"):
+                    result[key].update(
+                        value=None,
+                        status="incomplete_channel_coverage",
+                        reason="所选支付日的适用渠道记录不齐，不以部分渠道计算合计比率",
+                    )
+    return result
 
 
 def options(repo, q, selected=()):
@@ -378,7 +389,7 @@ def overview(repo, q):
     # 身份先固定当前窗，比较窗不以当期是否有经营行决定取数。
     selected_all = select(repo, q, date_scope=False)
     before = [r for r in selected_all if prior_q.start <= r["date"] <= prior_q.end]
-    previous = all_metrics(repo, q, before)
+    previous = all_metrics(repo, prior_q, before)
     current_coverage = coverage(repo, q, rows)
     previous_coverage = coverage(repo, prior_q, before)
     for key, m in current.items():
@@ -402,11 +413,12 @@ def overview(repo, q):
         prior_rows = by_date.get(prior, []) if prior else []
         c = coverage(repo, replace(q, start=day, end=day), daily)
         pc = coverage(repo, replace(q, start=prior, end=prior), prior_rows) if prior else None
-        prev = all_metrics(repo, q, prior_rows if pc and not pc["missing_count"] else [])
+        previous_q = replace(q, start=prior, end=prior) if prior else q
+        prev = all_metrics(repo, previous_q, prior_rows if pc and not pc["missing_count"] else [])
         series.append(
             dict(
                 date=day,
-                metrics=all_metrics(repo, q, daily),
+                metrics=all_metrics(repo, replace(q, start=day, end=day), daily),
                 previous_date=prior,
                 previous=prev,
                 missing=bool(c["missing_count"] or not daily),
@@ -436,7 +448,7 @@ def overview(repo, q):
             if q.channel and q.channel != code:
                 continue
             channel_rows = [r for r in rows if r["channel_code"] == code]
-            metrics = aggregate(channel_rows, strict=True)
+            metrics = all_metrics(repo, replace(q, channel=code), channel_rows)
             channels.append(
                 dict(
                     channel=code,

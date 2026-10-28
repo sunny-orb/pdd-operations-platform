@@ -145,7 +145,7 @@ export function ProductsPage() {
           <Risks data={data} />
           <Days state={state} scope={state.scope("detail")} />
           <footer className="m1-source-footer">
-            来源：数仓商品日经营、商品推广、商品上架资料。原值不额外扣退款或做单。收藏区间、归因及完整日的剩余问题登记于项目问题台账。
+            来源：数仓商品日经营、商品推广、商品上架资料。原值不额外扣退款或做单。收藏为累计新增收藏量（未扣取消），不代表净增或跨日去重人数；推广按支付日，归因窗口与完整日仍待补证。
           </footer>
         </main>
       </div>

@@ -1,19 +1,23 @@
 import { Card, Progress, Button } from "antd";
 import { detailPath, targetsSchema, useSalesDetail } from "../api/details";
 import { money, percent } from "../format";
+import { TARGET_SOURCE } from "../sourceLinks";
 export function SalesTargets({
   month,
   version,
   onConflict,
+  statusKey,
 }: {
   month: string;
   version?: string;
   onConflict: () => void;
+  statusKey?: string;
 }) {
   const { data, error, retry } = useSalesDetail(
     detailPath("targets", version, { month }),
     targetsSchema,
     onConflict,
+    statusKey,
   );
   const d = data?.data;
   return (
@@ -22,7 +26,7 @@ export function SalesTargets({
         {
           kind: "monthly",
           title: "本月 GMV 目标进度",
-          badge: "目标跟踪",
+          badge: d?.target_basis_label ?? "基础目标",
           actual: d?.month_actual,
           target: d?.month_target,
           rate: d?.month_ratio,
@@ -32,7 +36,7 @@ export function SalesTargets({
         {
           kind: "annual",
           title: "年度 GMV 目标进度",
-          badge: "年度累计",
+          badge: "年度累计 · 基础目标",
           actual: d?.annual_actual,
           target: d?.annual_target,
           rate: d?.annual_ratio,
@@ -53,7 +57,7 @@ export function SalesTargets({
             percent={x.rate == null ? 0 : Math.min(100, Number(x.rate) * 100)}
             showInfo={false}
             strokeColor={x.kind === "annual" ? "#15805d" : undefined}
-            aria-label={`${x.footer}${x.target == null ? "来源不可用" : ""}`}
+            aria-label={`${x.footer}${x.target == null ? "尚无相容目标" : "基础目标 · 观察参考进度"}`}
           />
           <div className="target-footer">
             <span>
@@ -67,8 +71,17 @@ export function SalesTargets({
         <span>本月目标缺口</span>
         <strong>{money(d?.gap)}</strong>
         <p>
-          {error ?? "目标原入口当前不可用；已展示真实月/年累计，缺口与达成率等待有效目标输入。"}
+          {error ?? d?.note ?? "正在读取基础目标及数仓完成额；未取得目标时达成率与缺口保留缺项。"}
         </p>
+        {d?.target_coverage && (
+          <p>
+            基础目标 · 财年已接 {d.target_coverage.available_months.length}/12 月
+            {d.target_coverage.missing_months.length
+              ? `，缺 ${d.target_coverage.missing_months.join("、")}`
+              : ""}
+            ；固定六店渠道范围，不按单店分摊。
+          </p>
+        )}
         {error && (
           <Button size="small" onClick={retry}>
             重试目标数据
@@ -76,6 +89,9 @@ export function SalesTargets({
         )}
         <a href="https://bi.kktree.cn/" target="_blank" rel="noreferrer">
           查看店铺销售原始数据 ↗
+        </a>
+        <a href={TARGET_SOURCE} target="_blank" rel="noreferrer">
+          查看基础目标来源 ↗
         </a>
       </Card>
     </section>

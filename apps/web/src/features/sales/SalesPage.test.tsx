@@ -194,3 +194,27 @@ it("切换店铺后忽略已取消请求的晚到响应", async () => {
     expect(within(screen.getByTestId("sales-kpis")).getByText("¥31")).toBeTruthy(),
   );
 });
+
+it("中心链接指定单日和店铺后显示实际范围且不先请求默认范围", async () => {
+  const requested: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((path: string) => {
+      requested.push(path);
+      return Promise.resolve({ ok: true, json: async () => syntheticResponse(path) });
+    }),
+  );
+  render(
+    <MemoryRouter
+      initialEntries={["/sales?month=2026-09&from=2026-09-15&to=2026-09-15&shop=spihw#performance"]}
+    >
+      <SalesPage />
+    </MemoryRouter>,
+  );
+  await waitFor(() => expect(screen.getByRole("heading", { name: "户外店经营表现" })).toBeTruthy());
+  expect(screen.getByText("经营数据：2026-09-15")).toBeTruthy();
+  const facts = requested.filter((path) => path.includes("/performance?"));
+  expect(facts).toHaveLength(1);
+  expect(facts[0]).toContain("date_from=2026-09-15");
+  expect(facts[0]).toContain("shop_id=spihw");
+});

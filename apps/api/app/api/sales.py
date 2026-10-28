@@ -63,10 +63,17 @@ def shops(
 
 
 @router.get("/targets", response_model=DetailResponse)
-def targets(request: Request, month: str, data_version: str = Query(min_length=1, max_length=100)):
+def targets(
+    request: Request,
+    month: str,
+    data_version: str = Query(min_length=1, max_length=100),
+    target_basis: str = Query(default="base", pattern="^(base|stretch)$"),
+):
     from app.modules.sales.detail_queries import SalesDetails
 
-    return finish(request, SalesDetails(request.app.state.engine).targets(month, data_version))
+    return finish(
+        request, SalesDetails(request.app.state.engine).targets(month, data_version, target_basis)
+    )
 
 
 @router.get("/ratings", response_model=DetailResponse)

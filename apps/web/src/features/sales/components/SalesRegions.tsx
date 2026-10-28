@@ -376,7 +376,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                       title: "退款率",
                       dataIndex: "refund_rate",
                       render: (v, r) => (
-                        <span title="来源期间参考占比，日期及实退归属待核">
+                        <span title="付款日筛选的来源期间参考占比；实退按退货发生周期，不能当同批订单退款率">
                           {percent(v)}
                           {v != null &&
                           (r.null_counts.actual_shipped_amount > 0 ||
@@ -439,7 +439,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
             按数仓业务日期（dt）、店铺、省份汇总日粒度记录；品类取商品分类，产品按款式编码合并颜色及规格，款式未设置时按商品编码区分。缺码记录保留在全部产品汇总，不合成一个可选产品。
           </p>
           <p>
-            退款率＝实退金额合计÷实发金额合计，不平均源比率；实发金额≤0或无已知值显示“—”，部分金额缺失标“*”。业务日期及实退归属待核，不推断同批最终退款，不与后台GMV相加。排除包材、儿童赠品、分类未设置。产品搜索只影响候选，选择产品后才影响汇总。
+            退款率＝实退金额合计÷实发金额合计，不平均源比率；实发金额≤0或无已知值显示“—”，部分金额缺失标“*”。业务日期已确认按付款日、实退计退货发生周期；当前源只有一个dt，仍作来源期间参考占比，不推断同批最终退款，不与后台GMV相加。排除包材、儿童赠品、分类未设置。产品搜索只影响候选，选择产品后才影响汇总。
           </p>
           <small>
             数据表：bwd_rpa_pdd_region_sales_summary_jst_f · 来源更新时间：

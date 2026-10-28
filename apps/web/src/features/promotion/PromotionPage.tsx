@@ -150,8 +150,8 @@ export function PromotionPage() {
           <Details state={state} />
           <footer>
             {product
-              ? "指标口径：实际投产比 = 交易额 ÷ 总花费；净投产比 = 净交易额 ÷ 总花费；CTR = 点击 ÷ 曝光；点击转化率 = 成交笔数 ÷ 点击量。"
-              : "店铺商品推广：ods_rpa_pdd_product_promotion_overview_f；官方店明星店铺：pdd_star_shop。仅日粒度，不含当天；比率由相容分子分母合计后计算。两渠道成交范围及归因待核，成交合计与依赖比率仅作参考。"}
+              ? "指标口径：推广成交按支付日统计；每日统计频率不代表点击后归因窗口天数，来源窗口仍待补证。实际投产比 = 交易额 ÷ 总花费；净投产比 = 净交易额 ÷ 总花费；CTR = 点击 ÷ 曝光；点击转化率 = 成交笔数 ÷ 点击量。"
+              : "店铺商品推广：ods_rpa_pdd_product_promotion_overview_f；官方店明星店铺：pdd_star_shop。按支付日统计，仅日粒度，不含当天；两渠道独立、不重复成交，比率由相容分子分母合计后计算。缺渠道日不发布合计ROI/CVR，明星店铺缺净额不拼完整净额。点击后归因窗口天数待来源补证。"}
           </footer>
         </main>
       </div>

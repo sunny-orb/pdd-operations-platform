@@ -38,6 +38,29 @@
 
 ## 本次核验后的来源决策与权限
 
-采用dwd_trd_sys_aftersale_order_detail_f与ud_1_dsyyxskb必要投影；Q按有限历史对账保留观察参考，A因补贴/倍额反例保持NULL门禁，J2只用sfje，J3使用取消状态sale_amount代理。分类/原款码未证不猜；原商品编码/名称/规格保留。业务不确定只阻断对应指标，不补0。原行精确timestamp保留私有归档，DB日标签明确是确认/支付日，非天然完整日。
+采用dwd_trd_sys_aftersale_order_detail_f与ud_1_dsyyxskb必要投影；Q按有限历史对账保留观察参考，A因补贴/倍额及二次分配反例保持NULL门禁，J2只用sfje，J3使用取消状态sale_amount代理。业务不确定只阻断对应指标，不补0。原行精确timestamp保留私有归档，DB日标签明确是确认/支付日，非天然完整日。
+
+身份与当前分类使用已确证的JST命名空间：三角色的product_code为款式编码、spec_code为SKU，分别写既有source_style_code与source_product_code，缺SKU不从款号或名称猜填。官方当前资料只读std_api_jstbz_product_spec_info_f必要列，取当前dt快照内product_type为普通商品且suite_code为空的记录，以SKU及款式联合核验1:1；同SKU跨款或普通资料重复均拒绝整批，不按首末消歧、不展开组合组件。只为精确命中行富集first_category和second_category至既有产品分类/子分类，虚拟分类保持NULL；组合/未知行保留事实与原键，分类NULL，不混入旧手工fl/xnfl。明确按当前JST资料分组，非事件发生时的历史分类；start/end原值保留，不伪造有效区间。
+
+本次不增表、字段、索引或权限；原事实N:1引用不可变输入版本，资料必要原字段、来源表、快照日期与逐行匹配结果随raw附jst_current_*证据进入同一不可变私有归档，分类修订通过新输入/报告版本重放，不修改已发布原行。两遍完整事实及当前资料指纹一致后才能交付；J1额外保留申请数量、原商品售后类型，并将真实aftersale_type映射为来源售后分类，拒收标记不冒充物流签收事件。验收覆盖三角色同命名空间、缺SKU/组合/跨款/重复、资料与事实分别变动、归档可追溯及真实PG逐字段重读。
 
 每源只接上海昨日上限的最近60天，三源相容报告窗口固定；当前及前一期滚动30天、覆盖完整的上一自然月分别出报告，无去年输入不伪造同比。追加06迁移，仅给pdd_ingest三表SELECT/INSERT，无UPDATE/DELETE/DDL；已有版本/规则/任务权限复用。先隔离PG验证和结构授权备份，再由upgrade-aftersales-local受控05→06；回退停M5任务后REVOKE这三表本次权限，保留已发布资料。数据表/字段/索引与原30表设计一致，不改派生schema.sql。
+
+## 已确认口径与来源缺口完善（2026-10-28新增实施授权）
+
+本轮用户要求按统一issues完善各页真实数据，明确只定向读责任文件、准确完整优先。沿原方案实施：当前JST普通资料一对一关联真实款式/SKU，原原因优先与尺码/质量观察分类，品类和单品分开展示；A及sfje无法通过反例的部分继续NULL，不发明签收阶段。来源拒收类型可显示来源标记观察，不能声称独立物流证据。输入修订必须重发三来源/报告，旧报告固定原输入/规则。
+
+### 退款目标区间的专用结构与实施
+
+用户已确认整体总退款率(P+A)/(S+P)目标0.40—0.43、售后退款率A/S目标0.32—0.36，滚动30天与自然月共用；无件数目标。目标是区间，不取中间值或将上限伪装单值。沿既有refund_targets对象/1:N版本，新增Alembic08，不修改已执行01—07：`metric_code TEXT NOT NULL DEFAULT 'total_refund_rate'`（仅total_refund_rate/aftersale_refund_rate）；`lower_rate/upper_rate NUMERIC NULL`；`application_policy_code TEXT NULL`（仅rolling_30d_and_natural_month）。target_rate允许NULL，旧17组仍用scalar；新约束要求“原scalar非空且两bound空”或“scalar空、两bound有限0≤lower≤upper≤1且policy非空”，禁止半区间、混填、NaN/Infinity。新范围目标保持原目标头/成员职责，不新建指标平台、不改其他事实字段。08仅补pdd_ingest对sales_targets/sales_target_shops/refund_targets的SELECT/INSERT，API只读，旧不可变保护沿用。
+
+新增两条总体目标输入，scope_kind=all，两种match_mode=all、scope_status=complete；原始声明无绝对起止，period_kind=custom、period_status=reference_only、两端NULL，表示按已确认application_policy匹配本次新报告的滚动30日或自然月，不声称历史当时曾存在这些目标；当前目标和历史输入的使用由新报告修订绑定。旧17细类不改值、不用其加权生成整体目标。目标由本地集中配置作为用户业务输入发布真实dataset_versions，字段/依据/配置SHA保留，report的targets输入固定其版本；不是GET临时读取新配置或在历史报告上换目标。
+
+先隔离PG验证08形状/最小权限/旧scalar相容/封版不可变/回退；备份本机结构授权后受控07→08。降级如存在区间记录/新字段语义必须拒绝，不删除业务记录或自动改成单值；运行回退先停新发布任务/撤新增权限，保留已封版输入。current表变更仅发布成功后推进。
+
+### 本轮责任文件及验证
+
+- 连接器/ingestion只补已证实的spec_code、普通SKU当前分类、aftersale_type及必要原证据，双读无变化/完整键唯一，组合/缺键不猜。测试缺SKU、跨款同SKU、重复资料、NULL金额和原行数不放大。
+- classification.py从既有源码必要词条及真实原原因枚举建立保守字面匹配；原原因非空始终优先，fallback按既有明确顺序，质量总量每原行Q一次，多标签可重叠；不以商品名/规格自动诊断质量。报告仅启用并固定经验证词典修订，旧无词典报告维持原语义。缺文本表示未识别，不能证明没质量问题。
+- query/analysis/repository在固定报告/规则/目标下派生九指标、六表和目标区间状态；整体/品类/单品分开，不混排相对100分。两目标分别显示上下界与实际/距两边界的百分点差，缺分子/分母仍不可计算；金额正差测算仅有完整相容分母时才可用且标非利润损失。
+- 先RED→最小实现→真实PG GREEN，再以实际必要源投影/PG/API逐字段对账、原行/分类/标签数验证；代码变更check/test/build/format及一次独立复核，浏览器能力不可用如实记录。共享文档/进度由根统一维护，不改原型布局或全局导航。

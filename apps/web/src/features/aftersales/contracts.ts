@@ -121,6 +121,28 @@ export const overview = z.object({
   ),
   scope_note: z.string(),
   quality_note: z.string(),
+  target_ranges: z
+    .array(
+      z.object({
+        metric_code: z.enum(["total_refund_rate", "aftersale_refund_rate"]),
+        label: z.string(),
+        target_id: z.string(),
+        version_id: z.string(),
+        lower_rate: decimal,
+        upper_rate: decimal,
+        current: decimal,
+        lower_gap_pp: decimal,
+        upper_gap_pp: decimal,
+        state: z.enum([
+          "metric_unavailable",
+          "below_range",
+          "within_range",
+          "above_range",
+          "scope_not_applicable",
+        ]),
+      }),
+    )
+    .default([]),
   core_insights: z.array(z.object({ label: z.string(), title: z.string(), detail: z.string() })),
   category_risks: z.array(risk),
   style_risks: z.array(risk),

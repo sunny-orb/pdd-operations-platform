@@ -22,14 +22,26 @@ import "./sales.css";
 
 /** 原型正文API适配；所有正式指标由后端提供，共享导航保持原组件。 */
 export function SalesPage() {
-  const { filters, scope, result, error, changeScope, retry, invalidateVersion } = useSalesData();
+  const {
+    filters,
+    scope,
+    result,
+    error,
+    scopeError,
+    changeScope,
+    resetScope,
+    retry,
+    invalidateVersion,
+  } = useSalesData();
   const selectedName =
     filters?.data.shops.find((s) => s.shop_id === scope.shop)?.display_name ?? "全部店铺";
-  const rangeLabel = scope.from
-    ? scope.from === scope.to
-      ? scope.from
-      : `${scope.from} 至 ${scope.to}`
-    : "等待本地数据范围";
+  const rangeLabel = scopeError
+    ? "链接范围无效"
+    : scope.from
+      ? scope.from === scope.to
+        ? scope.from
+        : `${scope.from} 至 ${scope.to}`
+      : "等待本地数据范围";
   const data = result?.performance;
   const shops = result?.shops ?? [];
   const selectShop = (id: string) => changeScope({ shop: scope.shop === id ? "" : id });
@@ -43,10 +55,10 @@ export function SalesPage() {
     ["店铺访客", count(data?.shop_visitors), "所选日期累计访客", ""],
     ["成交转化率", percent(data?.buyer_conversion), "成交买家 / 店铺访客", ""],
     ["客单价", data?.aov == null ? "—" : `¥${fixed(data.aov)}`, "成交金额 / 成交买家", ""],
-    ["退款率", percent(data?.refund_rate), "同店同日统计参考 · 日期及订单范围待核", "danger"],
+    ["退款率", percent(data?.refund_rate), "退款发生期 / 同期支付成交 · 经营金额占比", "danger"],
     ["推广花费", money(data?.promotion_spend), "数仓 6 店 · 官方明星店铺 · 已知值合计", ""],
     ["点击率", percent(data?.promotion_ctr), "已匹配推广点击量 / 曝光量", ""],
-    ["ROI", fixed(data?.promotion_roi), "单渠道来源参考 · 跨渠道成交归因待核", "success"],
+    ["ROI", fixed(data?.promotion_roi), "渠道独立 · 支付日统计 · 归因窗口待补证", "success"],
   ];
   return (
     <DashboardLayout
@@ -131,9 +143,13 @@ export function SalesPage() {
             <Alert
               type="error"
               showIcon
-              title="本地数据读取失败"
+              title={scopeError ? "链接范围无效" : "本地数据读取失败"}
               description={error}
-              action={<Button onClick={retry}>重新读取本地数据</Button>}
+              action={
+                <Button onClick={scopeError ? resetScope : retry}>
+                  {scopeError ? "清除无效范围" : "重新读取本地数据"}
+                </Button>
+              }
             />
           )}
           <aside className="source-coverage" aria-label="数据覆盖说明">
@@ -148,7 +164,7 @@ export function SalesPage() {
               {result
                 ? `所选时段销售缺少 ${result.missingShopDays} 个店铺日记录，仅汇总已观察值；缺失不补零。`
                 : "未收到当前版本前，指标保留为空，不展示旧筛选或样例数据。"}{" "}
-              退款、推广、评分及地区按独立来源覆盖展示；目标原入口不可用，完整日未确认。
+              退款、推广、评分及地区按独立来源覆盖展示；基础目标及其覆盖由目标进度区说明，完整日未确认。
             </p>
             <details>
               <summary>查看各店铺日期覆盖及退款缺失明细</summary>
@@ -190,12 +206,15 @@ export function SalesPage() {
           </aside>
           <p className="target-scope-note">
             目标进度按 {scope.month || "—"}{" "}
-            月累计及经营年度累计计算，不随自定义日期或经营店铺变化。原型所指目标表当前不可用，完成额正常展示。
+            月累计及经营年度累计计算，不随自定义日期或经营店铺变化。目标采用已确认的飞书基础目标，完成额为数仓成交原值；来源状态及缺口按实际覆盖显示。
           </p>
           <SalesTargets
             month={scope.month}
-            version={filters?.meta.input_versions ? filters.meta.data_version : undefined}
+            version={
+              !scopeError && filters?.meta.input_versions ? filters.meta.data_version : undefined
+            }
             onConflict={invalidateVersion}
+            statusKey={JSON.stringify(filters?.data.sources?.sales_targets)}
           />
           <section id="performance" className="dashboard-section sales-section">
             <div className="section-heading">
@@ -230,7 +249,7 @@ export function SalesPage() {
               </div>
               <p>
                 {rangeLabel} ·
-                店铺级指标随日期与店铺筛选联动；推广覆盖独立展示，跨渠道成交归因待核。
+                店铺级指标随日期与店铺筛选联动；两推广渠道独立、按支付日统计，归因窗口天数待来源补证。
               </p>
             </div>
             <div className="sales-kpis" data-testid="sales-kpis">
@@ -244,21 +263,25 @@ export function SalesPage() {
             </div>
             <PromotionDetails data={data} sources={filters?.data.sources} />
             <p className="refund-coverage-note">
-              退款率按销售与退款均有值的同店同日记录计算。已匹配退款{" "}
+              同期经营退款金额占比按销售与退款均有值的同店同日记录计算：分子为所选发生期退款金额，分母为同期支付成交金额。已匹配退款{" "}
               {money(data?.refund_match?.matched_refunds)} ÷ 对应成交金额{" "}
               {money(data?.refund_match?.matched_sales)}；匹配店铺日{" "}
               {data?.refund_match?.matched_days ?? "—"}、销售覆盖率{" "}
               {percent(data?.refund_match?.sales_coverage, 4)}、排除店铺日{" "}
               {data?.refund_match?.excluded_days ?? "—"} 及销售额{" "}
               {money(data?.refund_match?.excluded_sales)}
-              。这是同日统计参考，日期及订单范围待核，缺失不补零。
+              。这是发生期与支付期的同期经营占比，不代表同批支付订单的最终退款率；来源覆盖与做单原处理仍待核，缺失不补零。
               <br />
               <SourceState
                 source={filters?.data.sources?.shop_refunds ?? data?.refund_match?.source}
                 label="飞书退款"
               />
             </p>
-            <SalesRatings filters={filters} shop={scope.shop} onConflict={invalidateVersion} />
+            <SalesRatings
+              filters={scopeError ? null : filters}
+              shop={scope.shop}
+              onConflict={invalidateVersion}
+            />
           </section>
           <section className="dashboard-section store-split" id="shops">
             <div className="section-heading">
@@ -319,11 +342,11 @@ export function SalesPage() {
                   </div>
                   <div>
                     <dt>退款 / 目标</dt>
-                    <dd>飞书退款同日参考 · 目标入口不可用</dd>
+                    <dd>飞书同期经营退款占比 · 目标入口不可用</dd>
                   </div>
                 </dl>
                 <p>
-                  退款率使用同店同日匹配口径；归因成交不替代店铺销售。缺数、未知完整日与真实零分别显示，其他来源接入前不输出对应结果。
+                  退款发生额与同期支付成交按同店日配对，缺一方时双方共同排除；推广成交不替代店铺销售。缺数、未知完整日与真实零分别显示。
                 </p>
                 <a href={REFUND_SOURCE} target="_blank" rel="noreferrer">
                   查看统计退款金额 ↗

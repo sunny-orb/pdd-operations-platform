@@ -181,6 +181,12 @@ class Repository:
                     date_status="not_applicable"
                     if code in ("profile_records", "profile_links")
                     else "business_date",
+                    business_date_basis="payment_date"
+                    if code in (*STORE_CODES, "product_promotion")
+                    else None,
+                    attribution_state="window_pending"
+                    if code in (*STORE_CODES, "product_promotion")
+                    else None,
                     last_success_at=success.isoformat() if success else None,
                     latest_attempt={
                         k: v.isoformat() if hasattr(v, "isoformat") else v
@@ -192,6 +198,9 @@ class Repository:
             )
         return dict(
             mode=self.mode,
+            business_date_basis="payment_date",
+            attribution_state="window_pending",
+            attribution_window_days=None,
             data_version=self.token,
             definition_revision=definition_revision(),
             date_from=self.start,

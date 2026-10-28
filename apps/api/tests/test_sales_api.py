@@ -50,6 +50,8 @@ def test_query_contract_weighted_ratios_zero_and_version_conflict(sales_pg, tmp_
     filters = client.get("/api/v1/sales/filters")
     assert filters.status_code == 200
     assert len(filters.json()["data"]["shops"]) == 6
+    official = next(s for s in filters.json()["data"]["shops"] if s["shop_id"] == "spigf")
+    assert official["source_shop_id"] == "663599807"
     version = filters.json()["meta"]["data_version"]
     assert version == published.version_id
     params = dict(date_from="2026-10-25", date_to="2026-10-27", data_version=version)

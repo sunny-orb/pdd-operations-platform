@@ -18,6 +18,7 @@ import {
   formatMetric,
   localTime,
   shownAlerts,
+  observationCoverage,
   type DomainId,
   type Field,
   type SuggestedAction,
@@ -33,9 +34,9 @@ const sections = [
 ];
 const fallbackPairs: Record<DomainId, string[]> = {
   sales: ["最新入仓日 GMV", "月度目标", "目标达成", "最近更新"],
-  products: ["日环比", "同比", "异常数", "最近更新"],
+  products: ["日环比", "同比", "观察异常对象", "最近更新"],
   promotion: ["花费", "交易额", "CTR / CVR", "最近更新"],
-  aftersales: ["退款总额", "售后退款", "异常数", "最近更新"],
+  aftersales: ["退款总额", "售后退款", "观察异常对象", "最近更新"],
 };
 function renderField(field: Field) {
   return field.type === "text" ? (field.value ?? "—") : formatMetric(field.value, field.type);
@@ -144,7 +145,16 @@ export function OverviewPage() {
   const [level, setLevel] = useState("全部");
   const observations = states.flatMap((s) => s.data?.observations ?? []);
   const actions = states.flatMap((s) => s.data?.actions ?? []);
-  const counts = centerCounts(observations, actions);
+  const coverage = observationCoverage(states);
+  const counts = centerCounts(observations, actions, coverage);
+  const coverageLabels = {
+    observed: "观察列表已读取",
+    retained: "查询失败，保留旧观察",
+    failed: "查询失败，未纳入",
+    loading: "读取中",
+    not_connected: "观察来源未接收",
+    not_implemented: "未接异常接口",
+  };
   const hasResults = states.some((s) => s.data);
   const actionCount = hasResults ? counts.actionRows : "—";
   const visible = shownAlerts(observations, level);
@@ -230,7 +240,7 @@ export function OverviewPage() {
             <strong>— 项 P0 风险</strong>
             <p>
               售后退款率 <b>{formatMetric(aftersales?.value, "percent")}</b>
-              。正式风险与计数口径待确认，先按来源证据复核。
+              。去重统计单位已确认；中心正式P分级依据仍待核，不能从源域观察等级推定。
             </p>
             <a href="#alerts">
               查看预警与处理建议 <b>→</b>
@@ -244,12 +254,20 @@ export function OverviewPage() {
             <small>商品 / 推广按观察日；售后按实际报告期间</small>
           </Card>
           <Card>
-            <span>异常数量</span>
+            <span>观察异常对象数</span>
             <b>
-              — <em>项</em>
+              {counts.exceptionCount ?? "—"} <em>个对象</em>
             </b>
+            <Tag>已接范围{counts.unmappedObservations ? " · 映射不全" : ""}</Tag>
+            <small>
+              观察列表 {counts.availableDomains ? counts.observations : "—"} 条 · 未映射{" "}
+              {counts.unmappedObservations} 条
+            </small>
             <small>P0 — 项 · P1 — 项 · P2 — 项</small>
-            <small>M6-01 待确认</small>
+            <small>
+              {counts.availableDomains}/{coverage.length}{" "}
+              域有观察列表，非完整正式总数；P分级依据待核
+            </small>
           </Card>
           <Card>
             <span>待办动作</span>
@@ -303,9 +321,20 @@ export function OverviewPage() {
             />
           </div>
           <p className="m6-method">
-            当前已取得列表 {hasResults ? counts.observations : "—"}{" "}
-            条观察提示；正式异常总数及等级数量未发布。M1 / M2
+            当前已取得列表 {counts.availableDomains ? counts.observations : "—"} 条观察提示，去重后{" "}
+            {counts.exceptionCount ?? "—"} 个已映射观察对象；{counts.unmappedObservations}{" "}
+            条缺完整对象身份，未计入对象数。完整正式总数及等级数量未发布。M1 / M2
             源域等级仅保留线索，完整性与归因待核。综合评分不适用；等级筛选只作用于下方预警列表。
+          </p>
+          <p className="m6-method">
+            观察范围：
+            {coverage
+              .map(
+                (c) =>
+                  `${domains.find((d) => d.id === c.domain)?.label}：${coverageLabels[c.status]}`,
+              )
+              .join("；")}
+            。各域实际日期和完整性见来源卡片；观察列表已读取为空只表示该已接范围有0条，不证明未接范围无风险。
           </p>
           <div className="m6-alert-list">
             {visible.length ? (
@@ -388,15 +417,15 @@ export function OverviewPage() {
                     </p>
                     <p>
                       <b>店铺 GMV 与目标</b>
-                      来源：数仓店铺销售。月累计按销售域当前经营月；月目标未取得时保持缺失。店铺页当前入口需进入后选择范围。
+                      来源：数仓店铺销售。月累计按销售域当前经营月；月目标未取得时保持缺失。入口携带当前经营月及最新观察日，未选店铺表示全部店铺。
                     </p>
                     <p>
                       <b>售后退款</b>
                       来源：售后实际报告和原报告期间。金额与退款率沿用源域核验门禁；缺失不以旧报告或其他口径补齐，整体/品类/单款金额不重复加总。
                     </p>
                     <p>
-                      <b>风险与动作</b>当前来源线索均作观察，M6-01
-                      正式计数单位待确认；不套用原型跨域加权评分。建议不代表派单或进度。页面刷新只读本地发布数据，不触发上游或发送消息。
+                      <b>风险与动作</b>
+                      当前来源线索均作观察，同一完整对象多命中只计一次；售后总览与品类按报告及层级分别计项，缺对象身份单列未映射。对象数仅覆盖已接观察列表，中心正式P分级依据未齐备；不套用原型跨域加权评分。建议不代表派单或进度。页面刷新只读本地发布数据，不触发上游或发送消息。
                     </p>
                   </div>
                 ),

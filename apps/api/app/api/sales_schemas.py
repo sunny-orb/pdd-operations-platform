@@ -58,6 +58,7 @@ class ShopItem(SalesMetrics):
 
 
 class ShopOption(BaseModel):
+    source_shop_id: str
     shop_id: str
     shop_name: str
     display_name: str

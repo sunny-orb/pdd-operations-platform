@@ -64,7 +64,7 @@ def test_published_trial_is_atomic_idempotent_and_keeps_unknown_category(sales_p
         assert page["groups"] == dict(complete=0, pending=12, unscored=1)
         assert {item["decision"] for item in page["items"]} == {"pending_validation", "unscored"}
         assert all(item["complete_score"] is None for item in page["items"])
-        assert all(int(item["pending_weight"]) >= 24 for item in page["items"])
+        assert all(int(item["pending_weight"]) >= 14 for item in page["items"])
         assert page["items"][-1]["product_id"] == "13"
         assert str(page["items"][0]["score"]) == "76"
         from app.api.product_board_schemas import ScoresData

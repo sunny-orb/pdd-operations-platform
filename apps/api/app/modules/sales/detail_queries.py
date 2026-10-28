@@ -17,7 +17,9 @@ def source_info(snapshot, code):
     cached = snapshot.setdefault("source_info", {})
     if code in cached:
         return cached[code]
-    spec = SPECS[code]
+    spec = SPECS.get(code)
+    table = spec.fact_table if spec else "sales_targets"
+    date_column = spec.date_column if spec else "period_start"
     v = snapshot["versions"].get(code)
     c = snapshot["connection"]
     attempt = (
@@ -49,8 +51,8 @@ def source_info(snapshot, code):
         return cached[code]
     lo, hi = c.execute(
         sa.text(
-            f"SELECT min({spec.date_column}),max({spec.date_column}) FROM "
-            f"public.{spec.fact_table} WHERE dataset_version_id=:v"
+            f"SELECT min({date_column}),max({date_column}) FROM "
+            f"public.{table} WHERE dataset_version_id=:v"
         ),
         dict(v=v),
     ).one()
@@ -96,7 +98,7 @@ def scoped_rows(s, code, q, shops):
 
 
 def enrich_metrics(s, q, data, shops):
-    """退款仅匹配有销售/退款值的店铺日；推广分渠道，跨渠道成交未确认不合并ROI。"""
+    """退款匹配同店日；独立推广渠道的合计ROI要求支付日覆盖和必要字段齐备。"""
     refunds = scoped_rows(s, "shop_refunds", q, shops)
     sales = [
         r
@@ -156,6 +158,8 @@ def enrich_metrics(s, q, data, shops):
         channels.append(
             dict(
                 code=code,
+                business_date_basis="payment_date",
+                attribution_state="window_pending",
                 spend=number(total(rows, "spend"), money=True),
                 revenue=number(total(rows, "attributed_revenue"), money=True),
                 ctr=ratio(
@@ -203,16 +207,33 @@ def enrich_metrics(s, q, data, shops):
             )
         )
     paired = [r for r in all_rows if r["clicks"] is not None and r["impressions"] is not None]
+    roi_rows = [
+        r for r in all_rows if r["attributed_revenue"] is not None and r["spend"] is not None
+    ]
+    combined = len(channels) > 1
+    missing_coverage = any(channel["missing_shop_days"] for channel in channels)
+    missing_roi_input = len(roi_rows) != len(all_rows)
+    combined_roi = (
+        ratio(total(roi_rows, "attributed_revenue"), total(roi_rows, "spend"))
+        if not missing_coverage and not missing_roi_input
+        else None
+    )
     data.update(
         promotion_channels=channels,
         promotion_spend=number(total(all_rows, "spend"), money=True),
         promotion_ctr=ratio(total(paired, "clicks"), total(paired, "impressions")),
-        promotion_roi=channels[0]["roi"] if len(channels) == 1 else None,
+        promotion_roi=combined_roi if combined else channels[0]["roi"] if channels else None,
     )
     for f in ("promotion_spend", "promotion_ctr"):
         data["field_states"][f] = "observed_partial" if all_rows else "not_connected"
     data["field_states"]["promotion_roi"] = (
-        "cross_channel_unconfirmed" if len(channels) > 1 else "source_reference"
+        "not_connected"
+        if not all_rows
+        else "incomplete_channel_coverage"
+        if combined and missing_coverage
+        else "missing_channel_input"
+        if combined and missing_roi_input
+        else "source_reference"
     )
 
 
@@ -220,7 +241,9 @@ class SalesDetails:
     def __init__(self, engine):
         self.engine = engine
 
-    def targets(self, month, version):
+    def targets(self, month, version, target_basis="base"):
+        from .targets import query_targets
+
         if not re.fullmatch(r"\d{4}-\d{2}", month):
             raise SalesError("INVALID_MONTH", 422)
         try:
@@ -231,32 +254,8 @@ class SalesDetails:
             raise SalesError("INVALID_MONTH", 422)
         end = (start.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         with read_snapshot(self.engine, version) as s:
-            month_rows = [r for r in s["rows"] if start <= r["business_date"] <= end]
-            cutoff = min(end, calendar_through())
-            month_missing = ((cutoff - start).days + 1) * len(SHOPS) - len(
-                {(r["shop_id"], r["business_date"]) for r in month_rows}
-            )
-            annual_rows = [r for r in s["rows"] if r["business_date"] <= cutoff]
-            annual_missing = ((cutoff - APPROVED_START).days + 1) * len(SHOPS) - len(
-                {(r["shop_id"], r["business_date"]) for r in annual_rows}
-            )
-            # 目标入口未能取得，不将实际完成额/历史快照当目标。
             return dict(
-                data=dict(
-                    month_missing_days=month_missing,
-                    annual_missing_days=annual_missing,
-                    month_actual=number(total(month_rows, "shop_revenue"), money=True),
-                    annual_actual=number(
-                        total([r for r in s["rows"] if r["business_date"] <= end], "shop_revenue"),
-                        money=True,
-                    ),
-                    month_target=None,
-                    annual_target=None,
-                    month_ratio=None,
-                    annual_ratio=None,
-                    gap=None,
-                    state="source_unavailable",
-                ),
+                data=query_targets(s, start, min(end, calendar_through()), target_basis),
                 meta=meta(s),
             )
 

@@ -53,7 +53,9 @@ def build_bundle(repo):
     rows = observations(
         repo.rows(start, end), repo.rows(start, end, ads=True), profiles, [(start, end)]
     )
-    calibration = build_calibration(rows, as_of_date=end, authorized_ranges=[(start, end)])
+    calibration = build_calibration(
+        rows, as_of_date=end, authorized_ranges=[(start, end)], favorites_additive=True
+    )
     current = sorted(
         (r for r in rows if r["window_end"] == end and r["level"] == "新品"),
         key=lambda r: r["listing_id"],
@@ -92,7 +94,7 @@ def validate_bundle(bundle):
             raise ValueError("SCORE_IDENTITY_OR_SIGNALS_INVALID")
         seen.add(key)
         if (
-            row["pending_weight"] < 24
+            row["pending_weight"] < 14
             or row["complete_score"] is not None
             or row["formal_scaling_eligible"]
         ):

@@ -6,22 +6,20 @@ REF = "docs/m1-model-reuse.md#本次接入v2的最小设计"
 
 
 def parameters():
-    """返回数据库v1封闭配置；不把待验证收藏或放量分支标成已验证。"""
+    """收藏按M1-01日新增确认启用试算；来源/参照效果未验，正式放量关闭。"""
     branches = []
     for code, _, _, _ in WEIGHTS:
-        enabled = code not in ("favorites_7d", "revenue_multiple_7d")
+        enabled = code != "revenue_multiple_7d"
         branches.append(
             dict(
                 code="validate_" + code,
                 predicate_code="validate_" + code,
                 enabled=enabled,
-                confirmation_status="pending_confirmation"
-                if code == "favorites_7d"
-                else "confirmed",
+                confirmation_status="confirmed",
                 validation_status="verified_in_scope" if enabled else "pending_evidence",
                 contract_ref="docs/data-contract.md#351-m1-商品经营整页含-m4-新品评分",
                 evidence_ref=REF if enabled else None,
-                depends_on_question_codes=["M1-01"] if code == "favorites_7d" else [],
+                depends_on_question_codes=[],
                 thresholds={},
                 template_code=None,
             )
@@ -74,7 +72,7 @@ def parameters():
                     branch_codes=[code],
                     text="保留原值，先补相容输入及标准"
                     if code == "unscored"
-                    else "新试行标准待验证；收藏、完整性与推广归因仍待核，暂不放量",
+                    else "新试行参照效果、完整性与推广归因窗口仍待核，暂不放量",
                     verification_metric_codes=[],
                     execution_mode="display_only",
                 )

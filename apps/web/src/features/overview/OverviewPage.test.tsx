@@ -54,6 +54,8 @@ const obs: Observation = {
   domain: "products",
   level: "observation",
   sourcePriority: "P0",
+  objectKey: '["listing","source-shop","listing-id"]',
+  objectLevel: "listing",
   title: "单款观察提示",
   detail: "待核完整性",
   scope: "商店 · 风险观察窗",
@@ -89,6 +91,7 @@ const states = (): DomainState[] =>
         status: "观察",
       },
       observations: i === 1 ? [obs] : [],
+      observationState: i === 0 ? "not_implemented" : "observed",
       actions: i === 1 ? [actionFromObservation(obs, "复核源域事实", "待验证", "复核变化")] : [],
     },
     loading: false,
@@ -108,7 +111,8 @@ it("保留原型顺序和八列动作，正式数未知、建议不冒充已派�
   ].map((e) => e.id);
   expect(ids).toEqual(["overview", "alerts", "actions", "weather", "definitions"]);
   expect(screen.getByText("本日负责人")).toBeTruthy();
-  expect(screen.getAllByText("M6-01 待确认").length).toBeGreaterThan(0);
+  expect(screen.getByText("观察异常对象数")).toBeTruthy();
+  expect(screen.getByText("已接范围", { exact: true })).toBeTruthy();
   const table = screen.getByRole("table");
   expect(
     within(table)

@@ -3,6 +3,7 @@
 import hashlib
 from decimal import Decimal
 
+from .classification import compatible, enabled, observations
 from .metrics import groups, ratio, summarize
 from .query import METRICS, history_reports, reasons, report_totals, roles
 from .repository import public_report
@@ -68,13 +69,16 @@ def row_id(key):
 
 def object_rows(repo, q, level):
     blocks = roles(repo, q)
-    whole = summarize(*blocks)
-    all_values = groups(blocks, level)
-    all_values.sort(key=lambda r: (-(r["metrics"]["inbound_amount"] or Decimal(0)), str(r["key"])))
+    parameters = repo.classification_parameters()
+    whole = summarize(*blocks, parameters=parameters)
+    all_values = groups(blocks, level, parameters)
+    order_field = "inbound_amount" if whole["inbound_amount"] is not None else "returned_qty"
+    all_values.sort(key=lambda r: (-(r["metrics"][order_field] or Decimal(0)), str(r["key"])))
     result = []
     for rank, row in enumerate(all_values, 1):
         m = row["metrics"]
         e = row["example"]
+        issues = observations(row["roles"][0], parameters)
         cells = {
             k: cell(
                 m.get(k),
@@ -108,9 +112,9 @@ def object_rows(repo, q, level):
             ),
             qty_share=cell(ratio(m["returned_qty"], whole["returned_qty"])),
             amount_share=cell(ratio(m["inbound_amount"], whole["inbound_amount"])),
-            reasons=cell(items=reasons(row["roles"][0])[:5]),
-            size=cell(detail="分类词典未核"),
-            quality=cell(detail="质量多标签件数待验证"),
+            reasons=cell(items=reasons(row["roles"][0], parameters)[:5]),
+            size=cell(items=issues["size_rows"], detail=issues["note"]),
+            quality=cell(items=issues["quality_rows"], detail=issues["note"]),
         )
         result.append(dict(id=row_id(row["key"]), cells=cells))
     return result
@@ -146,13 +150,19 @@ def comparison(repo, q):
     previous = repo.by_id.get(r[prefix + "_report_id"])
     if r[prefix + "_comparison_status"] != "available" or previous is None:
         return [], r[prefix + "_comparison_reason"] or "比较报告不可用。"
-    now = summarize(*roles(repo, q))
-    old = summarize(*roles(repo, q, previous))
+    parameters = repo.classification_parameters()
+    previous_parameters = repo.classification_parameters(previous)
+    now = summarize(*roles(repo, q), parameters=parameters)
+    old = summarize(*roles(repo, q, previous), parameters=previous_parameters)
     result = []
     for k, label, kind, _ in METRICS:
         if k == "records":
             continue
         a, b = now[k], old[k]
+        if k in ("size_qty", "quality_qty") and not compatible(
+            parameters, previous_parameters, "size" if k == "size_qty" else "quality"
+        ):
+            b = None
         result.append(
             dict(
                 id=k,
@@ -168,8 +178,10 @@ def comparison(repo, q):
             )
         )
     for level in ("category", "style"):
-        curr = {str(x["key"]): x for x in groups(roles(repo, q), level)}
-        prev = {str(x["key"]): x for x in groups(roles(repo, q, previous), level)}
+        curr = {str(x["key"]): x for x in groups(roles(repo, q), level, parameters)}
+        prev = {
+            str(x["key"]): x for x in groups(roles(repo, q, previous), level, previous_parameters)
+        }
         for key in sorted(set(curr) | set(prev)):
             a = curr.get(key)
             b = prev.get(key)
@@ -189,7 +201,7 @@ def comparison(repo, q):
                         rate_change=cell(
                             (ar - br) * 100 if ar is not None and br is not None else None
                         ),
-                        reasons=cell(items=reasons(a["roles"][0])[:5] if a else []),
+                        reasons=cell(items=reasons(a["roles"][0], parameters)[:5] if a else []),
                     ),
                 )
             )
@@ -202,6 +214,7 @@ def comparison(repo, q):
 
 def analysis(repo, q):
     note = "当前报告相同筛选；未发生退货的销售组保留，缺行不补零。"
+    parameters = repo.classification_parameters()
     columns = {
         "category": CATEGORY,
         "style": STYLE,
@@ -217,8 +230,12 @@ def analysis(repo, q):
         if q.view == "yoy":
             columns = [(k, "去年同期" if k == "previous" else label, t) for k, label, t in columns]
     elif q.view == "quality":
-        rows = []
-        note = "质量分类词典与多标签件数未确认，暂不返回推测标签或零值。"
+        issues = observations(roles(repo, q)[0], parameters)
+        rows = [
+            dict(id=row_id(r["name"]), cells={k: cell(v) for k, v in r.items()})
+            for r in issues["quality_rows"]
+        ]
+        note = issues["note"]
     else:
         rows = []
         note = "整份报告范围；品类、关键词、问题重点不改变历史报告总体，不把重叠期间相加。"
@@ -233,7 +250,7 @@ def analysis(repo, q):
                 generated_at=cell(pr["generated_at"]),
             )
             rows.append(dict(id=r["id"], cells=cells))
-    pending_focus = q.focus != "all" and q.view != "history"
+    pending_focus = q.focus != "all" and q.view != "history" and not enabled(parameters, q.focus)
     if pending_focus:
         note = "尺码/质量分类规则未核，此重点筛选不可计算；空列表不表示无问题。 " + note
     return dict(

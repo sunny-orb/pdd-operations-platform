@@ -170,7 +170,7 @@ export function Metrics({
   const definitions = [
     ["revenue", "交易金额"],
     ["visitors", "商品访客数"],
-    ["favorites", "收藏数"],
+    ["favorites", "新增收藏量"],
     ["buyers", "支付买家数"],
     ["units", "支付件数"],
     ["aov", "客单价"],
@@ -249,7 +249,7 @@ export function Trends({ data, active }: { data?: Board; active: string[] }) {
           <small>浏览量、访客、收藏与成交为独立原值；不是同一人群的严格漏斗，加购未接入。</small>
         </div>
         <div className="funnel-steps">
-          {["商品浏览量", "商品访客", "收藏用户", "支付买家", "支付件数"].map((label, i) => {
+          {["商品浏览量", "商品访客", "新增收藏量", "支付买家", "支付件数"].map((label, i) => {
             const item = data?.funnel[i];
             return (
               <div className="funnel-step" key={label}>
@@ -337,7 +337,10 @@ export function Trends({ data, active }: { data?: Board; active: string[] }) {
             <b>核查顺序</b>
             <p>先复核来源覆盖及资料冲突，再看高优先级风险；建议是排查方向，不是已确认原因。</p>
           </div>
-          <small>{data?.basis ?? "数据状态待核"}。收藏区间定义、推广归因和完整日仍待补证。</small>
+          <small>
+            {data?.basis ?? "数据状态待核"}
+            。收藏按日新增累计、未扣取消；推广归因窗口和完整日仍待补证。
+          </small>
         </aside>
       </section>
     </>

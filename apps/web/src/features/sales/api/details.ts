@@ -23,6 +23,30 @@ export const targetsSchema = z.object({
     annual_ratio: numeric,
     gap: numeric,
     state: z.string(),
+    target_basis: z.enum(["base", "stretch"]).optional(),
+    target_basis_label: z.string().optional(),
+    target_coverage: z
+      .object({
+        available_months: z.array(z.string()),
+        missing_months: z.array(z.string()),
+        member_shop_ids: z.array(z.string()),
+        scope_state: z.string(),
+      })
+      .optional(),
+    target_source: z
+      .object({
+        state: z.string(),
+        url: z.string(),
+        version: z.string().nullable(),
+        field_id: z.string(),
+        last_success_at: z.string().nullable(),
+        last_attempt_status: z.string().nullable(),
+        last_attempt_at: z.string().nullable(),
+      })
+      .optional(),
+    monthly_window: z.object({ start: z.string(), end: z.string() }).optional(),
+    annual_window: z.object({ start: z.string(), end: z.string() }).optional(),
+    note: z.string().optional(),
   }),
   meta: metaSchema,
 });
@@ -87,6 +111,7 @@ export function useSalesDetail<T extends { meta: { data_version: string } }>(
   path: string | null,
   schema: z.ZodType<T>,
   onConflict: () => void,
+  statusKey?: string,
 ) {
   const [stored, setStored] = useState<{ path: string; value: T } | null>(null);
   const [error, setError] = useState<{ path: string; text: string } | null>(null);
@@ -113,7 +138,7 @@ export function useSalesDetail<T extends { meta: { data_version: string } }>(
         else setError({ path, text: "本区块读取失败，请重试；其余区块仍可查看。" });
       });
     return () => controller.abort();
-  }, [path, schema, onConflict, refresh]);
+  }, [path, schema, onConflict, refresh, statusKey]);
   return {
     data: stored?.path === path ? stored.value : null,
     error: error?.path === path ? error.text : null,

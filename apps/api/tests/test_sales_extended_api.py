@@ -311,3 +311,71 @@ def test_single_star_channel_enables_partial_promotion(sales_pg, tmp_path):
     c = setup(sales_pg, tmp_path)
     publish(sales_pg, tmp_path, "shop_channel_star_shop", [sample("shop_channel_star_shop")])
     assert c.get("/api/v1/sales/filters").json()["data"]["capabilities"]["promotion"] is True
+
+
+def test_confirmed_channels_roi_uses_complete_same_shop_payment_day(sales_pg, tmp_path):
+    c = setup(sales_pg, tmp_path)
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_channel_product_promotion",
+        [
+            sample(
+                "shop_channel_product_promotion",
+                metrics={"总花费(元)": "10", "交易额(元)": "40", "曝光量": "100", "点击量": "10"},
+            )
+        ],
+    )
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_channel_star_shop",
+        [
+            sample(
+                "shop_channel_star_shop",
+                cost="30",
+                transaction_amount="60",
+                impression_count="100",
+                click_count="20",
+            )
+        ],
+    )
+    q = {**params(c), "shop_id": "spigf", "date_to": "2026-10-26"}
+    response = c.get("/api/v1/sales/performance", params=q)
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["promotion_spend"] == "40.00"
+    assert data["promotion_roi"] == "2.500000000000"
+    assert data["field_states"]["promotion_roi"] == "source_reference"
+    assert all(c["business_date_basis"] == "payment_date" for c in data["promotion_channels"])
+    assert all(c["attribution_state"] == "window_pending" for c in data["promotion_channels"])
+    partial = c.get("/api/v1/sales/performance", params={**q, "date_to": "2026-10-27"}).json()[
+        "data"
+    ]
+    assert partial["promotion_roi"] is None
+    assert partial["field_states"]["promotion_roi"] == "incomplete_channel_coverage"
+
+
+def test_confirmed_channels_roi_rejects_missing_source_and_null_required_field(sales_pg, tmp_path):
+    c = setup(sales_pg, tmp_path)
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_channel_product_promotion",
+        [sample("shop_channel_product_promotion")],
+    )
+    q = {**params(c), "shop_id": "spigf", "date_to": "2026-10-26"}
+    missing = c.get("/api/v1/sales/performance", params=q).json()["data"]
+    assert missing["promotion_roi"] is None
+    assert missing["field_states"]["promotion_roi"] == "incomplete_channel_coverage"
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_channel_star_shop",
+        [sample("shop_channel_star_shop", cost="10", transaction_amount=None)],
+    )
+    null = c.get(
+        "/api/v1/sales/performance", params={**q, "data_version": params(c)["data_version"]}
+    ).json()["data"]
+    assert null["promotion_roi"] is None
+    assert null["field_states"]["promotion_roi"] == "missing_channel_input"

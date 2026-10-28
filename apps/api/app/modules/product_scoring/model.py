@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 
-VERSION = "m1-stage-independent-candidate-20261028-v1"
+VERSION = "m1-stage-independent-candidate-20261028-v2-daily-favorite-additions"
 # 来源viral_tiers.py固定十项权重；新规则只改变参照范围及回退，不改变权重。
 FEATURES = {
     "uv_7": 12,
@@ -192,6 +192,9 @@ def build_calibration(observations, *, as_of_date, authorized_ranges, favorites_
         "minimum_global_samples": 24,
         "fallback": "hard",
         "favorites_additive": favorites_additive,
+        "favorites_definition": "daily_additions_without_cancellation_deduction"
+        if favorites_additive
+        else "unconfirmed",
         "accepted_windows": accepted_windows,
         "standards": standards,
         "growth_floors": floors,

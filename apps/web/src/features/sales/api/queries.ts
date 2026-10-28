@@ -1,20 +1,77 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ApiError } from "../../../shared/api/client";
 import type { FiltersResponse, SalesResult, Scope } from "./contracts";
 import { getSalesFilters, getSalesResult } from "./salesApi";
 
 const initialScope: Scope = { month: "", from: "", to: "", shop: "" };
+const scopeKeys = ["month", "from", "to", "shop"] as const;
+
+function isDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/** URL只接收来源元信息允许的月份、日历范围及店铺身份；无效范围不回退取数。 */
+function readScope(search: URLSearchParams, filters: FiltersResponse) {
+  const invalid = (reason: string) => ({ scope: initialScope, error: `链接范围无效：${reason}` });
+  if (scopeKeys.some((key) => search.getAll(key).length > 1)) return invalid("筛选参数重复。");
+  const rawFrom = search.get("from"),
+    rawTo = search.get("to");
+  if ((rawFrom === null) !== (rawTo === null)) return invalid("开始与结束日期须同时提供。");
+  if (rawFrom !== null && (!isDate(rawFrom) || !isDate(rawTo!)))
+    return invalid("日期须为有效的ISO日历日期。");
+  const month = search.get("month") ?? rawFrom?.slice(0, 7) ?? filters.data.default_month;
+  const option = filters.data.months.find((item) => item.month === month);
+  if (!/^\d{4}-\d{2}$/.test(month) || !option) return invalid("月份不在已知经营月份中。");
+  const explicitMonth = search.has("month");
+  const from = rawFrom ?? (explicitMonth ? option.date_from : filters.data.recommended_date_from);
+  const to = rawTo ?? (explicitMonth ? option.date_to : filters.data.recommended_date_to);
+  const earliest = filters.data.months.reduce(
+    (lo, item) => (item.date_from < lo ? item.date_from : lo),
+    option.date_from,
+  );
+  if (
+    from > to ||
+    from < earliest ||
+    to > filters.data.calendar_through ||
+    !filters.data.months.some((item) => item.month === from.slice(0, 7)) ||
+    !filters.data.months.some((item) => item.month === to.slice(0, 7))
+  )
+    return invalid("日期倒置或超出可查询经营日历。");
+  const rawShop = search.get("shop");
+  const shop =
+    rawShop === null
+      ? null
+      : filters.data.shops.find(
+          (item) => item.shop_id === rawShop || item.source_shop_id === rawShop,
+        );
+  if (rawShop !== null && !shop) return invalid("店铺不在当前已知店铺集合中。");
+  return { scope: { month, from, to, shop: shop?.shop_id ?? "" }, error: null };
+}
+
 /** 取消旧组请求；仅展示当前筛选同版本结果，连续409只自动恢复一次。 */
 export function useSalesData() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [filters, setFilters] = useState<FiltersResponse | null>(null);
   const [latestStatus, setLatestStatus] = useState<FiltersResponse | null>(null);
-  const [scope, setScope] = useState(initialScope);
+  const search = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const parsed = useMemo(
+    () => (filters ? readScope(search, filters) : { scope: initialScope, error: null }),
+    [filters, search],
+  );
+  const scope = parsed.scope;
+  const scopeError = parsed.error;
   const [result, setResult] = useState<SalesResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const recovered = useRef(false);
-  const customScope = useRef(false);
   const key = JSON.stringify([filters?.meta.data_version, scope.from, scope.to, scope.shop]);
+  useEffect(() => {
+    recovered.current = false;
+  }, [location.search]);
   useEffect(() => {
     const controller = new AbortController();
     const signal = controller.signal;
@@ -25,19 +82,9 @@ export function useSalesData() {
           if (signal.aborted) return;
           setFilters(next);
           setLatestStatus(next);
-          setScope((previous) =>
-            previous.month
-              ? previous
-              : {
-                  month: next.data.default_month,
-                  from: next.data.recommended_date_from,
-                  to: next.data.recommended_date_to,
-                  shop: "",
-                },
-          );
           return;
         }
-        if (!scope.from || !scope.to) return;
+        if (scopeError || !scope.from || !scope.to) return;
         const next = await getSalesResult(scope, filters.meta.data_version, signal);
         if (signal.aborted) return;
         setResult({ ...next, key });
@@ -58,14 +105,42 @@ export function useSalesData() {
     }
     void load();
     return () => controller.abort();
-  }, [filters, scope, key, refresh]);
-  const changeScope = useCallback((next: Partial<Scope>) => {
-    if (next.from !== undefined || next.to !== undefined || next.month !== undefined)
-      customScope.current = true;
-    recovered.current = false;
+  }, [filters, scope, scopeError, key, refresh]);
+  const changeScope = useCallback(
+    (next: Partial<Scope>) => {
+      recovered.current = false;
+      setError(null);
+      const query = new URLSearchParams(location.search);
+      const updated = { ...scope, ...next };
+      if (next.from !== undefined || next.to !== undefined || next.month !== undefined) {
+        for (const field of scopeKeys) {
+          if (updated[field]) query.set(field, updated[field]);
+          else query.delete(field);
+        }
+      } else if (next.shop !== undefined) {
+        if (next.shop) query.set("shop", next.shop);
+        else query.delete("shop");
+      }
+      const nextSearch = query.toString();
+      if (nextSearch !== location.search.slice(1))
+        navigate({
+          pathname: location.pathname,
+          search: nextSearch ? `?${nextSearch}` : "",
+          hash: location.hash,
+        });
+    },
+    [location, navigate, scope],
+  );
+  const resetScope = useCallback(() => {
+    const query = new URLSearchParams(location.search);
+    scopeKeys.forEach((field) => query.delete(field));
     setError(null);
-    setScope((previous) => ({ ...previous, ...next }));
-  }, []);
+    navigate({
+      pathname: location.pathname,
+      search: query.size ? `?${query}` : "",
+      hash: location.hash,
+    });
+  }, [location, navigate]);
   useEffect(() => {
     if (!filters) return;
     const controller = new AbortController();
@@ -81,13 +156,6 @@ export function useSalesData() {
         if (next.meta.data_version === filters.meta.data_version) return;
         recovered.current = false;
         setFilters(next);
-        if (!customScope.current)
-          setScope((previous) => ({
-            ...previous,
-            month: next.data.default_month,
-            from: next.data.recommended_date_from,
-            to: next.data.recommended_date_to,
-          }));
       } catch {
         if (!controller.signal.aborted)
           setError("自动检查最新版本失败，保留上次成功数据，请重试。");
@@ -128,7 +196,7 @@ export function useSalesData() {
         : filters,
     scope,
     result:
-      result?.key === key
+      !scopeError && result?.key === key
         ? {
             ...result,
             meta:
@@ -137,8 +205,10 @@ export function useSalesData() {
                 : result.meta,
           }
         : null,
-    error,
+    error: scopeError ?? error,
+    scopeError,
     changeScope,
+    resetScope,
     retry,
   };
 }

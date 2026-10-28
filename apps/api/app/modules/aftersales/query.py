@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
+from .classification import classify_rows, enabled, observations
 from .metrics import from_values, groups, identity, matches, ratio, summarize, total
 from .repository import ROLES, public_report
 
@@ -20,10 +21,18 @@ class AfterQuery:
 
 
 def roles(repo, q, report=None):
-    if q.focus != "all":
+    parameters = repo.classification_parameters(report)
+    if q.focus != "all" and not enabled(parameters, q.focus):
         return [None, None, None]
     blocks = [repo.rows(role, report) for role in ROLES]
     chosen = {identity(row) for block in blocks for row in block or [] if matches(row, q)}
+    if q.focus != "all":
+        focused = {
+            identity(row)
+            for row, result in classify_rows(blocks[0] or [], parameters)
+            if result[q.focus]
+        }
+        chosen &= focused
     return [
         [row for row in block if identity(row) in chosen] if block is not None else None
         for block in blocks
@@ -53,12 +62,17 @@ METRICS = (
     ("aftersale_rate", "售后退款率", "percent", "A/S；确认期间与支付期间不是同批订单。"),
     ("total_rate", "总退款率", "percent", "(P+A)/(S+P)，不把售前率和售后率相加。"),
     ("records", "售后记录", "number", "接收明细行，不是原导出商品/原因汇总行、去重订单或客户数。"),
-    ("size_qty", "尺码问题", "number", "原原因分类/词典及主原因优先级待核，缺失不计零。"),
+    (
+        "size_qty",
+        "尺码问题",
+        "number",
+        "已接原原因文本识别的观察量；方向冲突归未说明，非全量语义判断。",
+    ),
     (
         "quality_qty",
         "质量问题",
         "number",
-        "质量主原因与多标签计数待M5-02确认，不相加冒充独立件数。",
+        "已接原原因文本识别的观察量；任一标签命中时每原行Q只计一次，细标签合计不是总量。",
     ),
 )
 
@@ -75,12 +89,12 @@ def metric(key, label, type, value, note, detail=""):
     )
 
 
-def reasons(rows):
+def reasons(rows, parameters=None):
     if rows is None:
         return []
     counts = defaultdict(list)
-    for r in rows:
-        counts[r.get("source_return_reason") or "未填写原因"].append(r)
+    for r, result in classify_rows(rows, parameters):
+        counts[result["primary_reason"]].append(r)
     denominator = total(rows, "actual_returned_qty")
     return [
         dict(
@@ -113,15 +127,19 @@ def report_totals(repo, report):
 
 def overview(repo, q):
     blocks = roles(repo, q)
-    values = summarize(*blocks)
+    parameters = repo.classification_parameters()
+    values = summarize(*blocks, parameters=parameters)
+    observed = observations(blocks[0], parameters)
     metrics = [metric(key, label, type, values[key], note) for key, label, type, note in METRICS]
     report = repo.report
     scope = (
         "关键词/重点先选完整对象，指标和原因统计所选对象的全部明细；"
         "金额/比率为已观察参考，完整日未知。"
     )
-    if q.focus != "all":
+    if q.focus != "all" and not enabled(parameters, q.focus):
         scope += " 尺码/质量分类规则尚未核实，此重点不返回推测匹配结果。"
+    elif q.focus != "all":
+        scope += " 问题重点按固定词典选中对象，保留这些对象的全部原因及销售分母。"
     risk_metrics = [
         metric(
             "total_rate",
@@ -161,9 +179,11 @@ def overview(repo, q):
 
     def risks(level):
         result = []
+        amount_available = values["inbound_amount"] is not None
+        field = "inbound_amount" if amount_available else "returned_qty"
         for row in sorted(
-            (r for r in groups(blocks, level) if r["metrics"]["inbound_amount"] is not None),
-            key=lambda r: (-(r["metrics"]["inbound_amount"] or Decimal(0)), str(r["key"])),
+            (r for r in groups(blocks, level, parameters) if r["metrics"][field] is not None),
+            key=lambda r: (-(r["metrics"][field] or Decimal(0)), str(r["key"])),
         )[:5]:
             m = row["metrics"]
             e = row["example"]
@@ -178,11 +198,28 @@ def overview(repo, q):
                     total_refund_rate=m["total_rate"],
                     change_pp=None,
                     risk_score=None,
-                    note="已观察规模参考；风险分、跨期判断与根因未确认，不作为正式风险排序。",
+                    note=(
+                        f"本层已观察实退Q={m['returned_qty']}的规模参考；先核金额与覆盖。"
+                        "品类与单品分别排序，不混排分数、不构成正式异常或根因。"
+                    ),
                 )
             )
         return result
 
+    # 旧v1此列实际承载product_aftersale_type；不能将旧“退货”重解释成真实售后分类。
+    source = repo.inputs().get("j1_returns") or {}
+    verified_refusal_field = source.get("row_schema_revision") == "m5-jst-current-sku-v2"
+    full_window = repo.rows("j1_returns") if verified_refusal_field else None
+    refusal_available = bool(blocks[0] and full_window) and all(
+        isinstance(r.get("source_aftersale_type"), str) and r["source_aftersale_type"].strip()
+        for r in full_window or []
+    )
+    refusal_rows = [r for r in blocks[0] or [] if r.get("source_aftersale_type") == "拒收退货"]
+    refusal_qty = (
+        (total(refusal_rows, "actual_returned_qty") if refusal_rows else Decimal(0))
+        if refusal_available
+        else None
+    )
     stages = [
         dict(
             name="未发货退款",
@@ -193,18 +230,28 @@ def overview(repo, q):
             status="observed_reference" if values["presale_amount"] is not None else "unavailable",
             note="已取消销售金额代理；销售数量不补作退款件数。",
         ),
-        *[
-            dict(
-                name=name,
-                amount=None,
-                qty=None,
-                share=None,
-                trend="趋势待补",
-                status="unavailable",
-                note="缺少相容物流阶段事实；原因词不证明真实拒收/签收，不用相减反推。",
-            )
-            for name in ("已发货拒收", "签收后退货")
-        ],
+        dict(
+            name="已发货拒收",
+            amount=None,
+            qty=refusal_qty,
+            share=None,
+            trend="趋势待补",
+            status="observed_reference" if refusal_qty is not None else "unavailable",
+            note=(
+                "按来源售后分类“拒收退货”的Q观察量；来源标记不是独立物流证据，金额仍待核。"
+                if refusal_available
+                else "本报告J1未具备已核v2售后分类或全窗字段覆盖不足；拒收未知保留NULL，不补零。"
+            ),
+        ),
+        dict(
+            name="签收后退货",
+            amount=None,
+            qty=None,
+            share=None,
+            trend="趋势待补",
+            status="unavailable",
+            note="缺相容签收事件，不用总Q减来源拒收标记反推。",
+        ),
     ]
     return dict(
         report=public_report(report),
@@ -217,18 +264,19 @@ def overview(repo, q):
             amount=values["total_amount"],
             amount_share=None,
             change_pp=None,
-            note="M5-01—04及来源完整性未关闭，不生成可信综合分或人工整改进度。",
+            note="金额与来源完整性仍有门禁；词典观察按本报告固定包，不生成综合分或人工整改进度。",
         ),
         priorities=[],
         actions=[],
         stages=stages,
-        size_breakdown=[
-            dict(name=n, qty=None, share=None) for n in ("尺码偏大", "尺码偏小", "尺码不合适未说明")
-        ],
-        reasons=reasons(blocks[0]),
+        size_breakdown=observed["size_rows"],
+        reasons=reasons(blocks[0], parameters),
         trend=trend,
         scope_note=scope,
-        quality_note="原行缺金额将阻断对应总额及比率；未接入/缺记录/缺字段不补零。三角色独立聚合，完整组键不匹配时细层分母不可用。原因按来源原文本展示，未生成已确认主原因/质量标签。",
+        quality_note=(
+            "原行缺金额阻断对应总额及比率；缺记录/字段不补零，完整组键不匹配时分母不可用。"
+            + observed["note"]
+        ),
         core_insights=[
             dict(
                 label="阅读口径",

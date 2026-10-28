@@ -12,10 +12,20 @@ GRADES = ("未达基础", "基础", "良好", "优秀", "突出")
 
 def published_scores(repo):
     """返回相容当前四头的已发布评分；任一输入改变立即待重算，不沿用旧分。"""
+    from .service import producer_hash
+
     version = repo.params.get("product_scores")
     standard = repo.params.get("score_standards")
     if not version or not standard:
         return {}, "standards_not_connected"
+    producers = dict(
+        repo.c.execute(
+            sa.text("SELECT id,producer_revision FROM public.dataset_versions WHERE id=ANY(:ids)"),
+            dict(ids=[version, standard]),
+        ).all()
+    )
+    if any(producers.get(vid) != producer_hash() for vid in (version, standard)):
+        return {}, "pending_recompute"
     inputs = {
         r["input_role"]: dict(r)
         for r in repo.c.execute(
@@ -149,7 +159,7 @@ def published_scores(repo):
             complete_score=None,
             decision="pending_validation" if scored else "unscored",
             decision_label="先补验证 · 暂不放量" if scored else "暂未评分",
-            reason="新试行标准已启用；收藏定义、完整日及推广归因仍待核",
+            reason="新试行标准已启用；收藏按日新增累计未扣取消，参照效果、完整日及推广归因窗口仍待核",
             action="按新试行标准观察表现，先补验证，暂不放量",
             score_status="partial" if scored else "unscored",
             standard_status="trial",

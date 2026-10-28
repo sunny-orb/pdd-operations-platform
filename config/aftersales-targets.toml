@@ -1,0 +1,10 @@
+# 用户2026-10-28确认；金额口径，两类期间共用；改动经发布任务形成新版本。
+application_policy_code = "rolling_30d_and_natural_month"
+
+[total_refund_rate]
+lower = "0.40"
+upper = "0.43"
+
+[aftersale_refund_rate]
+lower = "0.32"
+upper = "0.36"

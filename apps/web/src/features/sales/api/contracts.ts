@@ -108,7 +108,12 @@ export const filtersSchema = z.object({
       )
       .optional(),
     shops: z.array(
-      z.object({ shop_id: z.string(), shop_name: z.string(), display_name: z.string() }),
+      z.object({
+        source_shop_id: z.string().optional(),
+        shop_id: z.string(),
+        shop_name: z.string(),
+        display_name: z.string(),
+      }),
     ),
     months: z.array(z.object({ month: z.string(), date_from: date, date_to: date })).min(1),
     default_month: z.string(),

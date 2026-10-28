@@ -132,6 +132,21 @@ class Insight(BaseModel):
     detail: str
 
 
+class TargetRange(BaseModel):
+    metric_code: Literal["total_refund_rate", "aftersale_refund_rate"]
+    label: str
+    target_id: str
+    version_id: str
+    lower_rate: DecimalText
+    upper_rate: DecimalText
+    current: DecimalText
+    lower_gap_pp: DecimalText
+    upper_gap_pp: DecimalText
+    state: Literal[
+        "metric_unavailable", "below_range", "within_range", "above_range", "scope_not_applicable"
+    ]
+
+
 class Overview(BaseModel):
     report: Report | None
     metrics: list[Metric]
@@ -145,6 +160,7 @@ class Overview(BaseModel):
     trend: list[Trend]
     scope_note: str
     quality_note: str
+    target_ranges: list[TargetRange] = Field(default_factory=list)
     core_insights: list[Insight]
     category_risks: list[Risk]
     style_risks: list[Risk]

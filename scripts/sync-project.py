@@ -120,6 +120,24 @@ def build_steps(engine, password):
 
         return publish_reports(engine, ROOT / "var/ingestion/aftersales")
 
+    def refund_targets():
+        from app.modules.aftersales.targets import run_targets
+
+        return run_targets(
+            engine,
+            ROOT / "var/ingestion/refund_targets",
+            ROOT / "config/aftersales-targets.toml",
+        )
+
+    def sales_targets():
+        from app.modules.sales.targets import run_sales_targets
+
+        return asdict(
+            run_sales_targets(
+                engine, ROOT / "var/ingestion/sales_targets", basis="base"
+            )
+        )
+
     def weather():
         from app.jobs.sync_weather import run_weather
 
@@ -129,10 +147,12 @@ def build_steps(engine, password):
         "products": products,
         "product_scores": scores,
         **{code: lambda code=code: sales(code) for code in ("shop_daily", *SPECS)},
+        "sales_targets": sales_targets,
         **{
             code: lambda code=code: aftersales(code)
             for code in ("jst_returns", "jst_shipped_sales", "jst_cancelled_sales")
         },
+        "refund_targets": refund_targets,
         "aftersales_report": reports,
         "weather": weather,
     }
@@ -196,7 +216,12 @@ def main():
                 "product_scores": tuple(k for k in ("products",) if k in steps),
                 "aftersales_report": tuple(
                     k
-                    for k in ("jst_returns", "jst_shipped_sales", "jst_cancelled_sales")
+                    for k in (
+                        "jst_returns",
+                        "jst_shipped_sales",
+                        "jst_cancelled_sales",
+                        "refund_targets",
+                    )
                     if k in steps
                 ),
             },

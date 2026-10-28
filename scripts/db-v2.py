@@ -32,6 +32,8 @@ def fingerprint() -> str:
         ROOT / "apps/api/alembic-v2.ini",
         ROOT / "docs/database-schema/schema.sql",
         ROOT / "scripts/render-db-schema.py",
+        ROOT / "scripts/upgrade-targets-local.py",
+        ROOT / "docs/database-schema/target-ranges.sql",
         Path(__file__).resolve(),
     ]
     digest = hashlib.sha256()

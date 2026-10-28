@@ -92,17 +92,47 @@ def main():
                     at = time.monotonic()
                     result = get("overview", params)["data"]
                     timings.append(round((time.monotonic() - at) * 1000, 2))
-                    amount = c.execute(
+                    amount, favorites = c.execute(
                         sa.text(
-                            "SELECT sum(f.product_revenue) FROM public.product_daily_facts f JOIN public.current_datasets d ON d.version_id=f.dataset_version_id WHERE d.dataset_code='product_daily' AND f.business_date BETWEEN :start AND :end AND (:shop='' OR f.source_shop_id=:shop)"
+                            "SELECT sum(f.product_revenue),sum(f.favorites) FROM public.product_daily_facts f JOIN public.current_datasets d ON d.version_id=f.dataset_version_id WHERE d.dataset_code='product_daily' AND f.business_date BETWEEN :start AND :end AND (:shop='' OR f.source_shop_id=:shop)"
                         ),
                         {"start": start, "end": meta["date_to"], "shop": shop},
-                    ).scalar_one()
+                    ).one()
                     value = result["metrics"]["revenue"]["value"]
                     from decimal import Decimal
 
                     if (None if value is None else Decimal(value)) != amount:
                         raise RuntimeError("API与独立PG金额不一致")
+                    value = result["metrics"]["favorites"]["value"]
+                    if (None if value is None else Decimal(value)) != favorites:
+                        raise RuntimeError("API与独立PG累计新增收藏不一致")
+            scores = (
+                c.execute(
+                    sa.text(
+                        "SELECT p.listing_id,p.favorites_7d,"
+                        "CASE WHEN count(f.*)=7 AND count(f.favorites)=7 THEN sum(f.favorites) END expected "
+                        "FROM product_scores p JOIN current_datasets d ON d.version_id=p.dataset_version_id "
+                        "JOIN version_inputs i ON i.output_version_id=p.dataset_version_id AND i.input_role='product_current' "
+                        "LEFT JOIN product_daily_facts f ON f.dataset_version_id=i.input_version_id "
+                        "AND f.listing_id=p.listing_id AND f.business_date BETWEEN i.window_start AND i.window_end "
+                        "WHERE d.dataset_code='product_scores' GROUP BY p.id,p.listing_id,p.favorites_7d"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            assert scores and all(r["favorites_7d"] == r["expected"] for r in scores)
+            assert (
+                get(
+                    "scores",
+                    {
+                        "data_version": meta["data_version"],
+                        "date_from": meta["date_to"],
+                        "date_to": meta["date_to"],
+                    },
+                )["data"]["status"]
+                == "trial_active"
+            )
             if (
                 c.execute(sa.text("SELECT count(*) FROM public.task_runs")).scalar_one()
                 != task_count
@@ -112,6 +142,7 @@ def main():
             "status": "passed",
             "projection_rows": counts,
             "comparison_groups": len(timings),
+            "score_favorites_compared": len(scores),
             "http_ms": timings,
             "task_count_unchanged": True,
         }

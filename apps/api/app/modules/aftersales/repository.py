@@ -41,7 +41,14 @@ def revision():
     return hashlib.sha256(
         b"".join(
             Path(__file__).with_name(n).read_bytes()
-            for n in ("repository.py", "query.py", "metrics.py", "analysis.py")
+            for n in (
+                "repository.py",
+                "query.py",
+                "metrics.py",
+                "analysis.py",
+                "classification.py",
+                "targets.py",
+            )
         )
     ).hexdigest()
 
@@ -95,7 +102,9 @@ class Repository:
             json.dumps(
                 {
                     "definition": revision(),
-                    "reports": [(r["id"], r["dataset_version_id"]) for r in self.reports],
+                    "reports": [
+                        (r["id"], r["dataset_version_id"], r["rule_set_id"]) for r in self.reports
+                    ],
                 },
                 sort_keys=True,
             ).encode()
@@ -103,6 +112,29 @@ class Repository:
         self._summaries = {}
         self._inputs = {}
         self._rows = {}
+        self._classification = {}
+
+    def classification_parameters(self, report=None):
+        """懒读所选报告固定包；旧报告未绑定/空词典不回退当前配置。"""
+        report = report or self.report
+        rule_id = report.get("rule_set_id") if report else None
+        if not rule_id:
+            return None
+        if rule_id not in self._classification:
+            row = (
+                self.c.execute(
+                    sa.text("SELECT domain,schema_revision,parameters FROM rule_sets WHERE id=:id"),
+                    dict(id=rule_id),
+                )
+                .mappings()
+                .first()
+            )
+            self._classification[rule_id] = (
+                row["parameters"]
+                if row and row["domain"] == "aftersales" and row["schema_revision"] == "v1"
+                else None
+            )
+        return self._classification[rule_id]
 
     def inputs(self, report=None):
         report = report or self.report
@@ -153,7 +185,13 @@ class Repository:
             self._rows[key] = None
             return None
         fields = (
-            (*COMMON_FIELDS, "actual_returned_qty", "actual_inbound_amount", "source_return_reason")
+            (
+                *COMMON_FIELDS,
+                "actual_returned_qty",
+                "actual_inbound_amount",
+                "source_return_reason",
+                "source_aftersale_type",
+            )
             if role == "j1_returns"
             else (*COMMON_FIELDS, "sales_amount", "source_sales_qty")
         )

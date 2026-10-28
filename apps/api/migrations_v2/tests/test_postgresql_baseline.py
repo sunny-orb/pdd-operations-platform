@@ -335,9 +335,20 @@ class PostgreSQLBaselineTests(unittest.TestCase):
         for table in self.metadata.tables.values():
             with self.subTest(table=table.name):
                 columns = inspector.get_columns(table.name, schema="public")
-                self.assertEqual([c["name"] for c in columns], list(table.c.keys()))
-                for actual, expected in zip(columns, table.c, strict=True):
-                    self.assertEqual(actual["nullable"], expected.nullable)
+                extension = (
+                    ["metric_code", "lower_rate", "upper_rate", "application_policy_code"]
+                    if table.name == "refund_targets"
+                    else []
+                )
+                self.assertEqual([c["name"] for c in columns], [*table.c.keys(), *extension])
+                original_columns = columns[:-4] if extension else columns
+                for actual, expected in zip(original_columns, table.c, strict=True):
+                    self.assertEqual(
+                        actual["nullable"],
+                        True
+                        if table.name == "refund_targets" and expected.name == "target_rate"
+                        else expected.nullable,
+                    )
                     self.assertEqual(actual["comment"], expected.comment)
                     self.assertEqual(
                         str(actual["type"].compile(dialect=self.conn.dialect)),
@@ -351,9 +362,21 @@ class PostgreSQLBaselineTests(unittest.TestCase):
                     len(inspector.get_foreign_keys(table.name, schema="public")),
                     len(table.foreign_keys),
                 )
+                expected_checks = {
+                    c.name for c in table.constraints if isinstance(c, sa.CheckConstraint)
+                }
+                if table.name == "refund_targets":
+                    expected_checks |= {
+                        "ck_refund_targets_metric_code_values",
+                        "ck_refund_targets_application_policy_code_values",
+                        "ck_refund_targets_scalar_or_range",
+                    }
                 self.assertEqual(
-                    len(inspector.get_check_constraints(table.name, schema="public")),
-                    sum(isinstance(c, sa.CheckConstraint) for c in table.constraints),
+                    {
+                        c["name"]
+                        for c in inspector.get_check_constraints(table.name, schema="public")
+                    },
+                    expected_checks,
                 )
                 self.assertEqual(
                     len(inspector.get_unique_constraints(table.name, schema="public")),
@@ -377,6 +400,22 @@ class PostgreSQLBaselineTests(unittest.TestCase):
                 )
             ).scalar_one(),
             58,
+        )
+        self.assertEqual(
+            self.conn.execute(
+                sa.text(
+                    "SELECT t.tgname FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid "
+                    "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' "
+                    "AND NOT t.tgisinternal AND t.tgname NOT LIKE 'pdd_v2_%' ORDER BY t.tgname"
+                )
+            )
+            .scalars()
+            .all(),
+            [
+                "weather_document_immutable",
+                "weather_document_no_truncate",
+                "weather_parent_content",
+            ],
         )
 
     def test_00_empty_upgrade_down_upgrade(self):
@@ -405,7 +444,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_07",
+            "20261028_08",
         )
 
     def test_02_all_numeric_columns_reject_nonfinite_values(self):
@@ -672,7 +711,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_07",
+            "20261028_08",
         )
 
     def test_18_locking_seal_blocks_content_and_rejects_after_commit(self):

@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal, localcontext
 
+import pytest
 import sqlalchemy as sa
 from fastapi.testclient import TestClient
 
@@ -29,13 +30,42 @@ def client_for(engine):
         yield client
 
 
-def publish(engine, suffix="1", end=date(2026, 10, 27), missing=False, coarse=False):
+def publish(
+    engine,
+    suffix="1",
+    end=date(2026, 10, 27),
+    missing=False,
+    coarse=False,
+    rules=None,
+    returns=None,
+    source_revision="m5-test",
+):
     tables = build_metadata().tables
 
     def tab(n):
         return tables["public." + n]
 
     with engine.begin() as c:
+        rule_id = None
+        if rules is not None:
+            from app.modules.aftersales.publisher import fingerprint
+
+            rule_id = "rules-" + suffix
+            c.execute(
+                tab("rule_sets")
+                .insert()
+                .values(
+                    id=rule_id,
+                    set_code="m5-test-" + suffix,
+                    revision="1",
+                    domain="aftersales",
+                    schema_revision="v1",
+                    parameters=rules,
+                    confirmation_status="partially_confirmed",
+                    source_locator="synthetic:fixed-reason-dictionary",
+                    content_sha256=fingerprint(rules),
+                )
+            )
 
         def version(id, code, kind="source"):
             c.execute(
@@ -48,11 +78,12 @@ def publish(engine, suffix="1", end=date(2026, 10, 27), missing=False, coarse=Fa
                     state="draft",
                     source_system="synthetic" if kind == "source" else None,
                     source_locator="synthetic://m5" if kind == "source" else None,
-                    row_schema_revision="m5-test",
+                    row_schema_revision=source_revision if kind == "source" else "m5-test",
                     interpretation_ref="synthetic:fixed-groups",
                     producer_revision="synthetic:test",
                     period_start=date(2026, 9, 28),
                     period_end=end,
+                    rule_set_id=rule_id if kind == "derived" else None,
                 )
             )
 
@@ -98,7 +129,9 @@ def publish(engine, suffix="1", end=date(2026, 10, 27), missing=False, coarse=Fa
             if code == "jst_returns":
                 c.execute(
                     tab("return_records").insert(),
-                    [
+                    [{**base, "source_aftersale_type": None, **r} for r in returns]
+                    if returns is not None
+                    else [
                         dict(
                             base,
                             id="r" + suffix,
@@ -401,3 +434,130 @@ def test_unverified_focus_is_unavailable_not_zero_records(sales_pg):
         table = client.get("/api/v1/aftersales/analysis?focus=quality&view=category").json()["data"]
         assert table["status"] == "rule_pending"
         assert "不表示无问题" in table["scope_note"]
+
+
+def classified_returns(suffix="1"):
+    return [
+        dict(
+            id="quality-" + suffix,
+            source_row_key="quality",
+            actual_returned_qty=Decimal("2"),
+            actual_inbound_amount=None,
+            source_return_reason="质量问题，商品破损或污渍",
+            source_aftersale_type="拒收退货",
+        ),
+        dict(
+            id="other-" + suffix,
+            source_row_key="other",
+            actual_returned_qty=Decimal("3"),
+            actual_inbound_amount=None,
+            source_return_reason="不想要了",
+            source_aftersale_type="普通退货",
+        ),
+        dict(
+            id="size-" + suffix,
+            source_row_key="size",
+            source_style_code="0002",
+            source_product_code="SKU2",
+            actual_returned_qty=Decimal("4"),
+            actual_inbound_amount=None,
+            source_return_reason="尺码偏大也偏小",
+            source_aftersale_type="普通退货",
+        ),
+        dict(
+            id="missing-" + suffix,
+            source_row_key="missing",
+            source_style_code="0003",
+            source_product_code="SKU3",
+            actual_returned_qty=Decimal("5"),
+            actual_inbound_amount=None,
+            source_return_reason=None,
+            source_aftersale_type="普通退货",
+        ),
+    ]
+
+
+def test_fixed_dictionary_quality_focus_selects_full_objects_and_preserves_amount_gates(sales_pg):
+    from app.modules.aftersales.classification import rule_parameters
+
+    publish(
+        sales_pg,
+        rules=rule_parameters(),
+        returns=classified_returns(),
+        source_revision="m5-jst-current-sku-v2",
+    )
+    with client_for(sales_pg) as client:
+        board = client.get("/api/v1/aftersales/overview").json()["data"]
+        values = {r["key"]: r["value"] for r in board["metrics"]}
+        assert Decimal(values["returned_qty"]) == 14
+        assert Decimal(values["quality_qty"]) == 2
+        assert Decimal(values["size_qty"]) == 4
+        assert values["inbound_amount"] is None and values["total_rate"] is None
+        assert "未填写" in board["quality_note"] and "观察量" in board["quality_note"]
+        focused = client.get("/api/v1/aftersales/overview?focus=quality").json()["data"]
+        scoped = {r["key"]: r["value"] for r in focused["metrics"]}
+        assert Decimal(scoped["returned_qty"]) == 5
+        assert Decimal(scoped["records"]) == 2
+        assert Decimal(scoped["gmv"]) == 125
+        assert Decimal(scoped["quality_qty"]) == 2
+        assert {r["name"] for r in focused["reasons"]} == {"质量问题，商品破损或污渍", "不想要了"}
+        table = client.get("/api/v1/aftersales/analysis?view=quality").json()["data"]
+        assert table["status"] == "observed_reference"
+        assert {r["cells"]["qty"]["value"] for r in table["rows"]} == {"2"}
+        assert len(table["rows"]) == 2  # 多标签各2件，质量总量仍2件
+        stages = {r["name"]: r for r in board["stages"]}
+        assert stages["已发货拒收"]["qty"] == "2"
+        assert stages["已发货拒收"]["amount"] is None
+        assert "来源标记" in stages["已发货拒收"]["note"]
+        assert stages["签收后退货"]["qty"] is None
+        assert all(r["risk_score"] is None for r in board["category_risks"] + board["style_risks"])
+        assert board["category_risks"] and board["style_risks"]
+
+
+def test_old_report_dictionary_is_frozen_when_new_report_enables_classification(sales_pg):
+    from app.modules.aftersales.classification import rule_parameters
+
+    old = rule_parameters()
+    old["dictionaries"] = []
+    old["branches"] = []
+    publish(sales_pg, end=date(2026, 10, 26), rules=old, returns=classified_returns())
+    with client_for(sales_pg) as client:
+        before = client.get("/api/v1/aftersales/meta").json()["data"]["data_version"]
+        publish(sales_pg, suffix="2", rules=rule_parameters(), returns=classified_returns("2"))
+        assert client.get("/api/v1/aftersales/overview?data_version=" + before).status_code == 409
+        old_board = client.get("/api/v1/aftersales/overview?report_id=report1").json()["data"]
+        current = client.get("/api/v1/aftersales/overview?report_id=report2").json()["data"]
+        assert next(r["value"] for r in old_board["metrics"] if r["key"] == "quality_qty") is None
+        assert next(r["value"] for r in current["metrics"] if r["key"] == "quality_qty") == "2"
+        old_focus = client.get(
+            "/api/v1/aftersales/analysis?report_id=report1&view=quality&focus=quality"
+        ).json()["data"]
+        assert old_focus["status"] == "rule_pending"
+
+
+@pytest.mark.parametrize(
+    "revision,partial_missing",
+    [("m5-jst-partial-v1", False), ("m5-jst-current-sku-v2", True)],
+)
+def test_refusal_requires_verified_source_revision_and_whole_window_field_coverage(
+    sales_pg, revision, partial_missing
+):
+    from app.modules.aftersales.classification import rule_parameters
+
+    rows = classified_returns()
+    if partial_missing:
+        rows[-1]["source_aftersale_type"] = None
+    else:
+        # 旧接收把商品售后类型“退货”放在此列，不能据非空推断本期拒收为零。
+        for row in rows:
+            row["source_aftersale_type"] = "退货"
+    publish(sales_pg, rules=rule_parameters(), returns=rows, source_revision=revision)
+    with client_for(sales_pg) as client:
+        for focus in ("all", "quality"):
+            board = client.get("/api/v1/aftersales/overview", params={"focus": focus}).json()[
+                "data"
+            ]
+            stages = {r["name"]: r for r in board["stages"]}
+            assert stages["已发货拒收"]["qty"] is None
+            assert stages["已发货拒收"]["status"] == "unavailable"
+            assert stages["签收后退货"]["qty"] is None

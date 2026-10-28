@@ -9,6 +9,7 @@ from app.api.aftersales_schemas import Analysis, Envelope, Meta, Options, Overvi
 from app.modules.aftersales.analysis import analysis
 from app.modules.aftersales.query import AfterQuery, options, overview
 from app.modules.aftersales.repository import snapshot
+from app.modules.aftersales.targets import add_target_ranges
 from app.modules.product_board.repository import BoardError, wire
 
 router = APIRouter(prefix="/api/v1/aftersales", tags=["售后分析"])
@@ -66,7 +67,7 @@ def get_overview(
     data_version: str | None = Query(None, min_length=1, max_length=100),
 ):
     with snapshot(request.app.state.engine, q.report_id, data_version) as repo:
-        return response(repo, overview(repo, q))
+        return response(repo, add_target_ranges(repo, q, overview(repo, q)))
 
 
 @router.get("/analysis", response_model=Envelope[Analysis], response_model_exclude_none=False)

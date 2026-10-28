@@ -29,6 +29,8 @@ const server = await createServer({
 });
 try {
   const adapters = await server.ssrLoadModule("/src/features/overview/adapters.ts");
+  const model = await server.ssrLoadModule("/src/features/overview/model.ts");
+  const payloads = [];
   const names = ["salesSpec", "productsSpec", "promotionSpec", "aftersalesSpec"];
   const outcomes = await Promise.allSettled(
     names.map(async (name) => {
@@ -36,6 +38,7 @@ try {
       const signal = new AbortController().signal;
       const meta = await spec.meta(signal);
       const result = await spec.load(meta, signal);
+      payloads.push({ id: meta.id, data: result, loading: false, error: null });
       if (!meta.version) throw new Error("缺真实版本");
       const raw = responses.get(`/api/v1/${meta.id}/overview`)?.data;
       const pair = (label) => result.card.pairs.find((p) => p.label === label)?.value;
@@ -83,6 +86,18 @@ try {
   const rows = outcomes.map((r, i) =>
     r.status === "fulfilled" ? r.value : { domain: names[i], error: String(r.reason) },
   );
+  const observations = payloads.flatMap((p) => p.data.observations);
+  const counts = model.centerCounts(
+    observations,
+    payloads.flatMap((p) => p.data.actions),
+    model.observationCoverage(payloads),
+  );
+  const keys = new Set(
+    observations.filter((o) => o.objectKey && o.objectLevel !== "unknown").map((o) => o.objectKey),
+  );
+  assert.equal(counts.exceptionCount, keys.size);
+  assert.equal(counts.p0, null);
+  assert.equal(counts.assignees, null);
   const weather = await nativeFetch("http://127.0.0.1:8000/api/v1/weather/publication").then((r) =>
     r.json(),
   );
@@ -92,6 +107,7 @@ try {
     JSON.stringify(
       {
         domains: rows,
+        counts,
         weather: {
           id: weather.data.id,
           issue: weather.data.document.issue_time,

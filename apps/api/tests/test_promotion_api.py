@@ -1,9 +1,10 @@
 """M2真实PG反例：推广独立日期/身份、资料不放大、渠道门禁与精确空值。"""
 
 from contextlib import contextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
@@ -28,7 +29,7 @@ def test_channel_projection_preserves_net_zero_and_fractional_deals():
     assert star["attributed_deals"] == 0 and star["net_attributed_revenue"] is None
 
 
-def publish_products(engine, root):
+def publish_products(engine, root, promotion_rows=None):
     _, rows = candidate()
     end = date(2026, 10, 27)
     base = dict(
@@ -47,7 +48,9 @@ def publish_products(engine, root):
     )
     rows["product_promotion"] = normalize(
         "product_promotion",
-        [
+        promotion_rows
+        if promotion_rows is not None
+        else [
             dict(base, id="a", promotion_name="方式A"),
             dict(base, id="b", promotion_name="方式B", total_cost="8", transaction_amount="36"),
             dict(
@@ -133,12 +136,19 @@ def test_product_uses_ad_max_date_and_full_identity_not_operating_scope(sales_pg
             ), response.text
 
 
-def test_store_versions_independent_channel_gate_and_nullable_net(sales_pg, tmp_path):
+def test_store_independent_channels_sum_payment_day_and_preserve_missing_net(sales_pg, tmp_path):
     from app.modules.sales.datasets import SPECS
     from app.modules.sales.storage import ShopDailyStore
 
     for code in ("shop_channel_product_promotion", "shop_channel_star_shop"):
-        c = normalize_source(code, [sample(code)], window())
+        row = sample(code)
+        if code == "shop_channel_product_promotion":
+            row["metrics"].update(
+                {"总花费(元)": "10", "交易额(元)": "40", "成交笔数": "2", "点击量": "10"}
+            )
+        else:
+            row.update(cost="30", transaction_amount="60", transaction_count="3", click_count="20")
+        c = normalize_source(code, [row], window())
         ShopDailyStore(
             sales_pg, archive_root=tmp_path / code, approved=window(), spec=SPECS[code]
         ).publish_candidate(c)
@@ -153,9 +163,15 @@ def test_store_versions_independent_channel_gate_and_nullable_net(sales_pg, tmp_
             data_version=meta.json()["meta"]["data_version"],
         )
         data = client.get("/api/v1/promotion/overview", params=q).json()["data"]
-        assert Decimal(data["metrics"]["spend"]["value"]) == Decimal("10.20")
-        assert data["metrics"]["revenue"]["value"] is None
-        assert data["metrics"]["roi"]["status"] == "cross_channel_unconfirmed"
+        assert Decimal(data["metrics"]["spend"]["value"]) == 40
+        assert data["metrics"]["revenue"]["value"] is not None
+        assert Decimal(data["metrics"]["revenue"]["value"]) == 100
+        assert Decimal(data["metrics"]["roi"]["value"]) == Decimal("2.5")
+        assert Decimal(data["metrics"]["cvr"]["numerator"]) == 5
+        assert Decimal(data["metrics"]["cvr"]["denominator"]) == 30
+        assert data["metrics"]["revenue"]["business_date_basis"] == "payment_date"
+        assert data["metrics"]["roi"]["attribution_state"] == "window_pending"
+        assert meta.json()["data"]["business_date_basis"] == "payment_date"
         assert data["net"]["net_revenue"]["value"] is None
         single = client.get(
             "/api/v1/promotion/overview", params={**q, "channel": "product_promotion"}
@@ -181,7 +197,7 @@ def test_store_versions_independent_channel_gate_and_nullable_net(sales_pg, tmp_
         assert client.get("/api/v1/promotion/overview", params=q).status_code == 200
 
 
-def test_sop_net_zero_can_fall_full_hundred_percent_but_pending_rule_not_rate():
+def test_sop_net_zero_and_confirmed_growth_keep_separate_sample_thresholds():
     from app.modules.promotion.diagnosis import assess
 
     previous = [
@@ -195,15 +211,159 @@ def test_sop_net_zero_can_fall_full_hundred_percent_but_pending_rule_not_rate():
             date=date(2026, 10, 19),
         )
     ]
-    current = [dict(previous[0], net_attributed_revenue=Decimal("0"), date=date(2026, 10, 26))]
+    previous = [dict(previous[0], date=date(2026, 10, 14) + timedelta(days=n)) for n in range(7)]
+    current = [
+        dict(
+            previous[0],
+            net_attributed_revenue=Decimal("0"),
+            date=date(2026, 10, 21) + timedelta(days=n),
+        )
+        for n in range(7)
+    ]
     confirmed = assess(current, previous, complete=True)
     assert confirmed["current"]["net_roi"]["value"] == 0
     assert [(f["level"], f["rule"]) for f in confirmed["findings"]] == [("P1", "净投产下降≥25%")]
     assert assess(current, previous)["findings"] == []
-    growth = [dict(previous[0], spend=Decimal("650"), date=date(2026, 10, 26))]
-    pending = assess(growth, previous, complete=True)
-    assert not any("花费增长" in f["rule"] for f in pending["findings"])
-    assert any(c["status"] == "rule_pending" for c in pending["clues"])
+    growth = [dict(r, spend=Decimal("650"), net_attributed_revenue=Decimal("500")) for r in current]
+    confirmed_growth = assess(growth, previous, complete=True)
+    assert any(f["level"] == "P2" and "花费增长" in f["rule"] for f in confirmed_growth["findings"])
+    assert not any(c["status"] == "rule_pending" for c in confirmed_growth["clues"])
+
+
+def growth_windows(
+    *, previous_spend="10", current_spend="12", previous_revenue="100", current_revenue="100"
+):
+    """相邻七日小额输入；不达到投产规则300元门槛，仍可验证增长组合。"""
+    base = dict(
+        net_attributed_revenue=Decimal("100"),
+        attributed_deals=Decimal("0"),
+        impressions=Decimal("100"),
+        clicks=Decimal("10"),
+    )
+    return tuple(
+        [
+            dict(
+                base,
+                date=date(2026, 10, start) + timedelta(days=n),
+                spend=Decimal(spend),
+                attributed_revenue=Decimal(revenue),
+            )
+            for n in range(7)
+        ]
+        for start, spend, revenue in (
+            (21, current_spend, current_revenue),
+            (14, previous_spend, previous_revenue),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "changes,expected",
+    [
+        ({}, True),
+        ({"current_spend": "11.999"}, False),
+        ({"current_revenue": "110"}, False),
+        ({"current_revenue": "109.999"}, True),
+        ({"previous_spend": "0"}, False),
+        ({"previous_revenue": "0"}, False),
+        ({"current_revenue": "0"}, True),
+        (
+            {
+                "previous_spend": "3",
+                "current_spend": "4",
+                "previous_revenue": "6",
+                "current_revenue": "7",
+            },
+            False,
+        ),
+    ],
+)
+def test_growth_combination_has_no_minimum_spend_or_deal_count(changes, expected):
+    from app.modules.promotion.diagnosis import assess
+
+    current, previous = growth_windows(**changes)
+    result = assess(current, previous, complete=True)
+    growth = [f for f in result["findings"] if "花费增长" in f["rule"]]
+    assert bool(growth) is expected
+    if growth:
+        assert growth[0]["level"] == "P2"
+    assert not any("投产下降" in f["rule"] for f in result["findings"])
+
+
+@pytest.mark.parametrize(
+    "defect",
+    ["unknown", "missing_current_day", "missing_previous_day", "null_spend", "null_revenue"],
+)
+def test_growth_invalid_or_unknown_window_does_not_publish_formal_priority(defect):
+    from app.modules.promotion.diagnosis import assess
+
+    current, previous = growth_windows()
+    if defect == "missing_current_day":
+        current.pop()
+    elif defect == "missing_previous_day":
+        previous.pop()
+    elif defect == "null_spend":
+        current[0]["spend"] = None
+    elif defect == "null_revenue":
+        previous[0]["attributed_revenue"] = None
+    result = assess(current, previous, complete=defect != "unknown")
+    assert result["findings"] == []
+    assert result["priority"] == "观察"
+    assert not any(c["status"] == "rule_pending" for c in result["clues"])
+    if defect == "unknown":
+        assert any(
+            "花费增长" in c["label"] and c["status"] == "observation_only" for c in result["clues"]
+        )
+
+
+def test_growth_combination_inherits_existing_p1_for_same_object():
+    from app.modules.promotion.diagnosis import assess
+
+    current, previous = growth_windows(previous_spend="100", current_spend="150")
+    result = assess(current, previous, complete=True)
+    assert result["priority"] == "P1"
+    assert any("花费增长" in f["rule"] and f["level"] == "P1" for f in result["findings"])
+
+
+def test_fourteen_observed_days_still_require_proven_complete_input(sales_pg, tmp_path):
+    current, previous = growth_windows()
+    rows = [
+        dict(
+            id=f"ad-{r['date']}",
+            shop_id="663599807",
+            spu_id="123",
+            promotion_name="方式A",
+            dt=str(r["date"]),
+            start_dt=str(r["date"]),
+            time_granularity="day",
+            total_cost=r["spend"],
+            transaction_amount=r["attributed_revenue"],
+            net_transaction_amount=r["net_attributed_revenue"],
+            transaction_count=r["attributed_deals"],
+            impression_count=r["impressions"],
+            click_count=r["clicks"],
+            spu_name="合成推广",
+        )
+        for r in (*previous, *current)
+    ]
+    publish_products(sales_pg, tmp_path, rows)
+    with client_for(sales_pg) as client:
+        token = client.get("/api/v1/promotion/meta?mode=product").json()["meta"]["data_version"]
+        data = client.get(
+            "/api/v1/promotion/diagnosis",
+            params=dict(
+                mode="product", date_from="2026-10-27", date_to="2026-10-27", data_version=token
+            ),
+        ).json()["data"]
+        assert data["coverage"]["covered_days"] == 14
+        assert data["coverage"]["completeness"] == "unknown"
+        assert data["overall"]["findings"] == []
+        assert data["counts"]["p2"] == 0
+        assert data["rule_states"]["spend_growth"] == "confirmed_no_minimum_sample_inputs_pending"
+        assert any(
+            c["status"] == "observation_only" and "花费增长" in c["label"]
+            for c in data["overall"]["clues"]
+        )
 
 
 def test_paired_rates_and_store_missing_net_stays_null():
@@ -252,6 +412,54 @@ def test_expected_star_absence_cannot_publish_product_only_net_as_combined_total
     result = aggregate(product_only, strict=True, cross=True)
     assert result["net_revenue"]["value"] is None
     assert result["net_roi"]["value"] is None
+
+
+@pytest.mark.parametrize("defect", ["missing_star_day", "missing_star_source", "null_star_revenue"])
+def test_store_combined_partial_coverage_never_looks_like_complete_roi(sales_pg, tmp_path, defect):
+    from app.modules.sales.datasets import SPECS
+    from app.modules.sales.storage import ShopDailyStore
+
+    for code in ("shop_channel_product_promotion", "shop_channel_star_shop"):
+        if code == "shop_channel_star_shop" and defect == "missing_star_source":
+            continue
+        rows = [sample(code, id=f"{code}-{n}", dt=f"2026-10-{n}") for n in (25, 26)]
+        if code == "shop_channel_star_shop":
+            rows = rows[:1] if defect == "missing_star_day" else rows
+            for row in rows:
+                row.update(
+                    cost="10", transaction_amount="20", transaction_count="2", click_count="5"
+                )
+            if defect == "null_star_revenue":
+                rows[1]["transaction_amount"] = None
+        candidate = normalize_source(code, rows, window())
+        ShopDailyStore(
+            sales_pg, archive_root=tmp_path / code, approved=window(), spec=SPECS[code]
+        ).publish_candidate(candidate)
+    with client_for(sales_pg) as client:
+        token = client.get("/api/v1/promotion/meta?mode=store").json()["meta"]["data_version"]
+        q = dict(
+            mode="store",
+            date_from="2026-10-25",
+            date_to="2026-10-26",
+            shop_id="663599807",
+            data_version=token,
+        )
+        data = client.get("/api/v1/promotion/overview", params=q).json()["data"]
+        assert data["metrics"]["revenue"]["status"] == "partial"
+        assert data["metrics"]["revenue"]["value"] is not None
+        assert data["metrics"]["roi"]["value"] is None
+        if defect != "null_star_revenue":
+            assert data["metrics"]["cvr"]["value"] is None
+        assert data["net"]["net_revenue"]["value"] is None
+        assert data["net"]["net_roi"]["value"] is None
+        assert data["series"][1]["metrics"]["roi"]["value"] is None
+        if defect != "missing_star_source":
+            assert data["series"][0]["metrics"]["roi"]["value"] is not None
+        single = client.get(
+            "/api/v1/promotion/overview", params={**q, "channel": "product_promotion"}
+        ).json()["data"]
+        assert single["metrics"]["roi"]["value"] is not None
+        assert single["net"]["net_roi"]["value"] is not None
 
 
 def test_unknown_selected_uuid_rejected_for_all_product_endpoints(sales_pg, tmp_path):

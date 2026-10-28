@@ -8,11 +8,13 @@ Goal：按requirements6和data-contract3.5.2还原店铺推广总览/商品推�
 
 扩M3相同来源必要投影：商品推广JSON净交易额/成交笔数，明星transaction_count；明星净额仍NULL。提升生产解释版本并重发源版，原四指标/M3回归对账。来源位置只用已核ODS商品推广概览、pdd_star_shop、BWD商品推广及数仓资料，不叠加ADS子集/旧补齐。只读RR固定本模式实际依赖，不受无关域版本变化牵连。
 
-NUMERIC/Decimal汇总；API十进制字符串/null。比率仅用同一行成对有效分子/分母。跨渠道成交互斥/归因未知标参考或暂停合计成交率；净额缺项不能用商品渠道部分冒充完整净额。SOP按对象两个7日历窗及必需输入，unknown完整性保留观察/线索，未决花费组合不造已确认评级。
+NUMERIC/Decimal汇总；API十进制字符串/null。比率仅用同一行成对有效分子/分母。渠道独立/支付日已确认，现行合计成交率门禁尚待切换，归因天数继续补证；净额缺项不能用商品渠道部分冒充完整净额。SOP按对象两个7日历窗及必需输入，unknown完整性保留观察/线索，花费组合无最低门槛已定，现行rule_pending需后续实施；不因口径答复绕过完整性/数学有效性门禁。
 
 ## API职责
 
 /api/v1/promotion下meta/options/overview/days/diagnosis，mode=store|product。meta含各来源截至/成功/尝试/版本及推荐日期；其它请求显式data_version，409/422/503统一协议。overview合并趋势以同快照返回，days服务端分页。options级联有界商品候选，完整listing_id。店铺固定25行、商品25/50/100；商品模式不得依赖M1经营事实是否有同日行。
+
+业务答复现以[data-contract 3.5.6](data-contract.md#business-metric-questions)为准：支付日、两渠道独立和组合无最低门槛已明确；本文原门禁描述属于现行代码状态，须后续实施/对账后更新，不因口径答复自动解除。
 
 ## 实施步骤
 

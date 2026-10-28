@@ -95,7 +95,7 @@ npm run dev                     # 本地前后端
 
 接收仅用已批准三张数仓表、六店day、最近60日及去年对应期和当前必要资料；连接位置见[data-contract 3.2](docs/data-contract.md#32-推广字段)，本轮证据见[source-evidence](docs/source-evidence.md#m1-v2-rebuild-20261028)。凭据不写命令行/仓库。来源私有投影、解释及生产代码留在忽略的var中，API仍为只读pdd_app，接收为现有pdd_ingest。当前本机项目定时器已启用，运行入口见下；来源修订形成新版本，受控完整分页双读下的移除键留审计，既有原行/版本不删除。来源读取失败保留旧成功入口并明确状态，不回写来源。
 
-当前GET为`meta`、`options`、`overview`、`days`、`scores`、`scores/{listing_id}`，固定data_version，不相容返回409；覆盖、成功和失败状态分别表达。四榜、健康度、七指标、流量链路、趋势和风险由本地聚合；评分区读取相容四输入及新试行标准/评分版本，返回十项原值、参考部分分、四线/样本和待验证原因；完整分与正式放量保持关闭。收藏区间可加性、归因与标准适用范围限制见[问题台账](docs/issues.md#m1-商品经营含新品评分)。接口以[data-contract 7.9](docs/data-contract.md#m1-v2-query-contract)为准，历史旧M1接口和model_versions等不再是当前物理结构。
+当前GET为`meta`、`options`、`overview`、`days`、`scores`、`scores/{listing_id}`，固定data_version，不相容返回409；覆盖、成功和失败状态分别表达。四榜、健康度、七指标、流量链路、趋势和风险由本地聚合；评分区读取相容四输入及新试行标准/评分版本，返回十项原值、参考部分分、四线/样本和待验证原因；完整分与正式放量保持关闭。收藏新增定义接入、归因窗口与标准适用范围限制见[问题台账](docs/issues.md#m1-商品经营含新品评分)。接口以[data-contract 7.9](docs/data-contract.md#m1-v2-query-contract)为准，历史旧M1接口和model_versions等不再是当前物理结构。
 
 旧`profiles:m1`、`scores:m1`、`db:upgrade`仍停用，不用旧任务重建已删除的数据库结构。04授既有M1表最小权限，05补评分父行FOR SHARE必需的UPDATE(id)权限（封版不可变仍有效）；真实PG验证后，受控本地升级脚本为`scripts/upgrade-products-local.py`，已升级不会覆盖数据。
 

@@ -90,10 +90,41 @@ def build_steps(engine, password):
         result = publish_scores(engine)
         return {**result, "version_id": result["versions"]["product_scores"]}
 
+    def aftersales(code):
+        from app.connectors.aftersales import AftersalesReader
+        from app.modules.aftersales.publisher import publish_source
+
+        reader = None
+        try:
+
+            def receive(hb):
+                nonlocal reader
+                reader = AftersalesReader(password=password, heartbeat=hb)
+                end = reader.latest(code)
+                raw, rows = reader.read_stable(code, end)
+                return end, raw, rows
+
+            return publish_source(
+                engine, code, receive, ROOT / "var/ingestion/aftersales"
+            )
+        finally:
+            if reader is not None:
+                reader.close()
+
+    def reports():
+        from app.modules.aftersales.publisher import publish_reports
+
+        return publish_reports(engine, ROOT / "var/ingestion/aftersales")
+
     return {
         "products": products,
         "product_scores": scores,
         **{code: lambda code=code: sales(code) for code in ("shop_daily", *SPECS)},
+        **{
+            code: lambda code=code: aftersales(code)
+            for code in ("jst_returns", "jst_shipped_sales", "jst_cancelled_sales")
+        },
+        "aftersales_report": reports,
     }
 
 
@@ -151,7 +182,14 @@ def main():
             steps,
             ROOT / "var/project-sync",
             max_attempts=config.max_attempts_per_slot,
-            depends_on={"product_scores": ("products",)},
+            depends_on={
+                "product_scores": tuple(k for k in ("products",) if k in steps),
+                "aftersales_report": tuple(
+                    k
+                    for k in ("jst_returns", "jst_shipped_sales", "jst_cancelled_sales")
+                    if k in steps
+                ),
+            },
         )
         if result["status"] not in (
             "already_succeeded",

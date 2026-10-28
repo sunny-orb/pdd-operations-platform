@@ -779,3 +779,40 @@ PYTHONPATH=apps/api apps/api/.venv/bin/python -m app.jobs.score_product_board
 项目预览已作为本机launchd临时任务cn.kocotree.pdd-operations.preview启动，独立于本次对话终端，HTTP已用于上述联调；只监听原loopback开发端口。可用launchctl remove cn.kocotree.pdd-operations.preview停止，未安装为登录自动启动的生产服务。原schema.sql一行既有尾空行未纳入本轮；无上游写入、生产发布或推送。
 
 本轮最终已执行并通过npm run check、npm test（前端42通过、后端169通过/72旧库历史跳过）、npm run build、npm run format:check；新增四脚本另作ruff通过。隔离真实PG评分及编排15项、独立v2 38项与实际writer评分权限反例均另行执行，不以历史跳过用例冒充数据库验证。11份变更文档的本地文件链接检查无缺失。构建仍提示共享图表依赖大包，未据此承诺首屏/并发性能；本轮没有推送或生产发布。
+
+<a id="m5-live-implementation-20261028"></a>
+
+## M5售后真实输入、报告及页面联调（2026-10-28）
+
+本轮按用户授权实施M5，专用设计见[m5-aftersales-implementation](m5-aftersales-implementation.md)，当前口径与来源分别归data-contract/source-evidence。参考sites-current售后index/app的字段、提示、顺序和必要纯逻辑，未复制旧经营快照/运行环境；旧float补0、Top截断重建、款号单键回退和假人工状态未复用。前端使用Ant Design/Recharts及现有DashboardLayout，共享顶部/左目录不改实现，原筛选侧栏移入正文。
+
+### 本地结构及实际发布
+
+新增06仅给pdd_ingest对return_records、product_sales_records、aftersales_reports的SELECT/INSERT，未授UPDATE/DELETE/DDL，无新增表/字段/索引。先执行`apps/api/.venv/bin/python scripts/db-v2.py verify`：38项通过，项目结构快照未变化；随后通过`upgrade-aftersales-local.py`备份同集群结构/权限并受控05→06，原schema.sql既有尾空行未纳入本轮。真实writer隔离验证能发布三角色/报告，不能改原行；回退说明在专用方案与迁移正文。
+
+实际以项目独立入口串行双读最近60天必要投影：J1首次成功；J2首次1064失败并保留任务记录，J3独立成功；仅对J2做一次额外有界重试后成功，再由报告步骤固定三输入出报告。未无限重试或改上游配置。
+
+| 来源/结果           | 当前版本                             | 行数/期间                            |
+| ------------------- | ------------------------------------ | ------------------------------------ |
+| jst_returns         | 4ba4af3a-e7a2-474d-8368-101fad78d75c | 144,258原行，Q参考、A全部NULL门禁    |
+| jst_shipped_sales   | ae2490fe-8505-44ee-97ee-1888721698ad | 294,539原行，sfje缺1,108行，保留NULL |
+| jst_cancelled_sales | bfdc23c2-19c6-464b-a6cc-5d5c62c92695 | 24,864原行，取消销售代理金额         |
+| 当前报告结果版      | 7efbeb9b-bb75-4328-a226-342a55a406e7 | 2026-09-28—10-27滚动30日             |
+| 前一期报告          | 5238a6b7-7c98-443d-8444-1dfb89d8240d | 2026-09-21—10-20滚动30日             |
+| 自然月报告          | 15e991b0-53a0-446d-905d-d63ab3d41d94 | 2026-09-01—09-30月报                 |
+
+三来源实际已接收观察日均至10/27；今日10/28未结束，不混入当前结束日滚动报告。原投影/解释位于Git忽略var/ingestion/aftersales，文件0600；发布前从真实PG逐格重读比对规范投影，失败不推进入口。六个精确JST店名在本次J1已接收范围各只观察到一个来源shop_code，原code与项目店铺ID分别存储；按已登记完整店名映射，不以店名后缀消歧。未把确认日/支付日当成同批订单或宣称业务齐数。
+
+### API与数据核验
+
+实际使用项目pdd_app只读API，`verify-aftersales-local.py`用独立SQL对三报告Q/记录行数/缺额与门禁、六标签18组投影、12/13/7/7/3/10列、稳定分页、默认三期趋势/历史进行核验；29次HTTP通过，GET前后task_runs数量不变。最慢约7.869秒，为有限本机顺序开发样本，非并发P95/SLO；全窗投影聚合及公司容量验收尚未关闭。历史报告固定输入，不跟当前事实；来源日期按各自窗内实际MIN/MAX，无记录为no_records；成功时间绑定具体输入版本，新源已发布但报告未重算显示new_input_pending_report。
+
+隔离真实PG包含发布幂等、源连接失败保旧/记录failed、三输入缺失拒绝、实际writer最小权限/不能修改、固定历史/变版409、销售无退货组仍进分母、缺额/粗分母、关键词完整对象集、50位Decimal/普通十进制、size50/100及来源待重算状态。未核重点筛选另有反例：质量/尺码词典缺失时records为NULL及rule_pending，不能返回0暗示没有问题。自然月即使30日也明确称月报。原单元窗口测试原先会访问正在同步的项目锁，本轮改用隔离PG引擎，避免测试依赖真实任务状态；既有权限测试更新06已授权M5范围，仍断言不能删除。
+
+### 页面和本轮复核
+
+组件测试覆盖共享五区目录、正文筛选、focus初始化、重置保留标签/折叠、九卡空值、后端分页/关键词重置页、45秒元信息/旧请求取消/409有限重取、默认报告跟随与自选保留。一次独立复核返回1 Important/2 Minor，均在同一轮以反例修复：默认请求不再总带report_id而将历史图/表误缩为一份；说明改为真实JST明细粒度；来源观察/失败保旧/无记录/待重算分别标明。后续自查修正显式历史报告的meta轮询绑定所选report_id，避免来源日期仍显示默认最新；保留同版失败状态更新。原因环图中心复用服务端Q分母，未在前端重算经营值。
+
+本轮本地浏览器工具返回“Local browser use is disabled in Work settings”，没有绕过设置或用其他自动化工具接管；`open_in_codex`仅返回queued，不冒充实际显示确认。真实浏览器交互、窄屏矩阵及线上同条件全页对照尚未执行，已记M5-ISS-06。原型字段/布局迁移及组件测试不充当视觉验收。
+
+最终已实际通过npm run check、npm test（前端55项、后端185通过/72旧结构历史跳过）、npm run build、npm run format:check；新增脚本ruff亦通过。另行隔离PG售后16项、v2迁移38项及上述真实API对账通过，不用旧结构跳过用例充当真实PG验收。构建仍有既有共享图表大包提示。无上游写入、业务消息、推送或生产发布；其他预存推广代码/文档改动保持独立。

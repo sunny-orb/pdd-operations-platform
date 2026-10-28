@@ -11,6 +11,8 @@ from app.modules.sales.contracts import ReadWindow, SalesError
 from app.modules.sales.normalization import normalize_shop_daily
 from app.modules.sales.source_policy import SHOPS
 
+pytest_plugins = ["tests.sales_pg_support"]
+
 
 def raw_row(**changes):
     row = dict(
@@ -109,7 +111,7 @@ def test_optional_source_missing_marker_is_null_but_core_marker_is_rejected():
         normalize_shop_daily([row], window())
 
 
-def test_future_verify_window_is_rejected_before_source_connection(monkeypatch, capsys):
+def test_future_verify_window_is_rejected_before_source_connection(monkeypatch, capsys, sales_pg):
     from app.jobs import sync_shop_daily
     from app.modules.sales import source_policy
 
@@ -121,6 +123,7 @@ def test_future_verify_window_is_rejected_before_source_connection(monkeypatch, 
     def forbidden(*args, **kwargs):
         raise AssertionError("越界窗口不能读取凭据或创建来源连接")
 
+    monkeypatch.setattr(sync_shop_daily, "runtime_engine", lambda: sales_pg)
     monkeypatch.setattr(sync_shop_daily.getpass, "getpass", forbidden)
     monkeypatch.setattr(sync_shop_daily, "ShopDailyReader", forbidden)
     assert sync_shop_daily.main() == 1

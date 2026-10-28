@@ -867,3 +867,17 @@ HAVING COUNT(*) > 1;
 M2沿用同一商品推广BWD与M3两店铺渠道来源，未加ADS或旧声明零。ODS商品推广JSON新增必要键“净交易额(元)”和“成交笔数”，明星pdd_star_shop新增transaction_count；实际稳定投影重新发布，前者净额/笔数1597/1597非空，明星笔数268/268、净额不适用仍NULL。物理表不新增字段，SPECS/解释版本已更新，前四量保持原值；真实逐格/56组接口及M3回归证据见validation。
 
 模型按用户指明的备份限定必要模型文件名与M1目录核查：取得sites-current/product-data-dashboard/scripts/viral_tiers.py，156行，SHA256为a46fb3d0956941fcca78958fa9252920b5c5c358cb62aeecaeb45806550d2ad8，已只读复制到runtime/m1-v6。没有取得原data/new_product_tiers.json或原拟合参数包，旧重算源码含缺日补零/单product_id归并，未原样搬进主链。原V6源码离线8项边界可运行，依赖numpy/pandas；本机业务主链用用户另行批准的纯Decimal阶段无关试行适配，非恢复原拟合参数。接口/私有样本/训练截止/新标准及评分发布通过实际v2任务绑定，相容性和真实分数验证统一见[验收记录](validation.md#m1-trial-scores-20261028)。
+
+<a id="m5-live-sources-20261028"></a>
+
+### M5最新聚水潭加工候选与字段对账（2026-10-28）
+
+本轮获准实施后，在cubeappdata做限定元数据与六店必要字段/日期聚合。BWD/ADS限定只找到既有地区/发货排行两表，缺J1原因/确认时间和J2/J3支付/取消，不能替换。扩大至2.0允许的聚水潭加工层后，找到`dwd_trd_sys_aftersale_order_detail_f`（售后标准明细）、`ud_1_dsyyxskb`（销售宽表）。前者样本data_source为聚水潭标准API，后者为聚水潭拼多多方舟API/奇门API加工结果；它们是相关聚水潭加工候选，不因名称含API就误判为已排除的拼多多直采API或恢复ODS原始API链。未进入ETL/配置、申请权限、写来源或读取个人信息。连接沿现有14.103.40.80:9030/cubeappdata只读身份，凭据仅私有配置/进程。
+
+J1必要字段为`__id,shop_code,shop_name,product_code,product_name,spec_name,confirm_date,aftersale_num,actual_receive_amount,platform_subsidy_amount,reason_type,aftersale_status,product_aftersale_type`。`aftersale_num`对实退数量有有限对账支持：2024-08-01按店+JST售后号+款+SKU共享438个Q/A齐备组，Q全相等；2026-04-01按店+JST售后号680组Q全相等；2026-05-16仅1齐备组也相等。2024字段配对为UD.ksbm→DWD.product_code、UD.spbm→DWD.spec_code、UD.shdh→DWD.aftersale_order_id。这是有限历史样本，不宣称全量或最新齐数。
+
+A存在未关闭反例：2026-04-01直接用actual_receive_amount仅269/680与精确导出按分相同，加platform_subsidy_amount后679/680相同；五月1例同样需要补贴。2024另有19.20对38.40、2026有22.72对45.44，补贴均0，原因未证。不能过滤反例后宣称正确、不能将actual_receive_amount直接当A，也不直接采用推导额。当前实现将`actual_inbound_amount`置NULL门禁，必要原投影保存在私有归档供后续核查。
+
+精确字段导出候选`UD_1_BH0X9_shztfxshdsp2`仅2024-08-01；订单级M6IU6最新2025-10-16、R5GFF最新2026-05-16。它们用于有限同窗对账，不拿旧数字填新报告。现RPA销售候选在六店精确范围没有记录。原页面只读内嵌history.js，没有现行业务查询API；没有读取旧经营快照作为接入输入。
+
+J2/J3使用`ud_1_dsyyxskb`的`pay_time`，分别精确状态`已发货`/`取消`；J2只取`sfje`实发金额及`outstock_num`，J3取`sale_amount`销售金额及`sale_num`。近30天六店已发货179,506行的早期有界聚合中，sfje空653行，已知sfje与sale_amount也有2,133行差异，因此不能用sale_amount填实发缺值。缺额汇总及依赖率不发布完整值。取消销售继续是代理口径，不证明现金退款成功。当前没有确证的产品分类/虚拟分类/原款码，保留未核，不按商品名猜分类、不照旧只用款码连接。实际接收版本/数量与API验证统一见validation。

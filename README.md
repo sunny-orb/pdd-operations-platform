@@ -121,3 +121,9 @@ apps/api/.venv/bin/python scripts/install-sync-schedule.py --remove # 只移除�
 凭据独立保存在Git忽略的本机0600文件，前端及Git中没有密码。机器睡眠/关机不会按时执行；恢复后当日漏点合并补跑。当前同步只覆盖已接入来源及批准窗口，未开发页面不会冒充同步完成；窗口外历史回补仍由受控任务安排。数仓backend资源拒绝时总预算退避，失败保旧版/时间与原因；定时到点不保证上游已有新日或已齐数。运行/验收见[架构](docs/architecture.md#sync-trigger-policy)、[验证](docs/validation.md#project-sync-m2-20261028)。
 
 新试行评分独立入口为`PYTHONPATH=apps/api apps/api/.venv/bin/python -m app.jobs.score_product_board`，只读本地输入并发布参考评分，不连接上游。模型材料/算法及最小权限设计见[说明](docs/m1-model-reuse.md)；原参数与新试行参照分开追溯，不复用旧经营数字。
+
+## M5售后分析入口
+
+`/aftersales`使用共享顶部/左侧目录，原售后筛选移到正文。报告、九指标、折叠整改/阶段、两图和六分析表只经`/api/v1/aftersales`读取本地固定版本；数据来自允许的JST加工必要投影。当前观察量与未核金额分开，A/缺sfje依赖率、分类/词典及物流阶段有明确门禁，不以旧报告数字补值。详见[运行契约](docs/data-contract.md#m5-runtime-contract)、[统一问题](docs/issues.md#m5-售后分析)。
+
+项目每日10/14/18点编排已包括`jst_returns`、`jst_shipped_sales`、`jst_cancelled_sales`及依赖成功后的`aftersales_report`；单次手动可用`sync-project.py --run-now --only`选择它们。报告固定当前/前一期滚动30日和覆盖完整的上个自然月，默认最新、自选保留；没有真实去年输入则同比不可比。06仅追加既有三表的最小运行权限，受控本机升级入口为`scripts/upgrade-aftersales-local.py`，先执行`db-v2.py verify`；无新增数据表或服务启动DDL。

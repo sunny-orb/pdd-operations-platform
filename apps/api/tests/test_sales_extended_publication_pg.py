@@ -98,7 +98,7 @@ def test_partial_large_draft_never_replaces_successful_pointer(sales_pg, tmp_pat
         )
 
 
-def test_runtime_permissions_include_authorized_m1_without_unrelated_writes(sales_pg):
+def test_runtime_permissions_include_authorized_m1_m5_without_delete(sales_pg):
     with sales_pg.connect() as c:
         for name in (
             "shop_channel_promotion_daily",
@@ -118,7 +118,7 @@ def test_runtime_permissions_include_authorized_m1_without_unrelated_writes(sale
         assert c.execute(
             sa.text("SELECT has_table_privilege('pdd_ingest','product_daily_facts','INSERT')")
         ).scalar_one()
-        assert not c.execute(
+        assert c.execute(
             sa.text("SELECT has_table_privilege('pdd_ingest','return_records','INSERT')")
         ).scalar_one()
         assert not c.execute(

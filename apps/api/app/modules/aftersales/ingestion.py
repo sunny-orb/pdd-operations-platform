@@ -3,6 +3,12 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+from app.modules.aftersales.bundle_categories import (
+    BUNDLE_CATEGORY_ROW_LIMIT,
+    bundle_category_consensus,
+    bundle_category_evidence,
+    parent_key,
+)
 from app.modules.sales.datasets import REFUND_SHOPS
 from app.modules.sales.normalization import fingerprint
 
@@ -70,10 +76,11 @@ NOTE = (
     "实退数量经有限历史样本对账，仅作观察参考；实际入库金额因补贴及倍额反例未通过门禁。"
     "product_code为JST款式编码，spec_code为SKU；按当前JST普通SKU资料核对款/SKU并取得一二分类，"
     "缺失SKU仅按当前同款全部普通SKU逐字段非空唯一共识补类，身份仍未匹配；"
+    "原款/SKU精确对应当前组合父键时，仅按完整组合资料原生分类逐字段共识补类，不借普通子件推父类；"
     "非历史分类，不混入旧手工或虚拟分类。无共识保留空分类；重复或跨款SKU资料拒绝。"
     "原售后分类中的拒收仅作来源标记，签收阶段未核；当前明细不是原商品/原因汇总行。"
 )
-REVISION = "m5-jst-current-style-consensus-v3"
+REVISION = "m5-jst-current-bundle-consensus-v4"
 
 
 def number(value):
@@ -104,7 +111,7 @@ def style_consensus_eligible(item):
     )
 
 
-def enrich_current_master(raw, master, snapshot, style_candidates=None):
+def enrich_current_master(raw, master, snapshot, style_candidates=None, bundle_candidates=None):
     """事实与当前普通SKU资料1:1核验；返回含原资料证据的raw，不展开组合或改写度量。"""
     snapshot = str(snapshot)
     requested = {source_code(row.get("spec_code")) for row in raw} - {None}
@@ -204,6 +211,30 @@ def enrich_current_master(raw, master, snapshot, style_candidates=None):
             )
         ):
             item["category_match_method"] = "style_consensus"
+    bundle_candidates = bundle_candidates or {}
+    eligible_parents = {
+        parent_key(item.get("product_code"), item.get("spec_code"))
+        for item in enriched
+        if style_consensus_eligible(item)
+    } - {None}
+    if set(bundle_candidates) - eligible_parents:
+        raise ValueError("SOURCE_BUNDLE_CATEGORY_SCOPE_MISMATCH")
+    if sum(len(items) for items in bundle_candidates.values()) > BUNDLE_CATEGORY_ROW_LIMIT:
+        raise ValueError("SOURCE_BUNDLE_CATEGORY_ROW_LIMIT")
+    bundle_proofs = {
+        key: bundle_category_evidence(key, candidates, snapshot)
+        for key, candidates in bundle_candidates.items()
+    }
+    for item in enriched:
+        key = parent_key(item.get("product_code"), item.get("spec_code"))
+        proof = bundle_proofs.get(key) if style_consensus_eligible(item) else None
+        item["jst_current_bundle_category_evidence"] = proof
+        if proof is not None and proof["candidate_count"] > 0:
+            item["category_match_method"] = (
+                "current_bundle_category_consensus"
+                if any(value is not None for value in current_categories(item))
+                else "unmatched"
+            )
     return enriched
 
 
@@ -251,16 +282,31 @@ def style_category_consensus(evidence, style, snapshot):
 
 
 def current_categories(item):
-    """优先精确款/SKU资料；独立全款证据只补类别，不改未匹配身份。"""
+    """精确普通SKU优先；未匹配身份取精确组合原生类，无组合记录才回退普通款共识。"""
     if item.get("jst_current_mapping_status") != "matched":
         proof = item.get("jst_current_style_category_evidence")
+        categories = (None, None)
         if proof is not None:
             if not style_consensus_eligible(item):
                 raise ValueError("SOURCE_STYLE_CATEGORY_SCOPE_MISMATCH")
-            return style_category_consensus(
+            categories = style_category_consensus(
                 proof, item["product_code"], item.get("jst_current_snapshot_date")
             )
-        return None, None
+        bundle = item.get("jst_current_bundle_category_evidence")
+        if bundle is not None:
+            if not style_consensus_eligible(item):
+                raise ValueError("SOURCE_BUNDLE_CATEGORY_SCOPE_MISMATCH")
+            bundle_categories = bundle_category_consensus(
+                bundle,
+                parent_key(item.get("product_code"), item.get("spec_code")),
+                item.get("jst_current_snapshot_date"),
+            )
+            # 父SKU与款级推断粒度不同；存在父记录时NULL也保留，不拼接款级字段。
+            if bundle["candidate_count"] > 0:
+                return bundle_categories
+        return categories
+    if item.get("jst_current_bundle_category_evidence") is not None:
+        raise ValueError("SOURCE_BUNDLE_CATEGORY_SCOPE_MISMATCH")
     master = item.get("jst_current_master_record") or {}
     if (
         source_code(master.get("product_code")) != source_code(item.get("product_code"))

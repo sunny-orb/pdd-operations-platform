@@ -4,6 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
+from .amounts import amount_details
 from .classification import classify_rows, enabled, observations
 from .metrics import from_values, groups, identity, matches, ratio, summarize, total
 from .repository import ROLES, public_report
@@ -131,6 +132,9 @@ def overview(repo, q):
     values = summarize(*blocks, parameters=parameters)
     observed = observations(blocks[0], parameters)
     metrics = [metric(key, label, type, values[key], note) for key, label, type, note in METRICS]
+    details = amount_details(*blocks)
+    for item in metrics:
+        item["detail"] = details.get(item["key"], "")
     report = repo.report
     scope = (
         "关键词/重点先选完整对象，指标和原因统计所选对象的全部明细；"
@@ -211,6 +215,7 @@ def overview(repo, q):
     verified_refusal_field = source.get("row_schema_revision") in {
         "m5-jst-current-sku-v2",
         "m5-jst-current-style-consensus-v3",
+        "m5-jst-current-bundle-consensus-v4",
     }
     full_window = repo.rows("j1_returns") if verified_refusal_field else None
     refusal_available = bool(blocks[0] and full_window) and all(

@@ -42,6 +42,7 @@ def producer():
                 Path(__file__),
                 Path(__file__).with_name("ingestion.py"),
                 Path(__file__).with_name("classification.py"),
+                Path(__file__).with_name("bundle_categories.py"),
                 Path(__file__).parents[2] / "connectors/aftersales.py",
             )
         }

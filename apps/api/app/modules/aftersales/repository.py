@@ -45,6 +45,7 @@ def revision():
                 "repository.py",
                 "query.py",
                 "metrics.py",
+                "amounts.py",
                 "analysis.py",
                 "classification.py",
                 "targets.py",

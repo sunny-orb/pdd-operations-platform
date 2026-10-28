@@ -5,6 +5,11 @@ from zoneinfo import ZoneInfo
 
 from app.connectors.product_board import ProductBoardReader
 from app.connectors.retry import execute_read
+from app.modules.aftersales.bundle_categories import (
+    BUNDLE_CATEGORY_COLUMNS,
+    BUNDLE_CATEGORY_ROW_LIMIT,
+    parent_key,
+)
 from app.modules.aftersales.ingestion import (
     COLUMNS,
     MASTER_COLUMNS,
@@ -114,15 +119,70 @@ class AftersalesReader(ProductBoardReader):
         first = self.read(code, end)
         snapshot, master = self.read_current_master(first)
         styles = self.read_current_style_categories(first, master, snapshot)
+        bundles = self.read_current_bundle_categories(first, master, snapshot)
         second = self.read(code, end)
         next_snapshot, next_master = self.read_current_master(second)
         next_styles = self.read_current_style_categories(second, next_master, next_snapshot)
-        if fingerprint((first, snapshot, master, styles)) != fingerprint(
-            (second, next_snapshot, next_master, next_styles)
+        next_bundles = self.read_current_bundle_categories(second, next_master, next_snapshot)
+        if fingerprint((first, snapshot, master, styles, sorted(bundles.items()))) != fingerprint(
+            (second, next_snapshot, next_master, next_styles, sorted(next_bundles.items()))
         ):
             raise ValueError("SOURCE_CHANGED_DURING_READ")
-        raw = enrich_current_master(first, master, snapshot, styles)
+        raw = enrich_current_master(first, master, snapshot, styles, bundles)
         return raw, normalize(code, raw, end)
+
+    def read_current_bundle_categories(self, raw, master, snapshot):
+        """原款/SKU精确定位组合父键，读取完整原生分类；不查普通子件或展开事实。"""
+        checked = enrich_current_master(raw, master, snapshot)
+        keys = sorted(
+            {
+                parent_key(item.get("product_code"), item.get("spec_code"))
+                for item in checked
+                if style_consensus_eligible(item)
+            }
+            - {None}
+        )
+        result = {key: [] for key in keys}
+        projection = ",".join(
+            "CAST(`__id` AS CHAR) AS `__id`" if col == "__id" else f"`{col}`"
+            for col in BUNDLE_CATEGORY_COLUMNS
+        )
+        total = 0
+        for offset in range(0, len(keys), 250):
+            selected = keys[offset : offset + 250]
+            pairs = " OR ".join(["(suite_code=%s AND suite_spec_code=%s)"] * len(selected))
+            scope = f"FROM `{MASTER_TABLE}` WHERE product_type=%s AND dt=%s AND ({pairs})"
+            params = ("组合商品", snapshot, *(value for key in selected for value in key))
+            with self.connection.cursor() as c:
+                execute_read(
+                    c,
+                    f"SELECT COUNT(*) AS row_count {scope}",
+                    params,
+                    self.retry_budget,
+                    self.heartbeat,
+                )
+                expected = int(c.fetchone()["row_count"])
+                if total + expected > BUNDLE_CATEGORY_ROW_LIMIT:
+                    raise ValueError("SOURCE_BUNDLE_CATEGORY_ROW_LIMIT")
+                execute_read(
+                    c,
+                    f"SELECT {projection} {scope} ORDER BY __id LIMIT 5001",
+                    params,
+                    self.retry_budget,
+                    self.heartbeat,
+                )
+                page = c.fetchall()
+            total += len(page)
+            if total > BUNDLE_CATEGORY_ROW_LIMIT:
+                raise ValueError("SOURCE_BUNDLE_CATEGORY_ROW_LIMIT")
+            if len(page) != expected:
+                raise ValueError("SOURCE_BUNDLE_CATEGORY_COUNT_MISMATCH")
+            for item in page:
+                key = parent_key(item.get("suite_code"), item.get("suite_spec_code"))
+                if key not in selected:
+                    raise ValueError("SOURCE_BUNDLE_CATEGORY_SCOPE_MISMATCH")
+                result[key].append(item)
+        return result
 
     def read_current_style_categories(self, raw, master, snapshot):
         """精确SKU未找到时，另读该款同dt全部普通SKU；总计5000上限，绝不截断共识。"""

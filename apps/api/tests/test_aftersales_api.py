@@ -477,7 +477,14 @@ def classified_returns(suffix="1"):
     ]
 
 
-@pytest.mark.parametrize("revision", ["m5-jst-current-sku-v2", "m5-jst-current-style-consensus-v3"])
+@pytest.mark.parametrize(
+    "revision",
+    [
+        "m5-jst-current-sku-v2",
+        "m5-jst-current-style-consensus-v3",
+        "m5-jst-current-bundle-consensus-v4",
+    ],
+)
 def test_fixed_dictionary_quality_focus_selects_full_objects_and_preserves_amount_gates(
     sales_pg, revision
 ):
@@ -544,6 +551,7 @@ def test_old_report_dictionary_is_frozen_when_new_report_enables_classification(
         ("m5-jst-partial-v1", False),
         ("m5-jst-current-sku-v2", True),
         ("m5-jst-current-style-consensus-v3", True),
+        ("m5-jst-current-bundle-consensus-v4", True),
     ],
 )
 def test_refusal_requires_verified_source_revision_and_whole_window_field_coverage(

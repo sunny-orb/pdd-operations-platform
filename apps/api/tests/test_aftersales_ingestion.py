@@ -629,6 +629,7 @@ def test_reader_includes_unrequested_style_skus_and_checks_style_evidence_stabil
         return {"KQ24001": candidates}
 
     reader.read_current_style_categories = read_styles
+    reader.read_current_bundle_categories = lambda raw, master, snapshot: {}
     with pytest.raises(ValueError, match="SOURCE_CHANGED_DURING_READ"):
         reader.read_stable("jst_returns", date(2026, 10, 27))
 
@@ -828,7 +829,7 @@ def test_real_pg_style_consensus_archive_replay_and_failure_keep_previous_versio
             .mappings()
             .one()
         )
-        assert version["row_schema_revision"] == "m5-jst-current-style-consensus-v3"
+        assert version["row_schema_revision"] == "m5-jst-current-bundle-consensus-v4"
     archived = [
         json.loads(line) for line in Path(version["retained_input_ref"]).read_text().splitlines()
     ]
@@ -849,3 +850,438 @@ def test_real_pg_style_consensus_archive_replay_and_failure_keep_previous_versio
             == first["version_id"]
         )
         assert c.execute(sa.text("SELECT COUNT(*) FROM return_records")).scalar_one() == 1
+
+
+def bundle_master(**changes):
+    """组合资料原生一级未知；子件真实身份不等于父组合事实身份。"""
+    return (
+        dict(
+            __id="bundle-1",
+            data_source="JST",
+            product_code="组件款1",
+            spec_code="组件SKU1",
+            suite_code="KQ24001",
+            suite_spec_code="06941716542009",
+            product_type="组合商品",
+            first_category=None,
+            second_category="护耳帽",
+            dt="2026-10-27",
+        )
+        | changes
+    )
+
+
+def bundle_candidates():
+    return [bundle_master(), bundle_master(__id="bundle-2", spec_code="组件SKU2")]
+
+
+@pytest.mark.parametrize("code", ["jst_returns", "jst_shipped_sales", "jst_cancelled_sales"])
+def test_bundle_native_category_consensus_only_adds_verified_fields_preserving_fact(code):
+    from app.modules.aftersales.ingestion import enrich_current_master, normalize
+
+    fact = identity_fact()
+    end = date(2026, 10, 27)
+    baseline = normalize(code, enrich_current_master([fact], [], "2026-10-27"), end)[0]
+    raw = enrich_current_master(
+        [fact],
+        [],
+        "2026-10-27",
+        bundle_candidates={("KQ24001", "06941716542009"): bundle_candidates()},
+    )
+    row = normalize(code, raw, end)[0]
+    assert row == baseline | {"source_subcategory": "护耳帽"}
+    assert raw[0]["category_match_method"] == "current_bundle_category_consensus"
+    assert raw[0]["jst_current_mapping_status"] == "not_found"
+    assert raw[0]["jst_current_master_record"] is None
+    assert len(raw[0]["jst_current_bundle_category_evidence"]["candidates"]) == 2
+    assert "jst_current_bundle_category_evidence" not in fact
+
+
+@pytest.mark.parametrize("field", ["first_category", "second_category"])
+@pytest.mark.parametrize("bad_value", [None, "", "   ", 17, "不一致分类"])
+def test_bundle_native_categories_require_independent_complete_nonempty_consensus(field, bad_value):
+    from app.modules.aftersales.ingestion import enrich_current_master, normalize
+
+    candidates = [
+        bundle_master(first_category="童帽秋冬"),
+        bundle_master(__id="bundle-2", spec_code="组件SKU2", first_category="童帽秋冬")
+        | {field: bad_value},
+    ]
+    raw = enrich_current_master(
+        [identity_fact()],
+        [],
+        "2026-10-27",
+        {"KQ24001": full_style_master()},
+        bundle_candidates={("KQ24001", "06941716542009"): candidates},
+    )
+    row = normalize("jst_returns", raw, date(2026, 10, 27))[0]
+    assert row["source_product_category"] == (None if field == "first_category" else "童帽秋冬")
+    assert row["source_subcategory"] == (None if field == "second_category" else "护耳帽")
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"suite_code": "别款"},
+        {"suite_spec_code": "别父SKU"},
+        {"dt": "2026-10-26"},
+        {"product_type": "普通商品"},
+        {"product_code": None},
+        {"spec_code": "   "},
+        {"suite_code": " "},
+        {"suite_spec_code": False},
+        {"__id": ""},
+    ],
+)
+def test_bundle_candidates_reject_wrong_parent_scope_type_snapshot_and_invalid_keys(changes):
+    from app.modules.aftersales.ingestion import enrich_current_master
+
+    with pytest.raises(ValueError, match="BUNDLE_CATEGORY"):
+        enrich_current_master(
+            [identity_fact()],
+            [],
+            "2026-10-27",
+            bundle_candidates={("KQ24001", "06941716542009"): [bundle_master(**changes)]},
+        )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        bundle_master(__id="bundle-2"),
+        bundle_master(spec_code="组件SKU2"),
+    ],
+)
+def test_bundle_duplicate_component_or_record_cannot_be_arbitrarily_selected(extra):
+    from app.modules.aftersales.ingestion import enrich_current_master
+
+    with pytest.raises(ValueError, match="BUNDLE_CATEGORY_DUPLICATE"):
+        enrich_current_master(
+            [identity_fact()],
+            [],
+            "2026-10-27",
+            bundle_candidates={("KQ24001", "06941716542009"): [bundle_master(), extra]},
+        )
+
+
+def test_bundle_evidence_replay_rejects_partial_scope_count_and_tampering():
+    from copy import deepcopy
+
+    from app.modules.aftersales.ingestion import enrich_current_master, normalize
+    from app.modules.sales.normalization import fingerprint
+
+    raw = enrich_current_master(
+        [identity_fact()],
+        [],
+        "2026-10-27",
+        bundle_candidates={("KQ24001", "06941716542009"): bundle_candidates()},
+    )
+    for changes in [
+        {"complete": False},
+        {"candidate_count": 3},
+        {"candidates": bundle_candidates()[:1]},
+    ]:
+        changed = deepcopy(raw)
+        proof = changed[0]["jst_current_bundle_category_evidence"]
+        proof.update(changes)
+        proof["fingerprint"] = fingerprint({k: v for k, v in proof.items() if k != "fingerprint"})
+        with pytest.raises(ValueError, match="BUNDLE_CATEGORY"):
+            normalize("jst_returns", changed, date(2026, 10, 27))
+    changed = deepcopy(raw)
+    changed[0]["jst_current_bundle_category_evidence"]["candidates"][0]["second_category"] = "篡改"
+    with pytest.raises(ValueError, match="BUNDLE_CATEGORY_FINGERPRINT"):
+        normalize("jst_returns", changed, date(2026, 10, 27))
+
+
+def test_bundle_scope_only_applies_to_unmatched_nonblank_parent_keys_and_stays_bounded():
+    from app.modules.aftersales.ingestion import enrich_current_master
+
+    for fact, master in [
+        (identity_fact(), [current_master()]),
+        (identity_fact(), [current_master(product_code="别款")]),
+        (identity_fact(spec_code="  "), []),
+    ]:
+        with pytest.raises(ValueError, match="BUNDLE_CATEGORY_SCOPE"):
+            enrich_current_master(
+                [fact],
+                master,
+                "2026-10-27",
+                bundle_candidates={("KQ24001", "06941716542009"): bundle_candidates()},
+            )
+    with pytest.raises(ValueError, match="BUNDLE_CATEGORY_ROW_LIMIT"):
+        enrich_current_master(
+            [identity_fact()],
+            [],
+            "2026-10-27",
+            bundle_candidates={("KQ24001", "06941716542009"): [bundle_master()] * 5001},
+        )
+
+
+@pytest.mark.parametrize("code", ["jst_returns", "jst_shipped_sales", "jst_cancelled_sales"])
+def test_exact_bundle_native_fields_replace_style_inference_without_filling_nulls(code):
+    from app.modules.aftersales.ingestion import enrich_current_master, normalize
+
+    end = date(2026, 10, 27)
+    baseline = normalize(code, enrich_current_master([identity_fact()], [], "2026-10-27"), end)
+    styles = [
+        dict(row, first_category="童配秋冬", second_category="软壳裤")
+        for row in full_style_master()
+    ]
+    raw = enrich_current_master(
+        [identity_fact()],
+        [],
+        "2026-10-27",
+        {"KQ24001": styles},
+        bundle_candidates={
+            ("KQ24001", "06941716542009"): [bundle_master(second_category="软壳衣")]
+        },
+    )
+    assert normalize(code, raw, end) == [baseline[0] | {"source_subcategory": "软壳衣"}]
+    assert raw[0]["jst_current_mapping_status"] == "not_found"
+    assert raw[0]["category_match_method"] == "current_bundle_category_consensus"
+
+
+@pytest.mark.parametrize(
+    "candidates, expected, method",
+    [
+        ([bundle_master(second_category=None)], (None, None), "unmatched"),
+        ([], ("童帽秋冬", "护耳帽"), "style_consensus"),
+    ],
+)
+def test_bundle_scope_presence_controls_fallback_and_method_even_when_native_fields_empty(
+    candidates, expected, method
+):
+    from app.modules.aftersales.ingestion import enrich_current_master, normalize
+
+    raw = enrich_current_master(
+        [identity_fact()],
+        [],
+        "2026-10-27",
+        {"KQ24001": full_style_master()},
+        bundle_candidates={("KQ24001", "06941716542009"): candidates},
+    )
+    row = normalize("jst_returns", raw, date(2026, 10, 27))[0]
+    assert (row["source_product_category"], row["source_subcategory"]) == expected
+    assert raw[0]["category_match_method"] == method
+
+
+def bundle_query_reader(candidates, expected_count=None, selected_keys=None):
+    from types import SimpleNamespace
+
+    from pymysql.err import ProgrammingError
+
+    from app.connectors.aftersales import AftersalesReader
+
+    selected_keys = sorted(selected_keys or [("KQ24001", "06941716542009")])
+    selected_rows = [
+        row
+        for row in candidates
+        if (row["suite_code"], row["suite_spec_code"]) in selected_keys
+        and row["product_type"] == "组合商品"
+        and row["dt"] == "2026-10-27"
+    ]
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, query, params):
+            if "(suite_code,suite_spec_code) IN" in query:
+                # 本次StarRocks实测的方言边界，不能用接受任意SQL的替身掩盖1064。
+                raise ProgrammingError(
+                    1064,
+                    "Getting syntax error at line 1, column 116. "
+                    "Detail message: Unexpected input 'AND', "
+                    "the most similar input is {<EOF>, ';'}.",
+                )
+            # COUNT/SELECT都必须把每个完整父键括起，再把整个OR集合括起，避免AND优先级放大范围。
+            pairs = " OR ".join(["(suite_code=%s AND suite_spec_code=%s)"] * len(selected_keys))
+            assert f"WHERE product_type=%s AND dt=%s AND ({pairs})" in query
+            assert params == ("组合商品", "2026-10-27", *(v for key in selected_keys for v in key))
+            assert all(value not in query for key in selected_keys for value in key)
+            assert "product_name" not in query
+            if "COUNT(*)" not in query:
+                assert "LIMIT 5001" in query
+
+        def fetchone(self):
+            return {"row_count": len(selected_rows) if expected_count is None else expected_count}
+
+        def fetchall(self):
+            return selected_rows
+
+    reader = AftersalesReader.__new__(AftersalesReader)
+    reader.connection = SimpleNamespace(cursor=Cursor)
+    reader.retry_budget = None
+    reader.heartbeat = lambda: None
+    return reader
+
+
+def test_bundle_reader_reads_whole_exact_parent_scope_and_checks_source_count():
+    reader = bundle_query_reader(bundle_candidates())
+    result = reader.read_current_bundle_categories([identity_fact()], [], "2026-10-27")
+    assert len(result[("KQ24001", "06941716542009")]) == 2
+    reader.connection = None
+    assert (
+        reader.read_current_bundle_categories([identity_fact()], [current_master()], "2026-10-27")
+        == {}
+    )
+    for candidates, count in [(bundle_candidates()[:1], 2), ([bundle_master()] * 5001, 5001)]:
+        reader = bundle_query_reader(candidates, count)
+        with pytest.raises(ValueError, match="BUNDLE_CATEGORY"):
+            reader.read_current_bundle_categories([identity_fact()], [], "2026-10-27")
+
+
+def test_bundle_parent_or_scope_preserves_exact_pairs_and_keeps_values_parameterized():
+    keys = [("A' OR 1=1 --", "共享父SKU"), ("Z父款", "共享父SKU")]
+    candidates = [
+        bundle_master(__id="1", suite_code=keys[0][0], suite_spec_code=keys[0][1]),
+        bundle_master(__id="2", suite_code=keys[1][0], suite_spec_code=keys[1][1]),
+        bundle_master(__id="3", suite_code=keys[0][0], suite_spec_code="未申请父SKU"),
+        bundle_master(__id="4", suite_code="未申请父款", suite_spec_code=keys[1][1]),
+        bundle_master(__id="5", suite_code=keys[1][0], suite_spec_code=keys[1][1], dt="2026-10-26"),
+        bundle_master(
+            __id="6", suite_code=keys[1][0], suite_spec_code=keys[1][1], product_type="普通商品"
+        ),
+    ]
+    reader = bundle_query_reader(candidates, selected_keys=keys)
+    facts = [
+        identity_fact(__id=str(index), product_code=style, spec_code=sku)
+        for index, (style, sku) in enumerate(keys)
+    ]
+    result = reader.read_current_bundle_categories(facts, [], "2026-10-27")
+    assert set(result) == set(keys)
+    assert {key: [row["__id"] for row in rows] for key, rows in result.items()} == {
+        keys[0]: ["1"],
+        keys[1]: ["2"],
+    }
+
+
+def test_reader_checks_bundle_evidence_changes_before_normalizing():
+    from app.connectors.aftersales import AftersalesReader
+
+    reader = AftersalesReader.__new__(AftersalesReader)
+    reader.read = lambda code, end: [identity_fact()]
+    reader.read_current_master = lambda raw: ("2026-10-27", [])
+    reader.read_current_style_categories = lambda raw, master, snapshot: {}
+    calls = 0
+
+    def read_bundle(raw, master, snapshot):
+        nonlocal calls
+        calls += 1
+        return {
+            ("KQ24001", "06941716542009"): [
+                bundle_master(second_category="其他类" if calls > 1 else "护耳帽")
+            ]
+        }
+
+    reader.read_current_bundle_categories = read_bundle
+    with pytest.raises(ValueError, match="SOURCE_CHANGED_DURING_READ"):
+        reader.read_stable("jst_returns", date(2026, 10, 27))
+
+
+def test_real_pg_bundle_category_archive_preserves_all_fact_fields_and_old_v3_replay(
+    sales_pg, tmp_path
+):
+    import json
+    from pathlib import Path
+
+    import sqlalchemy as sa
+
+    from app.modules.aftersales.ingestion import enrich_current_master, normalize
+    from app.modules.aftersales.publisher import FACTS, publish_source
+
+    end = date(2026, 10, 27)
+    old_raw = enrich_current_master(
+        [identity_fact()], [], "2026-10-27", {"KQ24001": full_style_master()}
+    )
+    old_raw[0].pop("jst_current_bundle_category_evidence")  # 旧v3归档没有v4证据字段。
+    old_rows = normalize("jst_returns", old_raw, end)
+    assert old_rows[0]["source_product_category"] == "童帽秋冬"
+    assert old_rows[0]["source_subcategory"] == "护耳帽"
+    for code, table in FACTS.items():
+        raw = enrich_current_master(
+            [identity_fact()],
+            [],
+            "2026-10-27",
+            bundle_candidates={("KQ24001", "06941716542009"): bundle_candidates()},
+        )
+        rows = normalize(code, raw, end)
+
+        def receive(hb, raw=raw, rows=rows):
+            return end, raw, rows
+
+        first = publish_source(sales_pg, code, receive, tmp_path)
+        assert (
+            publish_source(sales_pg, code, receive, tmp_path)["version_id"] == first["version_id"]
+        )
+        with sales_pg.connect() as c:
+            db_rows = (
+                c.execute(
+                    sa.text(f"SELECT * FROM {table} WHERE dataset_version_id=:v"),
+                    {"v": first["version_id"]},
+                )
+                .mappings()
+                .all()
+            )
+            assert len(db_rows) == 1
+            assert {key: db_rows[0][key] for key in rows[0]} == rows[0]
+            version = (
+                c.execute(
+                    sa.text("SELECT * FROM dataset_versions WHERE id=:v"),
+                    {"v": first["version_id"]},
+                )
+                .mappings()
+                .one()
+            )
+        archived = [
+            json.loads(line)
+            for line in Path(version["retained_input_ref"]).read_text().splitlines()
+        ]
+        assert normalize(code, archived, end) == rows
+        assert archived[0]["jst_current_mapping_status"] == "not_found"
+        assert version["row_schema_revision"] == "m5-jst-current-bundle-consensus-v4"
+
+        def invalid(hb):
+            enrich_current_master(
+                [identity_fact()],
+                [],
+                "2026-10-27",
+                bundle_candidates={("KQ24001", "06941716542009"): bundle_candidates() * 2},
+            )
+
+        with pytest.raises(ValueError, match="BUNDLE_CATEGORY_DUPLICATE"):
+            publish_source(sales_pg, code, invalid, tmp_path)
+        with sales_pg.connect() as c:
+            assert (
+                str(
+                    c.execute(
+                        sa.text("SELECT version_id FROM current_datasets WHERE dataset_code=:code"),
+                        {"code": code},
+                    ).scalar_one()
+                )
+                == first["version_id"]
+            )
+            assert (
+                c.execute(
+                    sa.text(f"SELECT COUNT(*) FROM {table} WHERE dataset_version_id=:v"),
+                    {"v": first["version_id"]},
+                ).scalar_one()
+                == 1
+            )
+    assert normalize("jst_returns", old_raw, end) == old_rows
+
+
+def test_empty_bundle_scope_keeps_fact_unclassified_and_archive_replayable():
+    from app.modules.aftersales.ingestion import enrich_current_master, normalize
+
+    raw = enrich_current_master(
+        [identity_fact()], [], "2026-10-27", bundle_candidates={("KQ24001", "06941716542009"): []}
+    )
+    row = normalize("jst_returns", raw, date(2026, 10, 27))[0]
+    assert row["source_product_category"] is None and row["source_subcategory"] is None
+    assert raw[0]["category_match_method"] == "unmatched"
+    assert raw[0]["jst_current_mapping_status"] == "not_found"
+    assert raw[0]["jst_current_bundle_category_evidence"]["candidate_count"] == 0

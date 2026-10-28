@@ -83,6 +83,10 @@ npm run db:test     # 前后端全套测试，PG合成数据仅进入pdd_operati
 
 手工/非本地Docker部署仍可在`apps/api`使用具有迁移权限的`DATABASE_URL`执行`python -m alembic upgrade head`；服务启动不自动建表。该命令会按旧迁移重建旧结构；当前暂停，新链使用[独立v2方案](docs/database-schema/migration-plan.md)，不能混用。readiness成功只代表应用库可连接，不代表经营API或页面已完成对账。
 
+## 同步功能的平台接管
+
+本机触发和平台触发共用`app.jobs.project_runtime.execute_project`，显式注入engine、延迟取密及五类运行路径，完整保留原连接器、校验、发布与报告/评分。接口、整功能迁移清单、历史归档引用和回退见[平台接管说明](docs/sync-platform-handoff.md)。当前仍由本机10/14/18触发，没有部署平台任务。
+
 ## M1商品经营当前入口
 
 `/products`已从零重建，旧本地前端未读取即移除，没有样例回退入口。React/Ant Design/Recharts保留原型六区与共享导航，真实数据只通过`/api/v1/products`查询。总览、评分、底表三套URL范围独立；金额与计数传输字符串，展示舍入用BigInt，只有图形坐标近似Number。

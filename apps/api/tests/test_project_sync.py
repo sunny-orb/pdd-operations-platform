@@ -112,10 +112,8 @@ def test_manual_cli_shares_the_project_source_lock(sales_pg):
 
 
 def test_weather_step_never_reads_warehouse_credentials(tmp_path, monkeypatch):
-    import runpy
-    from pathlib import Path
-
     from app.jobs import sync_weather
+    from app.jobs.project_runtime import ProjectPaths, build_steps
 
     calls = []
 
@@ -127,11 +125,15 @@ def test_weather_step_never_reads_warehouse_credentials(tmp_path, monkeypatch):
         return {"version_id": "local-weather-version"}
 
     monkeypatch.setattr(sync_weather, "run_weather", weather)
-    script = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/sync-project.py"))
-    build = script["build_steps"]
-    build.__globals__["ROOT"] = tmp_path
+    paths = ProjectPaths(
+        tmp_path / "var/ingestion",
+        tmp_path / "runs",
+        tmp_path / "targets.toml",
+        tmp_path,
+        tmp_path / "scores",
+    )
     engine = object()
-    steps = build(engine, no_credentials)
+    steps = build_steps(engine, paths, no_credentials)
     assert steps["weather"]() == {"version_id": "local-weather-version"}
     assert calls == [(engine, tmp_path / "var/ingestion/weather")]
 
@@ -147,23 +149,25 @@ def test_weather_step_never_reads_warehouse_credentials(tmp_path, monkeypatch):
 def test_connection_failure_is_recorded_in_each_source_task(
     sales_pg, tmp_path, monkeypatch, name, job
 ):
-    import runpy
-    from pathlib import Path
-
     from app.connectors.product_board import ProductBoardReader
     from app.connectors.sales_sources import SalesSourceReader
     from app.connectors.shop_daily import ShopDailyReader
+    from app.jobs.project_runtime import ProjectPaths, build_steps
 
     def broken(*_, **__):
         raise ConnectionError("no upstream credentials are used")
 
     for cls in (ProductBoardReader, ShopDailyReader, SalesSourceReader):
         monkeypatch.setattr(cls, "__init__", broken)
-    script = runpy.run_path(str(Path(__file__).resolve().parents[3] / "scripts/sync-project.py"))
-    build = script["build_steps"]
-    build.__globals__["ROOT"] = tmp_path
+    paths = ProjectPaths(
+        tmp_path / "var/ingestion",
+        tmp_path / "runs",
+        tmp_path / "targets.toml",
+        tmp_path,
+        tmp_path / "scores",
+    )
     with pytest.raises(ConnectionError):
-        build(sales_pg, "synthetic")[name]()
+        build_steps(sales_pg, paths, lambda: "synthetic")[name]()
     with sales_pg.connect() as c:
         assert (
             c.execute(

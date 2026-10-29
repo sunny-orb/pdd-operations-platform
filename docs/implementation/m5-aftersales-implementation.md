@@ -6,7 +6,7 @@
 
 沿用React/TypeScript/Vite、Ant Design、Recharts、FastAPI、PostgreSQL及独立同步任务。`DashboardLayout`传入售后五区目录：报告筛选、决策摘要、指标与整改、历史与原因、分析明细；不修改用户共享导航行为。正文筛选使用报告Select、品类Select、关键词Input、全部/尺码/质量Segmented及重置。重置保留分析标签与折叠状态。
 
-按线上index.html/app.js的字段与文案迁移报告标题/实际期间/外链、决策摘要、默认折叠的风险五卡/阅读说明/结论Top/八列行动/阶段与尺码/九指标、两图及六标签。采用局部样式，不复制旧body/sidebar全局布局。不搬经营快照。缺失保留NULL，只有图形坐标使用近似Number，显示沿共享Decimal格式化。旧混排风险分、重叠质量计数、目标适用及主原因优先级遵守M5-01—04，现已答复的定义及两类金额目标区间按[data-contract 3.5.6](data-contract.md#business-metric-questions)实施，分类词典固定于报告版本；未通过的金额和风险结论保留待核说明，不伪造可信分数或人工进度。
+按线上index.html/app.js的字段与文案迁移报告标题/实际期间/外链、决策摘要、默认折叠的风险五卡/阅读说明/结论Top/八列行动/阶段与尺码/九指标、两图及六标签。采用局部样式，不复制旧body/sidebar全局布局。不搬经营快照。缺失保留NULL，只有图形坐标使用近似Number，显示沿共享Decimal格式化。旧混排风险分、重叠质量计数、目标适用及主原因优先级遵守M5-01—04，现已答复的定义及两类金额目标区间按[data-contract 3.5.6](../data-contract.md#business-metric-questions)实施，分类词典固定于报告版本；未通过的金额和风险结论保留待核说明，不伪造可信分数或人工进度。
 
 ## 来源与数据库专用设计
 

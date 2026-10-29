@@ -46,4 +46,3 @@ GRANT UPDATE(id) ON public.sales_targets TO pdd_ingest;
 UPDATE public.alembic_version_v2 SET version_num='20261028_08' WHERE public.alembic_version_v2.version_num = '20261028_07';
 
 COMMIT;
-

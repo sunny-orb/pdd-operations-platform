@@ -18,7 +18,7 @@ SOP按同对象相邻两个7日历窗及必需字段判断。花费增长≥20%�
 
 /api/v1/promotion下meta/options/overview/days/diagnosis，mode=store|product。meta含各来源截至/成功/尝试/版本及推荐日期；其它请求显式data_version，409/422/503统一协议。overview合并趋势以同快照返回，days服务端分页。options级联有界商品候选，完整listing_id。店铺固定25行、商品25/50/100；商品模式不得依赖M1经营事实是否有同日行。
 
-业务答复以[data-contract 3.5.6](data-contract.md#business-metric-questions)为准。meta及成交指标明确`payment_date/source_reported_payment_date`，两店铺来源分别保留日期角色；`attribution_window_days=NULL`，不填写未经来源证明的归因天数。规则版本为`sop-v1.4-m2-20261028-source-payment-date`，查询定义指纹随实现更新；口径实施及隔离PG合成反例通过不等于真实来源完整性或点击级归因算法验收。
+业务答复以[data-contract 3.5.6](../data-contract.md#business-metric-questions)为准。meta及成交指标明确`payment_date/source_reported_payment_date`，两店铺来源分别保留日期角色；`attribution_window_days=NULL`，不填写未经来源证明的归因天数。规则版本为`sop-v1.4-m2-20261028-source-payment-date`，查询定义指纹随实现更新；口径实施及隔离PG合成反例通过不等于真实来源完整性或点击级归因算法验收。
 
 本次最小实施顺序：先在`test_promotion_api.py`补支付日边界/无点击输入仍保留源额、NULL及完整日门禁反例，在M3推广渠道测试核对同义状态；随后仅改推广`repository/query/diagnosis`元信息和说明、M1评分提示及M3推广提示/DTO，保持金额与评分算法不变；定向真实PG与前端测试确认后由主任务统一对账与重发相容评分。本段不授权上游查询、迁移或业务库重算。
 

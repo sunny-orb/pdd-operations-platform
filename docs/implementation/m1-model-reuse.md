@@ -1,6 +1,6 @@
 # M1评分模型材料核查与复用
 
-核查日期：2026-10-28。本报告只负责用户本轮授权的模型材料定位、独立代码复用和离线验证；正式业务口径仍以[data-contract 3.5.1](data-contract.md#351-m1-商品经营整页含-m4-新品评分)为准，主应用接入、数据库发布及页面进度由主任务维护。
+核查日期：2026-10-28。本报告只负责用户本轮授权的模型材料定位、独立代码复用和离线验证；正式业务口径仍以[data-contract 3.5.1](../data-contract.md#351-m1-商品经营整页含-m4-新品评分)为准，主应用接入、数据库发布及页面进度由主任务维护。
 
 ## 取得了什么
 
@@ -18,18 +18,18 @@
 | 商品历史输入/季节参照   | `sites-current/outputs_full_history_v4/product_daily.pkl`、`snapshots.pkl`                   | 本轮实际不存在；该目录仅有CTR复核说明文件                                   |
 | V6推广历史/重新拟合输入 | `sites-current/outputs_full_history_v6/promotion_daily_quality.pkl`、`snapshots_quality.pkl` | 本轮实际不存在，V6输出目录也不存在                                          |
 
-这与[既有来源证据第12节](source-evidence.md#12-源码备份完整性与引用迁移2026-10-27)的轻量源码包缺项一致；本轮没有取得额外完整参数包。原参数拿到后可恢复标准查找；只重算新输入时不需要重新训练，也不需要恢复旧商品/推广快照结构。若需要重新拟合则另需相容历史输入和独立验收，不能用当前有限窗口或合成测试线代替历史标准。
+这与[既有来源证据第12节](../source-evidence.md#12-源码备份完整性与引用迁移2026-10-27)的轻量源码包缺项一致；本轮没有取得额外完整参数包。原参数拿到后可恢复标准查找；只重算新输入时不需要重新训练，也不需要恢复旧商品/推广快照结构。若需要重新拟合则另需相容历史输入和独立验收，不能用当前有限窗口或合成测试线代替历史标准。
 
 ## 已落地的独立资产
 
-| 当前项目文件                                                                    | 用途                                                                     |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| [runtime/m1-v6/viral_tiers.py](../runtime/m1-v6/viral_tiers.py)                 | 与来源逐字一致的纯评分/拟合引擎；主应用尚未导入                          |
-| [runtime/m1-v6/verify_offline.py](../runtime/m1-v6/verify_offline.py)           | 8项合成边界验证；不读数据库或真实输入，不产生业务评分                    |
-| [runtime/m1-v6/trial_baseline.py](../runtime/m1-v6/trial_baseline.py)           | 新候选基线与Decimal评分纯函数，无第三方依赖                              |
-| [runtime/m1-v6/test_trial_baseline.py](../runtime/m1-v6/test_trial_baseline.py) | 13项候选边界验证                                                         |
-| [runtime/m1-v6/run_local_candidate.py](../runtime/m1-v6/run_local_candidate.py) | 既有pdd_app只读快照执行入口，仅写忽略的私有核验文件                      |
-| [runtime/m1-v6/.gitignore](../runtime/m1-v6/.gitignore)                         | 忽略私有`data/`、`inputs/`、`outputs/`及常见模型二进制；本轮未复制二进制 |
+| 当前项目文件                                                                       | 用途                                                                     |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| [runtime/m1-v6/viral_tiers.py](../../runtime/m1-v6/viral_tiers.py)                 | 与来源逐字一致的纯评分/拟合引擎；主应用尚未导入                          |
+| [runtime/m1-v6/verify_offline.py](../../runtime/m1-v6/verify_offline.py)           | 8项合成边界验证；不读数据库或真实输入，不产生业务评分                    |
+| [runtime/m1-v6/trial_baseline.py](../../runtime/m1-v6/trial_baseline.py)           | 新候选基线与Decimal评分纯函数，无第三方依赖                              |
+| [runtime/m1-v6/test_trial_baseline.py](../../runtime/m1-v6/test_trial_baseline.py) | 13项候选边界验证                                                         |
+| [runtime/m1-v6/run_local_candidate.py](../../runtime/m1-v6/run_local_candidate.py) | 既有pdd_app只读快照执行入口，仅写忽略的私有核验文件                      |
+| [runtime/m1-v6/.gitignore](../../runtime/m1-v6/.gitignore)                         | 忽略私有`data/`、`inputs/`、`outputs/`及常见模型二进制；本轮未复制二进制 |
 
 来源身份为用户提供的本公司项目源码备份，不是本轮从外部下载的第三方模型。备份产品工程和`sites-current/`根未见`LICENSE`、`LICENSE.md`或`COPYING`；不据此补造开源许可证或对外再分发授权。NumPy、pandas是其运行依赖，本轮未复制依赖实现、安装包或改主项目锁文件。
 
@@ -73,7 +73,7 @@
 
 ## 已有四线能否直接复用
 
-四线本身可以作为**限定适用身份、口径和历史上下文的版本化试算标准**，无需为了数学判档而等待原训练源码。但当前[来源证据](source-evidence.md#m1新版三来源与原型核验2026-10-28)明确本轮线上投影为55组数值显示线，原对象未携带`shop_id/shop`，不能把单独`product_id`自动映射成当前完整K。历史57款/570行与本轮55组不是同一版本，不能合并宣称完整覆盖。
+四线本身可以作为**限定适用身份、口径和历史上下文的版本化试算标准**，无需为了数学判档而等待原训练源码。但当前[来源证据](../source-evidence.md#m1新版三来源与原型核验2026-10-28)明确本轮线上投影为55组数值显示线，原对象未携带`shop_id/shop`，不能把单独`product_id`自动映射成当前完整K。历史57款/570行与本轮55组不是同一版本，不能合并宣称完整覆盖。
 
 因此本轮不向`score_standards`发布这些显示线，也不虚构店铺映射。若主任务取得可核的原K适用证据，可按原上下文固定试算并注明显示舍入；不能给新商品或不同模型品类套用某一款线。若取回原`new_product_tiers.json`，可恢复按品类/季节/阶段查表，不再依赖某一商品的显示线，但仍需验证新数据与原标准口径及日期适用性。尚无适用标准时保留当前值和具体原因；独立已确认指标不因这一个缺口丢失。
 
@@ -145,4 +145,4 @@ python3 runtime/m1-v6/test_trial_baseline.py
 
 ## 验收记录
 
-来源材料、适配设计、规则、权限与失败处理由本文负责；实际运行、版本/行数和API/界面证据统一见[validation](validation.md#m1-trial-scores-20261028)，当前进度只见TODO。
+来源材料、适配设计、规则、权限与失败处理由本文负责；实际运行、版本/行数和API/界面证据统一见[validation](../validation/2026-10-28.md#m1-trial-scores-20261028)，当前进度只见TODO。

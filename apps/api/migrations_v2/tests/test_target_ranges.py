@@ -67,7 +67,7 @@ class TargetRangeOfflineTests(unittest.TestCase):
         expected = (
             "-- 仅审阅：Alembic 07→08目标区间与最小权限派生SQL；执行使用受控升级入口。\n"
             "-- API只读下限为SELECT；writer三表SELECT/INSERT及sales_targets.id UPDATE；"
-            "回退保留API只读和03已有销售目标权限。\n" + output.getvalue()
+            "回退保留API只读和03已有销售目标权限。\n" + output.getvalue().rstrip() + "\n"
         )
         self.assertEqual((ROOT / "docs/database-schema/target-ranges.sql").read_text(), expected)
 

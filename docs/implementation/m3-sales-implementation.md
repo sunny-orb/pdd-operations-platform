@@ -8,7 +8,7 @@
 
 **技术栈：** 现有React/TypeScript/Vite、FastAPI/Python、SQLAlchemy/psycopg、PyMySQL、PostgreSQL 17、Alembic；前期无Redis。
 
-**需求与契约：** [M3完整展示及首段约束](requirements.md#m3-first-chain-scope)、[当前来源及已核范围](data-contract.md#m3-source-access)、[查询契约7.7](data-contract.md#m3-daily-read-api)、[30表字典](database-schema/README.md)。来源证据只在[source-evidence](source-evidence.md#m3-source-verification-20261028)维护，进度只在[TODO](../TODO.md)维护。
+**需求与契约：** [M3完整展示及首段约束](../requirements.md#m3-first-chain-scope)、[当前来源及已核范围](../data-contract.md#m3-source-access)、[查询契约7.7](../data-contract.md#m3-daily-read-api)、[30表字典](../database-schema/README.md)。来源证据只在[source-evidence](../source-evidence.md#m3-source-verification-20261028)维护，进度只在[TODO](../../TODO.md)维护。
 
 ## 全局约束
 

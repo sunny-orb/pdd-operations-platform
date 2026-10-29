@@ -1,5 +1,8 @@
 """M3整页查询使用隔离真实PG；断言业务结果和版本一致性。"""
 
+from datetime import date
+
+import pytest
 from fastapi.testclient import TestClient
 from test_sales_extended_sources import sample, window
 from test_sales_source import raw_row
@@ -213,7 +216,17 @@ def test_regions_null_zero_weighted_rates_and_product_keys(sales_pg, tmp_path):
     )
 
 
-def test_target_actuals_independent_of_operating_range(sales_pg, tmp_path):
+@pytest.mark.parametrize(
+    ("calendar_end", "missing_days"),
+    [(date(2026, 10, 27), 161), (date(2026, 10, 28), 167), (date(2026, 11, 1), 185)],
+)
+def test_target_actuals_independent_of_operating_range(
+    sales_pg, tmp_path, monkeypatch, calendar_end, missing_days
+):
+    """六店仅有一条日事实；缺日随日历推进，跨月后截至所选月末。"""
+    from app.modules.sales import detail_queries
+
+    monkeypatch.setattr(detail_queries, "calendar_through", lambda: calendar_end)
     c = setup(sales_pg, tmp_path)
     v = params(c)["data_version"]
     r = c.get("/api/v1/sales/targets", params={"month": "2026-10", "data_version": v})
@@ -221,7 +234,7 @@ def test_target_actuals_independent_of_operating_range(sales_pg, tmp_path):
     d = r.json()["data"]
     assert d["month_actual"] == "100.00" and d["annual_actual"] == "100.00"
     assert d["month_target"] is None and d["state"] == "source_unavailable"
-    assert d["month_missing_days"] == 161
+    assert d["month_missing_days"] == missing_days
     assert d["annual_missing_days"] > d["month_missing_days"]
     assert (
         c.get("/api/v1/sales/targets", params={"month": "bad", "data_version": v}).status_code

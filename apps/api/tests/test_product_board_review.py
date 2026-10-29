@@ -89,6 +89,42 @@ def test_unknown_completeness_never_publishes_health_classification():
         assert "完整" in result["health"]["detail"]
 
 
+def test_category_comparison_checks_category_days_instead_of_every_listing():
+    rows = [row(END - timedelta(days=i)) for i in range(14)]
+    # 新链接只有本期1天，不阻断有完整两期品类日观察的品类汇总比较。
+    rows.append(row(END, "new"))
+    profiles = {k: dict(category="衣", level="常规") for k in ("x", "new")}
+    result = overview(Repo(rows, profiles), BoardQuery(END - timedelta(days=30), END))
+    category = result["brief"]["categories"][0]
+    assert category["revenue"] == D("800")
+    assert category["growth"] is not None
+    assert category["previous_revenue"] == D("700")
+    assert category["growth"].quantize(D(".000001")) == D(".142857")
+    assert category["comparison_status"] == "observed_reference"
+    assert category["comparison_reason"] is None
+
+
+def test_category_comparison_explains_missing_dates_nulls_and_zero_base():
+    profiles = {"x": dict(category="衣", level="常规")}
+    base = [row(END - timedelta(days=i)) for i in range(14)]
+    cases = [
+        (base[:-1], "两期品类日记录不足"),
+        (
+            [dict(r, product_revenue=None) if i == 7 else r for i, r in enumerate(base)],
+            "部分交易金额缺值或无效",
+        ),
+        (
+            [dict(r, product_revenue=D(0)) if i >= 7 else r for i, r in enumerate(base)],
+            "前7日交易额为0",
+        ),
+    ]
+    for rows, reason in cases:
+        result = overview(Repo(rows, profiles), BoardQuery(END - timedelta(days=30), END))
+        category = result["brief"]["categories"][0]
+        assert category["growth"] is None
+        assert category["comparison_reason"] == reason
+
+
 def test_cascade_preserves_valid_selection_and_only_clears_invalid_descendants():
     repo = Repo(
         [row(END), row(END, "y", "other")],

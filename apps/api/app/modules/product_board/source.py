@@ -9,6 +9,8 @@ from uuid import NAMESPACE_URL, uuid5
 
 from app.modules.sales.source_policy import SHOPS
 
+from .profile_rules import parse_listing_ids
+
 TABLES = {
     "product_daily": "bwd_rpa_pdd_product_detail_f",
     "profile_records": "base_spsjb",
@@ -104,11 +106,8 @@ def numeric(value, *, integer=False):
 
 
 def parse_ids(value):
-    """纯完整数字ID或明确分隔列表；混合状态文字、逗号及科学记数不猜ID。"""
-    value = str(value or "").strip()
-    if not re.fullmatch(r"[0-9]+(?:\s*[/;；\n\r]\s*[0-9]+)*", value):
-        return ()
-    return tuple(dict.fromkeys(re.split(r"\s*[/;；\n\r]\s*", value)))
+    """资料列逐行解析；状态后缀不删除同格其他明确ID，保留字符串精度。"""
+    return parse_listing_ids(value)
 
 
 def previous_year(day):

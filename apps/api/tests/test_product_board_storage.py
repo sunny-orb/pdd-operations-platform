@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 import pytest
 import sqlalchemy as sa
@@ -80,6 +81,87 @@ def test_failed_receiver_does_not_publish(sales_pg, tmp_path):
         ProductBoardStore(sales_pg, tmp_path).run(fail)
     with sales_pg.connect() as c:
         assert c.execute(sa.text("SELECT count(*) FROM current_datasets")).scalar_one() == 0
+
+
+def test_profile_rebuild_preserves_sources_and_is_idempotent(sales_pg, tmp_path, monkeypatch):
+    from app.modules.product_board import storage
+    from app.modules.product_board.repository import snapshot
+
+    end, rows = candidate(duplicate_profile=False)
+    rows["profile_records"][0]["source_listing_ids_official_raw"] = "123-下架"
+    store = ProductBoardStore(sales_pg, tmp_path)
+    with monkeypatch.context() as old_policy:
+        old_policy.setattr(storage, "parse_ids", lambda value: ())
+        first = store.run(lambda hb: (end, rows))
+    with snapshot(sales_pg) as repo:
+        source_success = repo.meta()["success_at"]
+
+    def source_failed(hb):
+        raise ValueError("SOURCE_DOWN")
+
+    with pytest.raises(ValueError, match="SOURCE_DOWN"):
+        store.run(source_failed)
+    with sales_pg.connect() as c:
+        source_before = c.execute(
+            sa.text(
+                "SELECT id,received_at FROM dataset_versions WHERE origin_kind='source' ORDER BY id"
+            )
+        ).all()
+    rebuilt = store.rebuild_profiles()
+    assert rebuilt["versions"]["profile_links"] != first["versions"]["profile_links"]
+    for code in storage.TABLES:
+        assert rebuilt["versions"][code] == first["versions"][code]
+    with snapshot(sales_pg) as repo:
+        profile = next(iter(repo.profiles().values()))
+        assert profile["category"] == "冲锋衣"
+        assert repo.meta()["success_at"] == source_success
+        source_failure = repo.meta()["latest_attempt"]
+        assert source_failure["status"] == "failed"
+    from app.modules.promotion.repository import snapshot as promotion_snapshot
+
+    with promotion_snapshot(sales_pg, "product") as repo:
+        for source in repo.metadata()["sources"]:
+            assert source["last_success_at"] == source_success
+            assert source["latest_attempt"] == source_failure
+    again = store.rebuild_profiles()
+    assert again["versions"] == rebuilt["versions"]
+    with sales_pg.connect() as c:
+        assert (
+            c.execute(
+                sa.text(
+                    "SELECT id,received_at FROM dataset_versions "
+                    "WHERE origin_kind='source' ORDER BY id"
+                )
+            ).all()
+            == source_before
+        )
+        assert c.execute(sa.text("SELECT count(*) FROM product_daily_facts")).scalar_one() == 1
+        assert c.execute(
+            sa.text("SELECT sum(product_revenue) FROM product_daily_facts")
+        ).scalar_one() == Decimal("23.17")
+        assert (
+            c.execute(
+                sa.text("SELECT count(*) FROM task_runs WHERE job_code='rebuild_product_profiles'")
+            ).scalar_one()
+            == 2
+        )
+
+
+def test_failed_profile_rebuild_keeps_all_current_inputs(sales_pg, tmp_path, monkeypatch):
+    store = ProductBoardStore(sales_pg, tmp_path)
+    first = store.run(lambda hb: candidate())
+
+    def fail(*args, **kwargs):
+        raise ValueError("PROFILE_REBUILD_TEST_FAILURE")
+
+    monkeypatch.setattr(store, "_stage", fail)
+    with pytest.raises(ValueError, match="PROFILE_REBUILD_TEST_FAILURE"):
+        store.rebuild_profiles()
+    with sales_pg.connect() as c:
+        assert (
+            dict(c.execute(sa.text("SELECT dataset_code,version_id FROM current_datasets")).all())
+            == first["versions"]
+        )
 
 
 def test_code_change_during_source_read_cannot_publish(sales_pg, tmp_path, monkeypatch):

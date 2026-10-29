@@ -10,13 +10,15 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
+from .profile_rules import resolve_product_name
+
 CODES = ("product_daily", "product_promotion", "profile_records", "profile_links")
 DEFINITION_REVISION = (
     "m1-board-query-v1:"
     + hashlib.sha256(
         b"".join(
             Path(__file__).with_name(name).read_bytes()
-            for name in ("query.py", "metrics.py", "repository.py")
+            for name in ("query.py", "metrics.py", "repository.py", "profile_rules.py")
         )
     ).hexdigest()
 )
@@ -37,6 +39,38 @@ def wire(value):
     if isinstance(value, (list, tuple)):
         return [wire(v) for v in value]
     return value
+
+
+def source_sync_status(connection, versions):
+    """固定三来源版本查真正接收成功时间；本地资料重建不覆盖上游失败/新鲜度。"""
+    attempt = (
+        connection.execute(
+            sa.text(
+                "SELECT status,started_at,finished_at,error_code FROM public.task_runs "
+                "WHERE job_code='sync_product_board' ORDER BY queued_at DESC,id DESC LIMIT 1"
+            )
+        )
+        .mappings()
+        .first()
+    )
+    success = connection.execute(
+        sa.text(
+            "SELECT t.finished_at FROM public.task_runs t "
+            "WHERE t.job_code='sync_product_board' AND t.status='succeeded' AND "
+            "EXISTS (SELECT 1 FROM public.version_inputs i WHERE "
+            "i.output_version_id=t.result_version_id AND i.input_role='product_current' "
+            "AND i.input_version_id=:product_daily) AND "
+            "EXISTS (SELECT 1 FROM public.version_inputs i WHERE "
+            "i.output_version_id=t.result_version_id AND i.input_role='ad_current' "
+            "AND i.input_version_id=:product_promotion) AND "
+            "EXISTS (SELECT 1 FROM public.version_inputs i WHERE "
+            "i.output_version_id=t.result_version_id AND i.input_role='profile_records' "
+            "AND i.input_version_id=:profile_records) "
+            "ORDER BY t.finished_at DESC LIMIT 1"
+        ),
+        {code: versions[code]["id"] for code in CODES if code != "profile_links"},
+    ).scalar_one_or_none()
+    return attempt, success
 
 
 @contextmanager
@@ -105,25 +139,7 @@ class Repository:
         )
 
     def meta(self):
-        attempt = (
-            self.c.execute(
-                sa.text(
-                    "SELECT status,started_at,finished_at,error_code FROM "
-                    "public.task_runs WHERE job_code='sync_product_board' ORDER "
-                    "BY queued_at DESC,id DESC LIMIT 1 "
-                )
-            )
-            .mappings()
-            .first()
-        )
-        success = self.c.execute(
-            sa.text(
-                "SELECT finished_at FROM public.task_runs WHERE "
-                "job_code='sync_product_board' AND result_version_id=:v AND "
-                "status='succeeded' ORDER BY finished_at DESC LIMIT 1 "
-            ),
-            dict(v=self.params["profile_links"]),
-        ).scalar_one_or_none()
+        attempt, success = source_sync_status(self.c, self.versions)
         counts = self.c.execute(
             sa.text(
                 "SELECT count(*),count(DISTINCT "
@@ -222,7 +238,11 @@ class Repository:
         result = {}
         for r in rows:
             item = dict(
-                candidates={}, field_status={}, listed_date=None, listed_date_status="unknown"
+                candidates={},
+                field_status={},
+                resolution_method={},
+                listed_date=None,
+                listed_date_status="unknown",
             )
             for plural, name in (
                 ("names", "product_name"),
@@ -231,10 +251,23 @@ class Repository:
                 ("operators", "operator"),
             ):
                 choices = sorted(r[plural] or [])
-                item[name] = choices[0] if len(choices) == 1 else None
+                item[name] = (
+                    resolve_product_name(choices)
+                    if name == "product_name"
+                    else choices[0]
+                    if len(choices) == 1
+                    else None
+                )
                 item["candidates"][name] = choices
                 item["field_status"][name] = (
-                    "matched" if len(choices) == 1 else "conflict" if choices else "missing"
+                    "matched" if item[name] is not None else "conflict" if choices else "missing"
+                )
+                item["resolution_method"][name] = (
+                    "common_variant_base"
+                    if item[name] is not None and len(choices) > 1
+                    else "unique"
+                    if item[name] is not None
+                    else "unresolved"
                 )
             item["styles"] = r["styles"] or []
             result[r["listing_id"]] = item

@@ -61,23 +61,29 @@ export function ProductsPage() {
               </div>
             </div>
             <Tooltip
+              trigger={["hover", "focus"]}
               title={
                 <div>
+                  <p>最近同步成功：{localTime(meta?.success_at)}；同步时间不代表业务数据日期。</p>
+                  <p>
+                    完整截至日：{meta?.complete_through ?? "尚未确认"}。
+                    {meta?.complete_through == null &&
+                      "尚未取得上游每日齐数的确认依据：日终采集完成标记、应交付范围和补录修订截止规则；不代表已经发现漏数。"}
+                  </p>
+                  <p>运营、品类、等级按当前商品资料分组；查看历史日期时，不代表当时的归属。</p>
+                  <p>热卖榜按已接收记录排序；源库对账一致不等于上游已完成日终全部采集。</p>
                   {meta?.sources.map((s) => (
                     <p key={s.dataset}>
                       {s.table} · 观察截至 {s.observed_through ?? "资料快照"} · 接收{" "}
-                      {localTime(s.received_at)} · 完整性未知
+                      {localTime(s.received_at)}
                     </p>
                   ))}
                   <p>最近任务：{meta?.latest_attempt.status ?? "未接收"}</p>
                 </div>
               }
             >
-              <div className="updated">
-                数据观察截至 {meta?.date_to ?? "—"}
-                <small>
-                  完整截至日 {meta?.complete_through ?? "未知"} · 成功 {localTime(meta?.success_at)}
-                </small>
+              <div className="updated" tabIndex={0}>
+                数据截止：{meta?.date_to ?? "—"}
               </div>
             </Tooltip>
           </header>

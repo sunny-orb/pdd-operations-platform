@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -9,6 +9,39 @@ from app.modules.product_board.storage import ProductBoardStore
 from tests.test_product_board_storage import candidate
 
 pytest_plugins = ["tests.sales_pg_support"]
+
+
+def test_real_pg_category_comparison_allows_a_new_listing(sales_pg, tmp_path):
+    from app.modules.product_board.source import normalize
+
+    end, rows = candidate(duplicate_profile=False)
+    products = [
+        dict(
+            z_id=i + 1,
+            shop_id="663599807",
+            spu_id="123",
+            dt=str(end - timedelta(days=i)),
+            time_granularity="day",
+            transaction_amount="100",
+        )
+        for i in range(14)
+    ]
+    products.append(dict(products[0], z_id=15, spu_id="456"))
+    rows["product_daily"] = normalize("product_daily", products, end)
+    rows["profile_records"] = normalize(
+        "profile_records",
+        [dict(__id=i, spigf=pid, pl="冲锋衣") for i, pid in ((1, "123"), (2, "456"))],
+        end,
+    )
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, rows))
+    with snapshot(sales_pg) as repo:
+        category = overview(repo, BoardQuery(end - timedelta(days=30), end))["brief"]["categories"][
+            0
+        ]
+        assert category["revenue"] == Decimal("800")
+        assert category["previous_revenue"] == Decimal("700")
+        assert category["growth"].quantize(Decimal(".000001")) == Decimal(".142857")
+        assert category["comparison_reason"] is None
 
 
 def test_real_pg_profile_consensus_and_no_multiplication(sales_pg, tmp_path):
@@ -29,6 +62,23 @@ def test_real_pg_profile_consensus_and_no_multiplication(sales_pg, tmp_path):
     assert e.value.status == 409
     with snapshot(sales_pg, token) as repo:
         assert repo.profiles()[next(iter(repo.profiles()))]["category"] == "冲锋衣"
+
+
+def test_real_pg_variant_names_merge_without_multiplying_facts(sales_pg, tmp_path):
+    end, rows = candidate()
+    for profile, suffix in zip(rows["profile_records"], ("拉链款", "按扣款"), strict=True):
+        profile["source_product_name_raw"] = f"商品甲（{suffix}）"
+        profile["source_listing_ids_official_raw"] = "123-下架"
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, rows))
+    with snapshot(sales_pg) as repo:
+        profile = next(iter(repo.profiles().values()))
+        assert profile["product_name"] == "商品甲"
+        assert profile["field_status"]["product_name"] == "matched"
+        assert profile["resolution_method"]["product_name"] == "common_variant_base"
+        assert len(profile["candidates"]["product_name"]) == 2
+        data = overview(repo, BoardQuery(end, end))
+        assert data["metrics"]["revenue"]["value"] == Decimal("23.17")
+        assert data["brief"]["products"][0]["product_name"] == "商品甲"
 
 
 def test_cross_shop_identity_conflicts_and_period_name_fallback(sales_pg, tmp_path):

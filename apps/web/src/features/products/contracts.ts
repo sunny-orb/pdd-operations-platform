@@ -163,7 +163,16 @@ export const board = z.object({
   health: z.object({ title: z.string(), tone: z.string(), detail: z.string() }),
   risks: z.array(risk),
   brief: z.object({
-    categories: z.array(z.object({ category: z.string(), revenue: decimal, growth: decimal })),
+    categories: z.array(
+      z.object({
+        category: z.string(),
+        revenue: decimal,
+        growth: decimal,
+        previous_revenue: decimal.optional(),
+        comparison_status: z.string().optional(),
+        comparison_reason: z.string().nullable().optional(),
+      }),
+    ),
     products: z.array(hot),
     risks: z.array(risk),
     rising: z.array(hot),

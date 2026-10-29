@@ -9,7 +9,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.modules.product_board.repository import BoardError
+from app.modules.product_board.repository import BoardError, source_sync_status
 from app.modules.product_board.repository import Repository as ProductRepository
 
 PRODUCT_CODES = ("product_daily", "product_promotion", "profile_records", "profile_links")
@@ -130,34 +130,45 @@ class Repository:
             else None
         )
         sources = []
+        product_sync = source_sync_status(self.c, self.versions) if self.mode == "product" else None
         for code in PRODUCT_CODES if self.mode == "product" else STORE_CODES:
             version = self.versions.get(code)
             attempt = (
-                self.c.execute(
-                    sa.text(
-                        "SELECT status,started_at,finished_at,error_code FROM public.task_runs "
-                        "WHERE job_code=:job ORDER BY queued_at DESC,id DESC LIMIT 1"
-                    ),
-                    dict(job="sync_product_board" if self.mode == "product" else "sync_" + code),
-                )
-                .mappings()
-                .first()
-            )
-            success = self.c.execute(
-                sa.text(
-                    "SELECT finished_at FROM public.task_runs WHERE status='succeeded' AND "
-                    "result_version_id=:v ORDER BY finished_at DESC LIMIT 1"
-                ),
-                dict(
-                    v=(
-                        self.versions["profile_links"]["id"]
-                        if self.mode == "product"
-                        else version["id"]
+                product_sync[0]
+                if product_sync
+                else (
+                    self.c.execute(
+                        sa.text(
+                            "SELECT status,started_at,finished_at,error_code FROM public.task_runs "
+                            "WHERE job_code=:job ORDER BY queued_at DESC,id DESC LIMIT 1"
+                        ),
+                        dict(
+                            job="sync_product_board" if self.mode == "product" else "sync_" + code
+                        ),
                     )
-                    if version
-                    else None
-                ),
-            ).scalar_one_or_none()
+                    .mappings()
+                    .first()
+                )
+            )
+            success = (
+                product_sync[1]
+                if product_sync
+                else self.c.execute(
+                    sa.text(
+                        "SELECT finished_at FROM public.task_runs WHERE status='succeeded' AND "
+                        "result_version_id=:v ORDER BY finished_at DESC LIMIT 1"
+                    ),
+                    dict(
+                        v=(
+                            self.versions["profile_links"]["id"]
+                            if self.mode == "product"
+                            else version["id"]
+                        )
+                        if version
+                        else None
+                    ),
+                ).scalar_one_or_none()
+            )
             source_rows = [
                 r for r in self.rows if version and r["dataset_version_id"] == version["id"]
             ]

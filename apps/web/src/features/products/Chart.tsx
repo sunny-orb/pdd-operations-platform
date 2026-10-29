@@ -47,8 +47,8 @@ export function Trend({ data, metrics }: { data: Board; metrics: string[] }) {
       role="img"
       aria-label={lines.map((k) => k.label).join("、") + "逐日趋势"}
     >
-      <ResponsiveContainer width="100%" height={285} minWidth={0}>
-        <LineChart data={points} margin={{ top: 22, right: 15, left: 8, bottom: 8 }}>
+      <ResponsiveContainer width="100%" height={270} minWidth={0}>
+        <LineChart data={points} margin={{ top: 24, right: 15, left: 8, bottom: 18 }}>
           <CartesianGrid vertical={false} stroke="#e4ebf3" />
           <XAxis
             dataKey="date"
@@ -133,13 +133,13 @@ export function Trend({ data, metrics }: { data: Board; metrics: string[] }) {
 export function MiniTrend({ values }: { values: (string | null)[] }) {
   return (
     <div className="m1-mini" aria-label="近7日趋势">
-      <ResponsiveContainer width="100%" height={30} minWidth={0}>
+      <ResponsiveContainer width="100%" height={28} minWidth={0}>
         <LineChart data={values.map((value) => ({ value: value == null ? null : Number(value) }))}>
           <Line
             dataKey="value"
             dot={false}
-            stroke="#d46054"
-            strokeWidth={1.7}
+            stroke="#d84a4a"
+            strokeWidth={2}
             isAnimationActive={false}
             connectNulls={false}
           />

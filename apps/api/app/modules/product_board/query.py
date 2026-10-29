@@ -251,6 +251,7 @@ def overview(repo, q):
     before = seven - timedelta(days=7)
     hot = []
     categories = defaultdict(list)
+    category_facts = defaultdict(list)
     anomalies = []
     period_revenue = {
         lid: total([r for r in values if q.start <= r["business_date"] <= q.end], "product_revenue")
@@ -278,10 +279,11 @@ def overview(repo, q):
         )
         if item["revenue"] is not None and item["revenue"] > 0:
             hot.append(item)
-        categories[
-            item["category"]
-            or ("资料冲突" if item["field_status"].get("category") == "conflict" else "未匹配品类")
-        ].append(item)
+        category = item["category"] or (
+            "资料冲突" if item["field_status"].get("category") == "conflict" else "未匹配品类"
+        )
+        categories[category].append(item)
+        category_facts[category].extend((*r1, *r0))
         if item["level"] and item["level"] not in ("清仓", "未匹配"):
             alert = risk(values, q.end, lid in top)
             if alert:
@@ -292,13 +294,26 @@ def overview(repo, q):
         revenue = total(values, "revenue")
         previous = total(values, "previous_revenue")
         if revenue is not None and revenue > 0:
+            # 品类按品类日覆盖比较，不将新品/停售链接缺日扩大成整个品类不可比。
+            # 仅汇总收到的原行；任一日期缺记录或金额无效仍阻断，不补商品日零值。
+            facts = category_facts[category]
+            expected_days = {before + timedelta(days=i) for i in range(14)}
+            if {r["business_date"] for r in facts} != expected_days:
+                reason = "两期品类日记录不足"
+            elif any(r["product_revenue"] is None or r["product_revenue"] < 0 for r in facts):
+                reason = "部分交易金额缺值或无效"
+            elif previous is None or previous <= 0:
+                reason = "前7日交易额为0"
+            else:
+                reason = None
             cat.append(
                 dict(
                     category=category,
                     revenue=revenue,
-                    growth=compare(revenue, previous)
-                    if all(r["coverage"] == "observed_reference" for r in values)
-                    else None,
+                    previous_revenue=previous,
+                    growth=compare(revenue, previous) if reason is None else None,
+                    comparison_status="observed_reference" if reason is None else "not_comparable",
+                    comparison_reason=reason,
                 )
             )
     cat.sort(key=lambda r: (-r["revenue"], r["category"]))

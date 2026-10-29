@@ -7,6 +7,8 @@ import { ApiError, get, params } from "./api";
 import { meta, options } from "./contracts";
 import { patchScope, readScope, scopeError, type Scope, type ScopeName } from "./scope";
 
+const DEFAULT_PERIOD_DAYS = 31;
+
 export function useProducts() {
   const [search, setSearch] = useSearchParams();
   const metadata = useQuery({
@@ -26,7 +28,9 @@ export function useProducts() {
   };
   const from = metadata.data
     ? [
-        dayjs(metadata.data.date_to).subtract(30, "day").format("YYYY-MM-DD"),
+        dayjs(metadata.data.date_to)
+          .subtract(DEFAULT_PERIOD_DAYS - 1, "day")
+          .format("YYYY-MM-DD"),
         metadata.data.date_from,
       ]
         .sort()

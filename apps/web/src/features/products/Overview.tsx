@@ -1,4 +1,5 @@
 import { Empty, Table, Tag } from "antd";
+import dayjs from "dayjs";
 import type { Board } from "./contracts";
 import type { Scope } from "./scope";
 import { change, format } from "./format";
@@ -13,29 +14,31 @@ export function Brief({
 }) {
   const brief = data?.brief;
   const window = brief ? `${brief.start} 至 ${brief.end}` : "等待来源期间";
+  const periodDays = data ? dayjs(data.scope.end).diff(dayjs(data.scope.start), "day") + 1 : null;
   return (
     <section className="hero conclusions-hero" id="product-brief">
       <div className="conclusion-main">
         <div className="scope-bar">
-          <span>
-            当前数据 <b>{data?.observed_rows ?? "—"}</b> 条商品日记录
+          <span className="scope-count">
+            当前范围 <b>商品-日明细 {format(data?.observed_rows)} 条</b>
           </span>
-          <span>所选期 {data ? `${data.scope.start} 至 ${data.scope.end}` : "—"}</span>
+          <span>
+            {data ? `近${periodDays}天（${data.scope.start} 至 ${data.scope.end}）` : "期间待接收"}
+          </span>
           <span>
             去年同期{" "}
             {data?.scope.previous_start && data?.scope.previous_end
               ? `${data.scope.previous_start} 至 ${data.scope.previous_end}`
               : "无同月日可比期间"}
           </span>
-          <small>粒度：店铺 × 商品 ID × 日期，非 SKU · 按当前资料归属</small>
+          <small>粒度：店铺 × 商品 ID × 日期，非 SKU</small>
         </div>
         <div className="conclusion-heading">
           <div>
             <p className="eyebrow">商品经营分析</p>
             <h1>经营核心结论</h1>
-            <p>聚焦增长、风险与机会，帮助运营快速定位关键商品。</p>
           </div>
-          <span>完整日未知 · 已观察排序</span>
+          <span>聚焦增长、风险与机会</span>
         </div>
         <div className="conclusion-grid">
           <article className="conclusion-item growth">
@@ -53,14 +56,15 @@ export function Brief({
                     {i + 1}. {r.category}
                   </b>
                   <small>
-                    {format(r.revenue, "currency")} · 较前7日 {change(r.growth)}
+                    交易 {format(r.revenue, "currency")} · 较前7日{" "}
+                    {r.growth == null ? (r.comparison_reason ?? "对比数据不足") : change(r.growth)}
                   </small>
                 </button>
               ))}
               {!brief?.categories.length && <p>暂无可排序的品类数据</p>}
             </div>
           </article>
-          <article className="conclusion-item opportunity">
+          <article className="conclusion-item established-card">
             <span>近7天热卖商品（包含新品）Top 3</span>
             <small>{window}</small>
             <div className="conclusion-list">
@@ -78,7 +82,7 @@ export function Brief({
                     {r.shop_name} · {r.level ?? "等级未匹配"}
                   </small>
                   <small>
-                    {format(r.revenue, "currency")} · 较前7日 {change(r.growth)}
+                    交易 {format(r.revenue, "currency")} · 较前7日 {change(r.growth)}
                   </small>
                 </button>
               ))}
@@ -99,7 +103,7 @@ export function Brief({
                   <b>{r.product_name ?? r.product_id}</b>
                   <small>
                     <span className={`priority ${r.alert.priority.toLowerCase()}`}>
-                      {r.alert.priority}
+                      {r.alert.priority === "P0" ? "P0紧急" : r.alert.priority}
                     </span>{" "}
                     {r.alert.label} · 累计交易 {format(r.period_revenue, "currency")}
                   </small>
@@ -110,7 +114,7 @@ export function Brief({
               )}
             </div>
           </article>
-          <article className="conclusion-item new">
+          <article className="conclusion-item opportunity">
             <span>新品起势 Top 3</span>
             <small>相邻两个7日观察窗 · {window}</small>
             <div className="conclusion-list">
@@ -123,10 +127,11 @@ export function Brief({
                 >
                   <b>{r.product_name ?? r.product_id}</b>
                   <small>
-                    {format(r.revenue, "currency")} · 支付转化 {format(r.conversion, "percent")}
+                    交易 {format(r.revenue, "currency")} · 支付转化{" "}
+                    {format(r.conversion, "percent")}
                   </small>
                   <small>
-                    前7日 {format(r.previous_revenue, "currency")} · 环比 {change(r.growth)}
+                    前7日交易 {format(r.previous_revenue, "currency")} · 环比 {change(r.growth)}
                   </small>
                 </button>
               ))}

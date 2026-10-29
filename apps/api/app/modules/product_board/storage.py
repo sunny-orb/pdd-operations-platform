@@ -24,7 +24,10 @@ REVISION = "m1-board-v2-1"
 
 def producer_hash():
     return fingerprint(
-        {p.name: p.read_text() for p in (Path(__file__), Path(__file__).with_name("source.py"))}
+        {
+            name: Path(__file__).with_name(name).read_text()
+            for name in ("storage.py", "source.py", "profile_rules.py")
+        }
     )
 
 
@@ -51,11 +54,56 @@ class ProductBoardStore:
             )
         }
 
-    def run(self, receive):
+    def rebuild_profiles(self):
+        """固定已发布三来源重建关系；不接上游，不重写事实/来源时间，返回发布摘要。"""
+        source_versions = {}
+
+        def receive(heartbeat):
+            rows = {}
+            with (
+                self.engine.connect().execution_options(isolation_level="REPEATABLE READ") as c,
+                c.begin(),
+            ):
+                c.execute(sa.text("SET TRANSACTION READ ONLY"))
+                versions = {
+                    r["dataset_code"]: dict(r)
+                    for r in c.execute(
+                        sa.text(
+                            "SELECT v.* FROM public.current_datasets d "
+                            "JOIN public.dataset_versions v ON v.id=d.version_id "
+                            "WHERE v.state='published' AND v.origin_kind='source' "
+                            "AND d.dataset_code=ANY(:codes)"
+                        ),
+                        dict(codes=list(TABLES)),
+                    ).mappings()
+                }
+                if set(versions) != set(TABLES):
+                    raise ValueError("SOURCE_INPUT_MISSING")
+                for code, version in versions.items():
+                    source_versions[code] = version["id"]
+                    table = self.tables[FACT_TABLES[code]]
+                    columns = [
+                        col for col in table.c if col.name not in ("id", "dataset_version_id")
+                    ]
+                    rows[code] = [
+                        dict(r)
+                        for r in c.execute(
+                            sa.select(*columns)
+                            .where(table.c.dataset_version_id == version["id"])
+                            .order_by(table.c.source_row_key)
+                        ).mappings()
+                    ]
+                    heartbeat()
+                return versions["product_daily"]["period_end"], rows
+
+        return self.run(receive, _source_versions=source_versions)
+
+    def run(self, receive, *, _source_versions=None):
         """receive(heartbeat)->(截至日,三来源必要投影)。锁和租约覆盖整个接收，失败保留旧头。"""
         if producer_hash() != LOADED_PRODUCER_HASH:
             raise ValueError("PRODUCER_CODE_CHANGED")
         code_hash = LOADED_PRODUCER_HASH
+        reuse_sources = _source_versions if _source_versions is not None else {}
         self.changes = []
         task = self.tables["task_runs"]
         run = str(uuid4())
@@ -72,7 +120,7 @@ class ProductBoardStore:
                     c.execute(
                         task.update()
                         .where(
-                            task.c.job_code == "sync_product_board",
+                            task.c.lock_key == "m1-product-board",
                             task.c.status == "running",
                             task.c.lease_expires_at < sa.func.clock_timestamp(),
                         )
@@ -86,8 +134,11 @@ class ProductBoardStore:
                     c.execute(
                         task.insert().values(
                             id=run,
-                            job_code="sync_product_board",
-                            request_ref=REVISION,
+                            job_code="rebuild_product_profiles"
+                            if _source_versions is not None
+                            else "sync_product_board",
+                            request_ref=REVISION
+                            + (":profile_rebuild" if _source_versions is not None else ""),
                             lock_key="m1-product-board",
                             status="running",
                             started_at=now,
@@ -115,18 +166,22 @@ class ProductBoardStore:
                             raise ValueError("TASK_LEASE_LOST")
 
                 end, rows = receive(heartbeat)
+                if _source_versions is not None and set(reuse_sources) != set(TABLES):
+                    raise ValueError("SOURCE_INPUT_MISSING")
                 if producer_hash() != code_hash:
                     raise ValueError("PRODUCER_CODE_CHANGED")
                 archive = self.archive_root / run
                 archive.mkdir(parents=True, mode=0o700)
                 os.chmod(archive, 0o700)
                 for code, values in rows.items():
+                    if code in reuse_sources:
+                        continue
                     p = archive / (code + ".json")
                     p.write_text(
                         json.dumps(values, default=str, ensure_ascii=False, separators=(",", ":"))
                     )
                     os.chmod(p, 0o600)
-                for name in ("source.py", "storage.py"):
+                for name in ("source.py", "storage.py", "profile_rules.py"):
                     p = archive / name
                     p.write_text(Path(__file__).with_name(name).read_text())
                     os.chmod(p, 0o600)
@@ -135,13 +190,16 @@ class ProductBoardStore:
                     producer=code_hash,
                     end=str(end),
                     windows=windows(end),
+                    reused_source_versions=dict(reuse_sources),
                     files={p.name: fingerprint(p.read_text()) for p in archive.iterdir()},
                 )
                 (archive / "manifest.json").write_text(
                     json.dumps(manifest, default=str, ensure_ascii=False)
                 )
                 os.chmod(archive / "manifest.json", 0o600)
-                versions = self._stage(c, rows, end, archive, heartbeat)
+                versions = self._stage(
+                    c, rows, end, archive, heartbeat, reuse_sources=reuse_sources
+                )
                 if self.reconcile_full_scope:
                     changes = archive / "reconciliation.json"
                     changes.write_text(json.dumps(self.changes, ensure_ascii=False))
@@ -153,7 +211,19 @@ class ProductBoardStore:
                     raise ValueError("PRODUCER_CODE_CHANGED")
                 with c.begin():
                     self._check_lease(c, run)
+                    for code, vid in reuse_sources.items():
+                        current = c.execute(
+                            sa.text(
+                                "SELECT version_id FROM public.current_datasets "
+                                "WHERE dataset_code=:code FOR UPDATE"
+                            ),
+                            dict(code=code),
+                        ).scalar_one()
+                        if current != vid:
+                            raise ValueError("SOURCE_INPUT_CHANGED")
                     for code, vid in versions.items():
+                        if code in reuse_sources:
+                            continue
                         v = self.tables["dataset_versions"]
                         state = c.execute(
                             sa.select(v.c.state).where(v.c.id == vid).with_for_update()
@@ -216,10 +286,13 @@ class ProductBoardStore:
         if current["status"] != "running" or current["lease_expires_at"] <= now:
             raise ValueError("TASK_LEASE_LOST")
 
-    def _stage(self, c, rows, end, archive, heartbeat):
+    def _stage(self, c, rows, end, archive, heartbeat, *, reuse_sources=None):
+        reuse_sources = reuse_sources or {}
         if set(rows) != set(TABLES) or not rows["product_daily"] or not rows["profile_records"]:
             raise ValueError("SOURCE_INPUT_MISSING")
         for code in TABLES:
+            if code in reuse_sources:
+                continue  # 同一RR快照的不可变来源，最终发布时再锁定验证指针。
             # Compare only overlapping received dates: moving the 60-day window is not deletion.
             t = self.tables[FACT_TABLES[code]]
             with c.begin():
@@ -324,13 +397,16 @@ class ProductBoardStore:
                         profile_record_id=identity(versions["profile_records"], r["profile_key"]),
                         listing_id=r["listing_id"],
                         relationship_status="matched",
-                        relationship_reason="strict_numeric_list",
+                        relationship_reason="numeric_rows_and_explicit_status_notes",
                         listed_date_applicability_status="unknown",
                     )
                     for r in links
                 ]
             else:
                 raw = rows[code]
+            if code in reuse_sources:
+                versions[code] = reuse_sources[code]
+                continue
             digest = fingerprint(
                 dict(
                     rows=raw,

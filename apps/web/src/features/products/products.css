@@ -5,6 +5,23 @@
 .m1-products-scope .m1-dashboard {
   width: 100%;
 }
+/* 公共旧.topbar有灰色文字；标题显式沿用商品原型墨色，不影响其他页。 */
+.m1-products-scope .topbar .brand b {
+  color: var(--ink);
+}
+.m1-products-scope .updated:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 4px;
+}
+.m1-products-scope .scope-bar .scope-count {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 20px;
+}
+.m1-products-scope .scope-count b {
+  color: var(--ink);
+  font-weight: 700;
+}
 .m1-products-scope .ant-select {
   min-width: 0;
   width: 100%;
@@ -64,23 +81,23 @@
 }
 .m1-products-scope .m1-mini {
   width: 108px;
-  height: 30px;
+  height: 28px;
 }
 .m1-products-scope .m1-trend {
   width: 100%;
   min-width: 0;
 }
 .m1-products-scope .m1-chart-empty {
-  min-height: 285px;
+  min-height: 270px;
   display: grid;
   place-items: center;
 }
 .m1-products-scope .m1-chart-tooltip {
-  padding: 12px;
-  background: #fff;
-  border: 1px solid #dce5f0;
-  border-radius: 7px;
-  box-shadow: 0 6px 18px #152b4520;
+  padding: 9px 10px;
+  background: rgba(23, 32, 51, 0.94);
+  color: #fff;
+  border-radius: 5px;
+  box-shadow: 0 6px 18px rgba(23, 32, 51, 0.18);
   font-size: 12px;
 }
 .m1-products-scope .m1-loading {

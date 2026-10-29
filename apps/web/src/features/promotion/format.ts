@@ -2,11 +2,11 @@ import { formatFixedDecimal } from "../../shared/format/decimal";
 import type { Metric } from "./contracts";
 import type { MetricKey } from "./state";
 export const specs: { key: MetricKey; label: string; type: string; color: string }[] = [
-  { key: "spend", label: "总花费", type: "currency", color: "#e88429" },
-  { key: "revenue", label: "交易额", type: "currency", color: "#1768d9" },
+  { key: "spend", label: "总花费", type: "currency", color: "#ff9b3d" },
+  { key: "revenue", label: "交易额", type: "currency", color: "#1a62d8" },
   { key: "roi", label: "实际投产比", type: "ratio", color: "#6a55d7" },
   { key: "impressions", label: "曝光量", type: "number", color: "#3478f6" },
-  { key: "clicks", label: "点击量", type: "number", color: "#139e94" },
+  { key: "clicks", label: "点击量", type: "number", color: "#16a394" },
   { key: "ctr", label: "点击率", type: "percent", color: "#16a394" },
   { key: "cvr", label: "点击转化率", type: "percent", color: "#e85d72" },
   { key: "cpc", label: "CPC", type: "currency", color: "#62758e" },

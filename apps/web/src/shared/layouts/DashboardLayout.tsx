@@ -28,6 +28,7 @@ export function DashboardLayout({
       <Link className="dashboard-brand" to="/" aria-label="返回运营看板中心">
         <AppstoreOutlined aria-hidden /> <span>拼多多运营平台</span>
       </Link>
+      {context && <span className="dashboard-topbar-context">{context}</span>}
       <nav className="dashboard-page-tabs" aria-label="看板切换">
         {dashboardPages.map((page) => (
           <Link
@@ -39,7 +40,6 @@ export function DashboardLayout({
           </Link>
         ))}
       </nav>
-      {context && <span className="dashboard-topbar-context">{context}</span>}
     </header>
   );
   return (

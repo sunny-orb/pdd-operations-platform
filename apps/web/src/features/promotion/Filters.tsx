@@ -30,7 +30,11 @@ export function Filters({ state }: { state: PromotionState }) {
     (item, index, list) => list.findIndex((p) => p.value === item.value) === index,
   );
   return (
-    <section className="filters" aria-label={product ? "商品推广筛选条件" : "店铺推广筛选条件"}>
+    <section
+      className="filters"
+      id="promotion-filters"
+      aria-label={product ? "商品推广筛选条件" : "店铺推广筛选条件"}
+    >
       <label>
         开始日期
         <DatePicker

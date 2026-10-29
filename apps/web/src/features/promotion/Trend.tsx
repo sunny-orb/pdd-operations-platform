@@ -53,8 +53,8 @@ export function Trend({ data, selected }: { data: Overview | undefined; selected
         role="img"
         aria-label="推广核心指标趋势图：实线本期，虚线去年同期；缺日断线"
       >
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chart} margin={{ top: 24, bottom: 10, left: 0, right: 0 }}>
+        <ResponsiveContainer width="100%" height={286}>
+          <LineChart data={chart} margin={{ top: 26, bottom: 18, left: 0, right: 0 }}>
             <CartesianGrid vertical={false} stroke="#e1e9f3" />
             <XAxis
               dataKey="date"

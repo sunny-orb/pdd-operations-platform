@@ -42,6 +42,12 @@ it.each(dashboardPages)("$title可独立使用共享壳且不依赖商品页", (
     .map((link) => link.getAttribute("href"));
   expect(destinations).toEqual(["/", ...dashboardPages.map((page) => page.path)]);
   const switcher = within(header).getByRole("navigation", { name: "看板切换" });
+  expect(switcher.previousElementSibling?.classList.contains("dashboard-topbar-context")).toBe(
+    true,
+  );
+  expect(switcher.firstElementChild?.textContent).toContain("运营看板中心");
+  expect(switcher.lastElementChild?.textContent).toContain("售后分析");
+  expect(within(switcher).getAllByRole("link")).toHaveLength(dashboardPages.length);
   const current = within(switcher).getByRole("link", { name: title });
   expect(current.getAttribute("aria-current")).toBe("page");
   expect(

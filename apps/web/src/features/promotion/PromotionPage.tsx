@@ -1,6 +1,14 @@
 import { useState } from "react";
 import { Alert, Button, Spin } from "antd";
+import {
+  BarChartOutlined,
+  BulbOutlined,
+  FilterOutlined,
+  LineChartOutlined,
+  TableOutlined,
+} from "@ant-design/icons";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
+import type { DashboardSectionLink } from "../../shared/components/DashboardSections";
 import { usePromotion } from "./data";
 import { Filters } from "./Filters";
 import { Details } from "./Details";
@@ -26,8 +34,23 @@ export function PromotionPage() {
   const meta = state.meta.data?.data;
   const data = state.overview.data?.data;
   const errors = [state.overview.error, state.days.error, state.options.error].filter(Boolean);
+  const sections: DashboardSectionLink[] = product
+    ? [
+        { id: "promotion-filters", title: "筛选范围", icon: <FilterOutlined /> },
+        { id: "promotion-metrics", title: "推广指标", icon: <BarChartOutlined /> },
+        { id: "promotion-trend", title: "趋势与漏斗", icon: <LineChartOutlined /> },
+        { id: "promotion-top-dates", title: "低投产日期", icon: <LineChartOutlined /> },
+        { id: "promotion-diagnosis", title: "SOP经营诊断", icon: <BulbOutlined /> },
+        { id: "promotion-days", title: "每日推广明细", icon: <TableOutlined /> },
+      ]
+    : [
+        { id: "promotion-filters", title: "筛选范围", icon: <FilterOutlined /> },
+        { id: "promotion-metrics", title: "推广指标", icon: <BarChartOutlined /> },
+        { id: "promotion-trend", title: "核心指标趋势", icon: <LineChartOutlined /> },
+        { id: "promotion-days", title: "店铺渠道明细", icon: <TableOutlined /> },
+      ];
   return (
-    <DashboardLayout currentPage="promotion" context="推广分析 · 本页独立分析">
+    <DashboardLayout currentPage="promotion" sections={sections} context="推广分析 · 本页独立分析">
       <div className="m2-promotion-scope">
         <div className="promotion-modes" aria-label="推广分析模式">
           <Button aria-pressed={!product} onClick={() => state.setMode("store")}>

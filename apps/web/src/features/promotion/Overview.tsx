@@ -28,7 +28,7 @@ export function Metrics({
     return `曝光 ${formatMetric(data?.metrics.impressions)}`;
   };
   return (
-    <section className="metrics" aria-label="推广八项指标">
+    <section className="metrics" id="promotion-metrics" aria-label="推广八项指标">
       {specs.map((spec) => (
         <Tooltip key={spec.key} title={data?.metrics[spec.key]?.reason || spec.label}>
           <button
@@ -110,7 +110,7 @@ export function Trends({
 }
 export function TopDates({ data }: { data: Overview | undefined }) {
   return (
-    <section className="panel daily-ranking">
+    <section className="panel daily-ranking" id="promotion-top-dates">
       <div className="panel-title">
         <div>
           <span>日期复核参考</span>

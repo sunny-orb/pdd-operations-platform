@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -138,6 +138,15 @@ function mount() {
 it("默认店铺模式保留八指标、净额缺失、缺日和十列表格；指标不能全部取消", async () => {
   mount();
   await screen.findByText("拼多多店铺推广看板");
+  const directory = screen.getByRole("navigation", { name: "本页目录" });
+  expect(within(directory).getByRole("link", { name: "筛选范围" }).getAttribute("href")).toBe(
+    "#promotion-filters",
+  );
+  expect(within(directory).getByRole("link", { name: "推广指标" }).getAttribute("href")).toBe(
+    "#promotion-metrics",
+  );
+  expect(screen.getByRole("banner", { name: "看板导航" })).toBeTruthy();
+  expect(document.getElementById("promotion-filters")).toBeTruthy();
   await screen.findByText(/存在 1 个店铺渠道日缺失/);
   expect(screen.getByText(/净交易额：—/)).toBeTruthy();
   expect(screen.getByRole("columnheader", { name: "来源" })).toBeTruthy();
@@ -153,6 +162,13 @@ it("商品模式包含漏斗、日期参考、SOP、四层清单及浏览进度�
   mount();
   await userEvent.click(screen.getByRole("button", { name: "商品推广明细" }));
   await screen.findByText("拼多多推广数据看板");
+  const directory = screen.getByRole("navigation", { name: "本页目录" });
+  expect(within(directory).getByRole("link", { name: "SOP经营诊断" }).getAttribute("href")).toBe(
+    "#promotion-diagnosis",
+  );
+  expect(within(directory).getByRole("link", { name: "每日推广明细" }).getAttribute("href")).toBe(
+    "#promotion-days",
+  );
   await screen.findByText("从曝光到成交");
   expect(screen.getByText("低投产日期 Top 5")).toBeTruthy();
   expect(screen.getByText("从推广结果定位到商品与行动")).toBeTruthy();

@@ -384,12 +384,7 @@ export function OverviewPage() {
             columns={columns}
             dataSource={actions}
             rowKey="id"
-            pagination={{
-              defaultPageSize: 10,
-              showSizeChanger: true,
-              pageSizeOptions: [10, 20, 50],
-              showTotal: (n) => `当前清单 ${n} 条建议`,
-            }}
+            pagination={false}
             scroll={{ x: 1495 }}
             locale={{ emptyText: "尚未取得可核来源建议" }}
           />

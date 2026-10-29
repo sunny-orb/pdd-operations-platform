@@ -111,19 +111,6 @@ def sql(statement: str, database: str = "postgres") -> str:
     return result.stdout.strip()
 
 
-def admin_environment(database: str) -> dict[str, str]:
-    """为迁移或独立测试进程提供管理员连接；不写应用运行配置、不输出URL。"""
-    config = read_config(ROOT)
-    url = (
-        f"postgresql+psycopg://pdd_admin:{config['POSTGRES_PASSWORD']}"
-        f"@127.0.0.1:{config['POSTGRES_PORT']}/{database}"
-    )
-    env = dict(os.environ)
-    env["DATABASE_URL"] = url
-    env["TEST_DATABASE_URL"] = url if database.endswith("_test") else ""
-    return env
-
-
 def provision() -> None:
     """仅创建项目库/独立测试库及受限应用角色；既有库和卷不删除。"""
     config = read_config(ROOT)
@@ -160,50 +147,11 @@ def provision() -> None:
     )
 
 
-def migrate() -> None:
-    """应用Alembic迁移并给应用角色只读权限，不运行同步或造业务数据。"""
-    subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", "head"],
-        cwd=ROOT / "apps/api",
-        env=admin_environment("pdd_operations"),
-        check=True,
-    )
-    sql(
-        "GRANT USAGE ON SCHEMA public TO pdd_app;"
-        "GRANT SELECT ON ALL TABLES IN SCHEMA public TO pdd_app;"
-        "ALTER DEFAULT PRIVILEGES FOR ROLE pdd_admin IN SCHEMA public "
-        "GRANT SELECT ON TABLES TO pdd_app;",
-        "pdd_operations",
-    )
-    tables = sql(
-        "SELECT tablename FROM pg_tables WHERE schemaname='public' "
-        "AND tablename<>'alembic_version';",
-        "pdd_operations",
-    ).splitlines()
-    for name in tables:
-        quoted = '"' + name.replace('"', '""') + '"'
-        sql(
-            f"GRANT SELECT, INSERT, UPDATE ON TABLE {quoted} TO pdd_ingest;",
-            "pdd_operations",
-        )
-    print("项目库迁移完成；应用角色只读，未同步数仓数据。")
-
-
 def main() -> None:
-    """提供本地库和手工接入入口；不提供隐式down -v或删除数据操作。"""
+    """提供本地容器和测试入口；不提供隐式down -v或删除数据操作。"""
     action = sys.argv[1] if len(sys.argv) > 1 else "status"
-    if action not in {
-        "up",
-        "migrate",
-        "test",
-        "status",
-        "sync:m1",
-        "profiles:m1",
-        "scores:m1",
-    }:
-        raise SystemExit(
-            "用法：db-local.py up|migrate|test|status|sync:m1|profiles:m1|scores:m1"
-        )
+    if action not in {"up", "test", "status"}:
+        raise SystemExit("用法：db-local.py up|test|status；迁移请使用v2受控入口")
     initialize(ROOT)
     if action == "up":
         compose("up", "-d", "--wait", "--wait-timeout", "90")
@@ -211,37 +159,9 @@ def main() -> None:
         print(
             "项目库pdd_operations和独立测试库已就绪；本机端口55432，未执行迁移/同步。"
         )
-    elif action == "migrate":
-        migrate()
     elif action == "test":
-        env = admin_environment("pdd_operations_test")
-        # 外层npm test同时执行前端和后端；PG合成样例只写独立测试库。
-        subprocess.run(["npm", "test"], cwd=ROOT, env=env, check=True)
-    elif action in {"sync:m1", "profiles:m1", "scores:m1"}:
-        config = read_config(ROOT)
-        sync_password = (
-            (ROOT / "var/local-db/sync.env").read_text().strip().split("=", 1)[1]
-        )
-        env = dict(os.environ)
-        env["SYNC_DATABASE_URL"] = (
-            f"postgresql+psycopg://pdd_ingest:{sync_password}"
-            f"@127.0.0.1:{config['POSTGRES_PORT']}/pdd_operations"
-        )
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                {
-                    "sync:m1": "app.jobs.sync_m1",
-                    "profiles:m1": "app.jobs.resolve_profiles",
-                    "scores:m1": "app.jobs.score_m1",
-                }[action],
-                *sys.argv[2:],
-            ],
-            cwd=ROOT / "apps/api",
-            env=env,
-            check=True,
-        )
+        # 现行PG fixture自行建立一次性v2测试库，不向业务库或旧测试库注入连接。
+        subprocess.run(["npm", "test"], cwd=ROOT, check=True)
     else:
         compose("ps")
 

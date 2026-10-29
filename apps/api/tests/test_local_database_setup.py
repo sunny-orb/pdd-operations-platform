@@ -61,3 +61,18 @@ def test_compose_uses_managed_configuration_even_with_shell_overrides(tmp_path, 
     expected = config["POSTGRES_PASSWORD"] + "|55432"
     assert setup.compose("version", capture=True).stdout == expected
     assert setup.sql("SELECT 1") == expected
+
+
+def test_retired_actions_are_rejected_before_local_initialization(monkeypatch):
+    """旧链路不可再通过数据库工具重建；拒绝时也不读写本地配置。"""
+    import pytest
+
+    setup = load_setup()
+    calls = []
+    monkeypatch.setattr(setup, "initialize", lambda *_: calls.append("initialize"))
+    monkeypatch.setattr(setup, "migrate", lambda: calls.append("migrate"), raising=False)
+    for action in ("migrate", "sync:m1", "profiles:m1", "scores:m1"):
+        monkeypatch.setattr(setup.sys, "argv", ["db-local.py", action])
+        with pytest.raises(SystemExit):
+            setup.main()
+        assert calls == []

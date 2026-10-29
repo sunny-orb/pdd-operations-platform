@@ -15,23 +15,17 @@ const commands = {
   dev: ["uvicorn", "app.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
   check: ["ruff", "check", "."],
   test: ["pytest", "-q"],
-  "db:upgrade": [],
   "db:up": [],
   "db:test": [],
   "db:status": [],
   "sync:m1": ["app.jobs.sync_product_board"],
-  "profiles:m1": [],
-  "scores:m1": [],
 };
 const command = commands[process.argv[2]];
 if (!command) throw new Error("不支持的 API 命令");
 const localDatabaseActions = {
   "db:up": "up",
-  "db:upgrade": "migrate",
   "db:test": "test",
   "db:status": "status",
-  "profiles:m1": "profiles:m1",
-  "scores:m1": "scores:m1",
 };
 const localAction = localDatabaseActions[process.argv[2]];
 const args = localAction

@@ -68,7 +68,12 @@ def test_pg_daily_additions_compare_without_cancellation_or_cross_day_dedup(sale
             missing = query(pid)["metrics"]["favorites"]
             assert missing["value"] == D("3")
             assert missing["status"] == "partial"
-            assert missing["yoy"] is None and missing["mom"] is None
+            if pid == "2":
+                # 无记录的日期两边一起排除；仍比较共同日期的新增收藏。
+                assert missing["yoy"] == D("2") and missing["mom"] == D(".5")
+            else:
+                # 有记录但收藏值为空，不能把该行当0或静默丢掉。
+                assert missing["yoy"] is None and missing["mom"] is None
 
 
 def test_pg_trial_rebuild_uses_same_daily_additions_and_keeps_other_gates(sales_pg, tmp_path):

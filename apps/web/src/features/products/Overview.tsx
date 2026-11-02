@@ -4,19 +4,23 @@ import type { Board } from "./contracts";
 import type { Scope } from "./scope";
 import { change, format } from "./format";
 import { MiniTrend, Trend } from "./Chart";
+import { MetricComparison, MetricComparisons } from "./MetricComparisons";
 
 export function Brief({
   data,
   onSelect,
+  updating = false,
 }: {
   data?: Board;
   onSelect?: (patch: Partial<Scope>) => void;
+  updating?: boolean;
 }) {
   const brief = data?.brief;
+  const actions = brief?.actions;
   const window = brief ? `${brief.start} 至 ${brief.end}` : "等待来源期间";
   const periodDays = data ? dayjs(data.scope.end).diff(dayjs(data.scope.start), "day") + 1 : null;
   return (
-    <section className="hero conclusions-hero" id="product-brief">
+    <section className="hero conclusions-hero" id="product-brief" aria-busy={updating}>
       <div className="conclusion-main">
         <div className="scope-bar">
           <span className="scope-count">
@@ -35,7 +39,7 @@ export function Brief({
         </div>
         <div className="conclusion-heading">
           <div>
-            <p className="eyebrow">商品经营分析</p>
+            <p className="eyebrow">商品数据分析</p>
             <h1>经营核心结论</h1>
           </div>
           <span>聚焦增长、风险与机会</span>
@@ -49,6 +53,7 @@ export function Brief({
                 <button
                   type="button"
                   className="conclusion-row"
+                  disabled={updating}
                   key={r.category}
                   onClick={() => onSelect?.({ category: r.category, products: [] })}
                 >
@@ -72,6 +77,7 @@ export function Brief({
                 <button
                   type="button"
                   className="conclusion-row"
+                  disabled={updating}
                   key={r.listing_id}
                   onClick={() => onSelect?.({ products: [r.listing_id] })}
                 >
@@ -97,6 +103,7 @@ export function Brief({
                 <button
                   type="button"
                   className="conclusion-row"
+                  disabled={updating}
                   key={r.listing_id}
                   onClick={() => onSelect?.({ products: [r.listing_id] })}
                 >
@@ -122,6 +129,7 @@ export function Brief({
                 <button
                   type="button"
                   className="conclusion-row"
+                  disabled={updating}
                   key={r.listing_id}
                   onClick={() => onSelect?.({ products: [r.listing_id] })}
                 >
@@ -139,11 +147,24 @@ export function Brief({
             </div>
           </article>
         </div>
-        <div className="conclusion-action">
-          <b>建议动作</b>
-          <p>
-            AI经营建议待启用。当前可按下方规则风险逐款核对价格、承接及流量入口；本页不自动创建任务或调整预算。
-          </p>
+        <div className="conclusion-action" role="region" aria-label="建议动作">
+          <b>
+            建议动作<small>规则提醒</small>
+          </b>
+          <div className="conclusion-action-content">
+            {!!actions?.items.length && (
+              <ul className="conclusion-action-summary">
+                {actions.items.map((item) => (
+                  <li key={item.kind}>{item.text}</li>
+                ))}
+              </ul>
+            )}
+            {!actions?.items.length && (
+              <p className="conclusion-action-status">
+                {actions?.message ?? "等待当前范围的规则提醒。"}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </section>
@@ -154,11 +175,11 @@ export function Health({ data }: { data?: Board }) {
     <section className={`health-bar ${data?.health.tone ?? "neutral"}`}>
       <div>
         <span>增长健康度</span>
-        <b>{data?.health.title ?? "增长待验证"}</b>
+        <b>{data?.health.title ?? "暂无比较结果"}</b>
       </div>
-      <p>{data?.health.detail ?? "等待相容本期与去年同期数据。"}</p>
+      <p>{data?.health.detail ?? "取得所选范围的商品记录后，展示同款商品的同期变化。"}</p>
       <small>
-        判定规则：来源完整性和所选日历、必需字段齐备后，才启用“规模增长、效率承压”。当前仅展示观察数值。
+        同店同商品按去年同月同日配对，无对应记录不参与。交易额同比增长且转化率或客单价下降，标记为“规模增长、效率承压”。
       </small>
     </section>
   );
@@ -182,40 +203,40 @@ export function Metrics({
     ["conversion", "支付转化率"],
   ];
   return (
-    <section className="metrics">
-      {definitions.map(([key, label]) => {
-        const m = data?.metrics[key];
-        return (
-          <button
-            className={`metric ${active.includes(key) ? "selected" : ""}`}
-            key={key}
-            type="button"
-            aria-pressed={active.includes(key)}
-            onClick={() => toggle(key)}
-            title={m?.reason ?? "按数仓原值汇总，完整日未知"}
-          >
-            <span>{label}</span>
-            <strong>
-              {format(
-                m?.value,
-                m?.type ??
-                  (key === "revenue" || key === "aov"
-                    ? "currency"
-                    : key === "conversion"
-                      ? "percent"
-                      : "number"),
+    <>
+      <section className="metrics">
+        {definitions.map(([key, label]) => {
+          const m = data?.metrics[key];
+          const kind =
+            m?.type ??
+            (key === "revenue" || key === "aov"
+              ? "currency"
+              : key === "conversion"
+                ? "percent"
+                : "number");
+          return (
+            <button
+              className={`metric ${active.includes(key) ? "selected" : ""}`}
+              key={key}
+              type="button"
+              aria-pressed={active.includes(key)}
+              onClick={() => toggle(key)}
+            >
+              <span className="m1-metric-label">{label}</span>
+              <strong>{format(m?.value, kind)}</strong>
+              <MetricComparison comparison={m?.yoy_comparison} kind={kind} period="yoy" />
+              <MetricComparison comparison={m?.mom_comparison} kind={kind} period="mom" />
+              {m?.status !== "observed" && (
+                <small className="m1-metric-status">
+                  {!m ? "等待数据" : m.value == null ? "暂无可用数值" : "按已有经营记录统计"}
+                </small>
               )}
-            </strong>
-            <small>去年同期 {format(m?.previous, m?.type)}</small>
-            <em className={m?.yoy?.startsWith("-") ? "down" : "up"}>同比 {change(m?.yoy)}</em>
-            <i className={m?.mom?.startsWith("-") ? "down" : "up"}>环比 {change(m?.mom)}</i>
-            {m?.status !== "observed" && (
-              <small className="m1-metric-status">{m?.reason ?? "等待数据"}</small>
-            )}
-          </button>
-        );
-      })}
-    </section>
+            </button>
+          );
+        })}
+      </section>
+      <MetricComparisons periods={data?.comparison_periods} />
+    </>
   );
 }
 export function Trends({ data, active }: { data?: Board; active: string[] }) {

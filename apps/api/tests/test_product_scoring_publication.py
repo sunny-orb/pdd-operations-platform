@@ -61,6 +61,13 @@ def test_published_trial_is_atomic_idempotent_and_keeps_unknown_category(sales_p
     with snapshot(sales_pg) as repo:
         page = score_cards(repo, BoardQuery(repo.start, repo.end, size=100))
         assert page["total"] == 13
+        assert page["total_count"] == 13 and page["scored_count"] == 12
+        single = score_cards(
+            repo, BoardQuery(repo.start, repo.end, products=(page["items"][-1]["listing_id"],))
+        )
+        assert single["total"] == 1 and single["total_count"] == 13
+        assert single["scored_count"] == 12
+        assert single["groups"] == dict(complete=0, pending=0, unscored=1)
         assert page["groups"] == dict(complete=0, pending=12, unscored=1)
         assert {item["decision"] for item in page["items"]} == {"pending_validation", "unscored"}
         assert all(item["complete_score"] is None for item in page["items"])

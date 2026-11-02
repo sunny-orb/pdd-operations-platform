@@ -35,17 +35,19 @@ class Repo:
     def rows(self, start, end):
         return [r for r in self.data if start <= r["business_date"] <= end]
 
+    identity_rows = rows
+
     def profiles(self):
         return self.info
 
 
-def test_missing_calendar_days_block_comparison_for_explicit_listing():
+def test_missing_days_keep_partial_total_but_allow_paired_card_comparisons():
     repo = Repo([row(END), row(END - timedelta(days=7)), row(previous_year(END))])
     result = overview(repo, BoardQuery(END - timedelta(days=6), END, products=("x",)))
     revenue = result["metrics"]["revenue"]
     assert revenue["value"] == D("100")
     assert revenue["status"] == "partial"
-    assert revenue["yoy"] is None and revenue["mom"] is None
+    assert revenue["yoy"] == 0 and revenue["mom"] == 0
     assert result["windows"][0]["metrics"]["revenue"]["change"] is None
     # 显式选择中完全缺记录的另一个K也不能被悄悄缩出期望范围。
     single = overview(repo, BoardQuery(END, END, products=("x", "absent")))
@@ -78,15 +80,16 @@ def test_each_period_and_daily_comparison_requires_its_own_inputs():
     assert day["previous"]["conversion"] is None
 
 
-def test_unknown_completeness_never_publishes_health_classification():
+def test_unknown_source_completeness_does_not_block_matched_observations():
     for amount in ("90", "110"):
         a = row(END)
         a["product_revenue"] = D(amount)
         repo = Repo([a, row(previous_year(END))])
         result = overview(repo, BoardQuery(END, END, products=("x",)))
-        assert result["health"]["title"] == "增长待验证"
+        expected = "交易额同比下降" if amount == "90" else "交易额同比增长"
+        assert result["health"]["title"] == expected
         assert result["health"]["tone"] == "neutral"
-        assert "完整" in result["health"]["detail"]
+        assert "仅比较有同期记录的同款商品" in result["health"]["detail"]
 
 
 def test_category_comparison_checks_category_days_instead_of_every_listing():

@@ -1,5 +1,5 @@
-# 本地已接入来源；修改times后下次分钟检查生效，无需改API代码。
+# 每分钟重新读取；时区为Asia/Shanghai。
 enabled = true
 timezone = "Asia/Shanghai"
-times = ["10:00", "14:00", "18:00"]
+times = ["10:00", "10:30", "11:00"]
 max_attempts_per_slot = 2

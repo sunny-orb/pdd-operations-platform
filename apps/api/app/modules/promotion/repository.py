@@ -17,10 +17,21 @@ STORE_CODES = ("shop_channel_product_promotion", "shop_channel_star_shop")
 
 
 def definition_revision():
+    """绑定本域及实际使用的共享查询规则，避免来源未变时复用旧目录版本。"""
+    shared = Path(__file__).parents[1]
     return (
         "m2-v1:"
         + hashlib.sha256(
             b"".join(
+                shared.joinpath(name).read_bytes()
+                for name in (
+                    "sales/source_policy.py",
+                    "product_board/profile_rules.py",
+                    "product_board/metrics.py",
+                    "product_board/repository.py",
+                )
+            )
+            + b"".join(
                 Path(__file__).with_name(name).read_bytes()
                 for name in ("repository.py", "query.py", "diagnosis.py")
             )

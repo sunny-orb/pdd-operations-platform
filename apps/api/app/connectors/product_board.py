@@ -66,7 +66,7 @@ class ProductBoardReader:
         )
         key = "__id" if code == "profile_records" else "z_id" if code == "product_daily" else "id"
         result = []
-        periods = (None,) if code == "profile_records" else windows(end)
+        periods = (None,) if code == "profile_records" else windows(end, code)
         for period in periods:
             offset = 0
             while True:

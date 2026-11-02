@@ -56,7 +56,7 @@ it("retains all six sections and original table fields when upstream is unavaila
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText("商品经营数据尚未接通")).toBeTruthy();
+  expect(await screen.findByText("商品数据尚未接通")).toBeTruthy();
   for (const id of [
     "product-brief",
     "product-scores",

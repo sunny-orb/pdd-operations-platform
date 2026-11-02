@@ -6,6 +6,7 @@
 | ---------------- | --------------------------------------------------------- |
 | M1 商品经营      | [新版链路](m1-products-implementation.md)                 |
 | M1 / M4 参考评分 | [模型复用、试行标准与限制](m1-model-reuse.md)             |
+| AI能力规划       | [页面AI分析、项目问答与商品建议兜底草案](ai-assistance.md)（仅规划，规则待用户确认）                              |
 | M2 推广分析      | [双模式接入](m2-promotion-implementation.md)              |
 | M3 店铺销售      | [首链、续段与目标](m3-sales-implementation.md)            |
 | M5 售后分析      | [报告、金额、分类与目标](m5-aftersales-implementation.md) |

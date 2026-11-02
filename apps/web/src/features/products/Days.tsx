@@ -72,7 +72,7 @@ export function Days({ state, scope }: { state: ProductsState; scope: Scope }) {
     <section className="detail-card" id="product-days">
       <div className="detail-heading">
         <span>商品逐日明细</span>
-        <b>独立筛选 · 逐日追踪商品经营</b>
+        <b>独立筛选 · 逐日追踪商品数据</b>
         <small>按当前资料归属；与经营总览及新品评分筛选独立。真实零保留，缺值显示 —。</small>
       </div>
       <Filters name="detail" scope={scope} state={state} />

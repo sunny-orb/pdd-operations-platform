@@ -54,6 +54,15 @@ export const card = base.extend({
   reason: z.string(),
   action: z.string(),
 });
+const pairedComparison = z.object({
+  value: decimal,
+  previous: decimal,
+  change: decimal,
+  reason: z.string().nullable(),
+  message: z.string().nullable(),
+  matched_product_days: z.number().int().nonnegative(),
+  matched_products: z.number().int().nonnegative(),
+});
 const metric = z
   .object({
     label: z.string(),
@@ -63,6 +72,8 @@ const metric = z
     previous_period: decimal,
     yoy: decimal,
     mom: decimal,
+    yoy_comparison: pairedComparison.optional(),
+    mom_comparison: pairedComparison.optional(),
     status: z.string(),
     reason: z.string().nullable(),
   })
@@ -91,6 +102,23 @@ const hot = base.extend({
   coverage: z.string(),
 });
 const risk = hot.extend({ alert, period_revenue: decimal });
+const actions = z.object({
+  generation_method: z.literal("rules"),
+  ai_status: z.literal("not_connected"),
+  status: z.enum(["empty", "observed_reference", "insufficient_data", "no_match"]),
+  as_of_date: z.string(),
+  message: z.string(),
+  items: z
+    .array(
+      z.object({
+        kind: z.enum(["risk", "opportunity"]),
+        listing_ids: z.array(z.string()).max(3),
+        text: z.string(),
+      }),
+    )
+    .max(2),
+  notices: z.array(z.string()),
+});
 export const meta = z.object({
   data_version: z.string(),
   date_from: z.string(),
@@ -163,6 +191,7 @@ export const board = z.object({
   health: z.object({ title: z.string(), tone: z.string(), detail: z.string() }),
   risks: z.array(risk),
   brief: z.object({
+    actions,
     categories: z.array(
       z.object({
         category: z.string(),
@@ -190,6 +219,13 @@ export const board = z.object({
   ),
   observed_rows: z.string(),
   product_count: z.string(),
+  comparison_periods: z
+    .object({
+      current: z.object({ start: z.string(), end: z.string() }),
+      yoy: z.object({ start: z.string(), end: z.string() }).nullable(),
+      mom: z.object({ start: z.string(), end: z.string() }),
+    })
+    .optional(),
   scope: z.object({
     start: z.string(),
     end: z.string(),
@@ -201,6 +237,8 @@ export const board = z.object({
 export const scorePage = z.object({
   items: z.array(card),
   total: z.number(),
+  total_count: z.number(),
+  scored_count: z.number(),
   page: z.number(),
   size: z.number(),
   start: z.string(),
@@ -243,6 +281,22 @@ export const options = z.object({
   products: z.array(z.object({ value: z.string(), label: z.string() })),
   total: z.number(),
 });
+export const catalog = z.object({
+  shops: z.array(z.object({ value: z.string(), label: z.string().nullable() })),
+  items: z.array(
+    z.object({
+      value: z.string(),
+      label: z.string(),
+      shop: z.string(),
+      operator: z.string().nullable(),
+      category: z.string().nullable(),
+      level: z.string().nullable(),
+      search_text: z.string(),
+    }),
+  ),
+  total: z.number().int().nonnegative(),
+});
+export type Catalog = z.infer<typeof catalog>;
 export type Board = z.infer<typeof board>;
 export type ScoreCard = z.infer<typeof card>;
 export type Meta = z.infer<typeof meta>;

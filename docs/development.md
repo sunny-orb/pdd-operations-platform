@@ -37,19 +37,19 @@ apps/api/.venv/bin/python scripts/db-v2.py verify
 
 ## 同步与评分
 
-配置唯一入口为 [config/sync.toml](../config/sync.toml)，时区为 Asia/Shanghai。独立 launchd 每分钟检查，每日 10:00、14:00、18:00 串行接收已接入来源；API 和页面刷新只查本地发布结果。
+配置唯一入口为 [config/sync.toml](../config/sync.toml)，时区为 Asia/Shanghai。独立 launchd 每分钟检查，每日 10:00、10:30、11:00 串行接收已接入来源；这是全项目共用时点，替换原 14:00、18:00 轮次。API 和页面刷新只查本地发布结果。
 
 ```bash
 apps/api/.venv/bin/python scripts/sync-project.py --status
 apps/api/.venv/bin/python scripts/sync-project.py --run-now
-apps/api/.venv/bin/python scripts/sync-project.py --set-times 10:00 14:00 18:00
+apps/api/.venv/bin/python scripts/sync-project.py --set-times 10:00 10:30 11:00
 apps/api/.venv/bin/python scripts/install-sync-schedule.py
 apps/api/.venv/bin/python scripts/install-sync-schedule.py --remove
 ```
 
 前两条分别查看状态和按现有范围补跑，后三条调整钟点、安装/重载、移除本机定时器。只选择部分步骤时用 `--run-now --only`，合法值以脚本 `--help` 和项目步骤配置为准。不要同时开多套编排。
 
-机器睡眠/关机不能按时运行；恢复后当日漏点合并补跑，跨日自动补跑未启用。来源失败保留旧成功版并显示原因；窗口外回补、来源完整性及公司调度不因本机运行而视为完成。页面每 45 秒及聚焦时检查本地元信息，默认日期推进、自选范围保留。
+修改钟点后下次分钟检查即生效，无需重启 API 或重新安装定时器；当日已过的多个时点只合并补跑最近一轮，不追补全部漏点。机器睡眠/关机不能按时运行，跨日自动补跑未启用。来源失败保留旧成功版并显示原因；调整时点不证明已修复来源读取错误。窗口外回补、来源完整性及公司调度不因本机运行而视为完成。页面每 45 秒及聚焦时检查本地元信息，默认日期推进、自选范围保留。
 
 商品独立入口：
 

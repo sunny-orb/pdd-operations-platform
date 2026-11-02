@@ -7,6 +7,7 @@ from math import ceil
 from uuid import UUID
 
 from app.modules.product_board.metrics import compare, divide, total
+from app.modules.product_board.profile_rules import matches_keyword
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.source_policy import SHOPS
 
@@ -127,6 +128,7 @@ def labels(repo, rows):
             level=profile.get("level"),
             operator=profile.get("operator"),
             field_status=profile.get("field_status", {}),
+            candidates=profile.get("candidates", {}),
         )
     return result
 
@@ -141,10 +143,7 @@ def matches(info, q, ignore=""):
         ):
             return False
     return (ignore == "products" or not q.products or info.get("listing_id") in q.products) and (
-        ignore == "keyword"
-        or not q.keyword
-        or q.keyword.casefold()
-        in f"{info.get('product_id', '')} {info.get('product_name') or ''}".casefold()
+        ignore == "keyword" or matches_keyword(info, q.keyword)
     )
 
 

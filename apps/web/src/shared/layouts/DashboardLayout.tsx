@@ -3,6 +3,7 @@ import { AppstoreOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
 import type { CSSProperties, ReactNode } from "react";
 import { DashboardSections, type DashboardSectionLink } from "../components/DashboardSections";
+import { CalendarIcon } from "../components/CalendarIcon";
 import { dashboardPages, type DashboardPageId } from "./dashboardNavigation";
 import zhCN from "antd/locale/zh_CN";
 import { dashboardTheme } from "./dashboardTheme";
@@ -10,6 +11,7 @@ import "./dashboard-layout.css";
 
 const headerHeight = 62;
 const layoutStyle = { "--dashboard-header-height": `${headerHeight}px` } as CSSProperties;
+const datePickerConfig = { suffixIcon: <CalendarIcon /> };
 
 /** 统一看板壳：业务页只提供当前页面、目录及正文，布局不读取业务接口。 */
 export function DashboardLayout({
@@ -43,7 +45,7 @@ export function DashboardLayout({
     </header>
   );
   return (
-    <ConfigProvider locale={zhCN} theme={dashboardTheme}>
+    <ConfigProvider locale={zhCN} theme={dashboardTheme} datePicker={datePickerConfig}>
       <AntApp>
         <div className="dashboard-layout" style={layoutStyle}>
           {sections.length ? (

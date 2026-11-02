@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.product_board_schemas import (
+    CatalogData,
     Envelope,
     ErrorEnvelope,
     MetaData,
@@ -15,7 +16,14 @@ from app.api.product_board_schemas import (
     ScoreDetail,
     ScoresData,
 )
-from app.modules.product_board.query import BoardQuery, days, options, overview, score_cards
+from app.modules.product_board.query import (
+    BoardQuery,
+    catalog,
+    days,
+    options,
+    overview,
+    score_cards,
+)
 from app.modules.product_board.repository import snapshot, wire
 
 router = APIRouter(
@@ -86,6 +94,20 @@ def get_options(
     with snapshot(request.app.state.engine, data_version) as repo:
         return response(
             request, options(repo, q, tuple(selected_listing_ids or ()), scope == "score"), repo
+        )
+
+
+@router.get("/catalog", response_model=Envelope[CatalogData])
+def get_catalog(
+    request: Request,
+    date_from: date,
+    date_to: date,
+    data_version: str = Query(min_length=1, max_length=100),
+    scope: Literal["main", "score", "detail"] = "main",
+):
+    with snapshot(request.app.state.engine, data_version) as repo:
+        return response(
+            request, catalog(repo, BoardQuery(date_from, date_to), scope == "score"), repo
         )
 
 

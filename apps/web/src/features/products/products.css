@@ -46,15 +46,11 @@
     repeat(2, minmax(130px, 1fr)) repeat(4, minmax(110px, 1fr)) minmax(170px, 1.3fr)
     minmax(170px, 1.3fr) auto;
 }
-.m1-products-scope .ant-input-affix-wrapper input {
-  height: auto;
-  padding: 0;
-  border: 0;
-}
-.m1-products-scope .ant-picker input {
-  height: auto;
-  padding: 0;
-  border: 0;
+/* 商品页三处筛选共用 34px 外框；焦点、内层输入与多选标签交给组件处理。 */
+.m1-products-scope
+  :is(.filters, .detail-filters, .new-potential-filters)
+  > :is(.ant-select, .ant-picker, .ant-input-affix-wrapper, .ant-input, .ant-btn) {
+  height: 34px;
 }
 .m1-products-scope .ant-table {
   font-family: inherit;
@@ -192,16 +188,6 @@
   border-radius: 4px;
   color: #806632;
 }
-.m1-products-scope .potential-meta {
-  white-space: nowrap;
-  font-size: 12px;
-  color: #6b7d94;
-}
-.m1-products-scope .potential-meta small {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-}
 .m1-products-scope .potential-guide {
   font-size: 12px;
   margin: 12px 0;
@@ -221,6 +207,7 @@
 }
 .m1-products-scope .new-potential-section > .ant-pagination {
   margin-top: 15px;
+  justify-content: flex-end;
 }
 .m1-products-scope .m1-score-dialog .ant-modal-title {
   font-size: 15px;
@@ -340,6 +327,7 @@ body:has(.m1-products-scope) {
   }
   .m1-products-scope .new-potential-section > .ant-pagination .ant-pagination-total-text {
     flex-basis: 100%;
+    text-align: right;
   }
   .m1-products-scope .period-stat {
     min-width: 0;
@@ -363,4 +351,90 @@ body:has(.m1-products-scope) {
 .m1-products-scope button.conclusion-row:focus-visible {
   outline: 2px solid #1768d9;
   outline-offset: 2px;
+}
+
+/* 总览更新提示占固定行位；不临时插入加载块推挤指标。 */
+.m1-products-scope .m1-filter-status {
+  grid-column: 2 / -1;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #6b7d94;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.m1-products-scope .conclusion-row:disabled {
+  cursor: progress;
+}
+@media (max-width: 600px) {
+  .m1-products-scope .m1-filter-status {
+    grid-column: 1 / -1;
+    min-height: 40px;
+  }
+}
+.m1-products-scope .metric .m1-metric-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.m1-products-scope .metric .m1-comparison-empty {
+  color: #637b99;
+}
+.m1-products-scope .metric .m1-metric-comparison {
+  display: block;
+  border-top: 1px solid var(--line);
+  margin: 10px 0 0;
+  padding-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.m1-products-scope .m1-metric-comparison em {
+  margin-top: 0;
+  line-height: 1.6;
+}
+.m1-products-scope .m1-comparison-values {
+  display: grid;
+  gap: 2px;
+  margin-top: 5px;
+}
+.m1-products-scope .metric .m1-comparison-values span {
+  margin: 0;
+  font-size: inherit;
+  color: inherit;
+}
+.m1-products-scope .m1-comparison-values > span {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 6px;
+  line-height: 1.6;
+}
+.m1-products-scope .metric .m1-comparison-values > span > span:last-child {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.m1-metric-comparisons {
+  margin: -8px 0 20px;
+  color: #637b99;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.m1-metric-comparisons p {
+  margin: 8px 0;
+}
+.m1-metric-comparisons summary {
+  cursor: pointer;
+}
+.m1-products-scope .m1-comparison-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 32px;
+  margin: 12px 0;
+}
+.m1-comparison-periods dt {
+  font-weight: 600;
+  color: var(--ink);
+}
+.m1-comparison-periods dd {
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
 }

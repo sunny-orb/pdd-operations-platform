@@ -1,0 +1,11 @@
+.dashboard-calendar-icon {
+  display: block;
+  flex: none;
+  box-sizing: content-box;
+  padding: 2px;
+  color: #000;
+}
+
+.ant-picker-disabled .dashboard-calendar-icon {
+  opacity: 0.35;
+}

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import dayjs from "dayjs";
 import { ApiError, get, params } from "./api";
-import { meta, options } from "./contracts";
+import { catalog, meta } from "./contracts";
+import { catalogOptions } from "./catalog";
 import { patchScope, readScope, scopeError, type Scope, type ScopeName } from "./scope";
 
 const DEFAULT_PERIOD_DAYS = 31;
@@ -68,6 +69,22 @@ export function useResource<T>(
       return get(path, schema, params(scope, state.version), signal);
     },
     retry: false,
+    // 只在同一版本、同一筛选的评分翻页期间保留旧页，避免列表塌陷造成滚动跳动。
+    // 换筛选、日期、版本或接口时立即撤下旧结果，不让旧商品冒充新范围的数据。
+    placeholderData: (previousData, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      if (path !== "scores" || key?.[1] !== path || key[2] !== state.version) return undefined;
+      const previousScope = key[3] as Scope;
+      const sameScope = Object.entries(scope).every(([field, value]) => {
+        if (field === "page") return true;
+        const previous = previousScope[field as keyof Scope];
+        return Array.isArray(value) && Array.isArray(previous)
+          ? value.length === previous.length &&
+              value.every((item, index) => item === previous[index])
+          : value === previous;
+      });
+      return sameScope ? previousData : undefined;
+    },
   });
   useEffect(() => {
     if (query.error) state.stale(query.error);
@@ -84,26 +101,46 @@ export function useDebounced(value: string) {
   }, [value]);
   return current;
 }
+/** 每个版本/日期仅取一次轻量目录；维度与搜索即时计算，不读取经营快照。 */
 export function useOptions(scope: Scope, state: ProductsState, needle: string, name: ScopeName) {
-  const keyword = useDebounced(needle);
-  const base = { ...scope, products: [], keyword: keyword || scope.keyword, size: 100 };
+  const directory = name === "score" ? "score" : "main";
   const invalid = scopeError(scope, state.metadata.data?.date_from, state.metadata.data?.date_to);
-  const query = useInfiniteQuery({
-    queryKey: ["m1", "options", name, state.version, base, scope.products],
+  const query = useQuery({
+    queryKey: ["m1", "catalog", directory, state.version, scope.from, scope.to],
     enabled: !!state.version && !invalid,
-    initialPageParam: 1,
-    queryFn: ({ pageParam, signal }) => {
+    queryFn: ({ signal }) => {
       if (invalid) throw new ApiError(422, invalid);
-      const p = params({ ...base, page: pageParam }, state.version);
-      scope.products.forEach((id) => p.append("selected_listing_ids", id));
-      p.set("scope", name);
-      return get("options", options, p, signal);
+      return get(
+        "catalog",
+        catalog,
+        new URLSearchParams({
+          date_from: scope.from,
+          date_to: scope.to,
+          data_version: state.version,
+          scope: directory,
+        }),
+        signal,
+      );
     },
-    getNextPageParam: (last, all) => (all.length * 100 < last.total ? all.length + 1 : undefined),
+    // 发布版本不变时目录不会变；新版本进入独立缓存键。
+    staleTime: Infinity,
     retry: false,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === directory && previousQuery.queryKey[3] === state.version
+        ? previous
+        : undefined,
   });
   useEffect(() => {
     if (query.error) state.stale(query.error);
   }, [query.error, state]);
-  return query;
+  const data = useMemo(
+    () => (query.data ? catalogOptions(query.data, scope, needle) : undefined),
+    [query.data, scope, needle],
+  );
+  return {
+    ...query,
+    catalog: invalid ? undefined : query.data,
+    data: invalid ? undefined : data,
+    error: invalid && state.version ? new ApiError(422, invalid) : query.error,
+  };
 }

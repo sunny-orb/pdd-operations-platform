@@ -1,7 +1,7 @@
 """商品指标纯函数：Decimal、成对分母、日历风险窗口；不推定来源完整日。"""
 
 from datetime import timedelta
-from decimal import Decimal, localcontext
+from decimal import Decimal, Inexact, localcontext
 
 D = Decimal
 METRICS = (
@@ -21,6 +21,13 @@ FIELDS = dict(
     units="units",
     views="views",
     orders="orders",
+)
+FIELD_KEYS = {field: key for key, field in FIELDS.items()}
+RATIOS = (
+    ("aov", "product_revenue", "buyers"),
+    ("conversion", "buyers", "visitors"),
+    ("score_conversion", "orders", "visitors"),
+    ("uv_value", "product_revenue", "visitors"),
 )
 WEIGHTS = (
     ("visitors_7d", "商品访客数", 12, "number"),
@@ -53,8 +60,21 @@ def compare(now, before):
 
 def total(rows, field):
     values = [D(r[field]) for r in rows if r.get(field) is not None]
+    return _sum(values)
+
+
+def _sum(values):
     if not values:
         return None
+    # 通常金额/计数在50位内可精确累加；陷阱发现任何精度损失才扫描位数重算。
+    # 不用float，也不在每次正常汇总中对全部Decimal反复拆分数字元组。
+    try:
+        with localcontext() as ctx:
+            ctx.prec = 50
+            ctx.traps[Inexact] = True
+            return sum(values, D(0))
+    except Inexact:
+        pass
     with localcontext() as ctx:
         ctx.prec = max(
             50,
@@ -67,12 +87,23 @@ def total(rows, field):
         return sum(values, D(0))
 
 
-def aggregate(rows, *, daily=False):
-    """累计已知商品日原值；收藏为日新增，未扣取消且不作跨日人数去重。"""
-    output = {}
+def aggregate(rows, *, daily=False, only=None):
+    """累计已知原值；only仅限制内部计算项，保留成对过滤、精确和及缺失状态。"""
+    output, complete_nonnegative = {}, {}
+    ratios = RATIOS if only is None else tuple(r for r in RATIOS if r[0] in only)
+    fields = (
+        set(FIELDS.values())
+        if only is None
+        else {FIELDS[key] for key in only if key in FIELDS}
+        | {field for _, numerator, denominator in ratios for field in (numerator, denominator)}
+    )
     for key, field in FIELDS.items():
-        count = sum(r.get(field) is not None for r in rows)
-        value = total(rows, field)
+        if field not in fields:
+            continue
+        values = [D(r[field]) for r in rows if r.get(field) is not None]
+        count = len(values)
+        value = _sum(values)
+        complete_nonnegative[field] = count == len(rows) and all(v >= 0 for v in values)
         status = "observed" if rows and count == len(rows) else "partial" if count else "missing"
         reason = None if status == "observed" else "字段缺失或无记录"
         output[key] = dict(
@@ -82,37 +113,95 @@ def aggregate(rows, *, daily=False):
             valid_rows=str(count),
             observed_rows=str(len(rows)),
         )
-    for key, numerator, denominator in (
-        ("aov", "product_revenue", "buyers"),
-        ("conversion", "buyers", "visitors"),
-        ("score_conversion", "orders", "visitors"),
-        ("uv_value", "product_revenue", "visitors"),
-    ):
-        paired = [
-            r
-            for r in rows
-            if all(r.get(f) is not None and r[f] >= 0 for f in (numerator, denominator))
-        ]
-        n, d = total(paired, numerator), total(paired, denominator)
+    for key, numerator, denominator in ratios:
+        if complete_nonnegative[numerator] and complete_nonnegative[denominator]:
+            # 全部行成对有效时复用刚刚计算的精确和；缺值/负数仍走原成对筛选。
+            paired_count = len(rows)
+            n = output[FIELD_KEYS[numerator]]["value"]
+            d = output[FIELD_KEYS[denominator]]["value"]
+        else:
+            paired = [
+                r
+                for r in rows
+                if all(r.get(f) is not None and r[f] >= 0 for f in (numerator, denominator))
+            ]
+            paired_count = len(paired)
+            n, d = total(paired, numerator), total(paired, denominator)
         value = divide(n, d)
         output[key] = dict(
             value=value,
             status="not_computable"
             if value is None
             else "observed"
-            if len(paired) == len(rows)
+            if paired_count == len(rows)
             else "partial",
             reason="无记录或非正分母"
             if value is None
             else None
-            if len(paired) == len(rows)
+            if paired_count == len(rows)
             else "只采用分子分母同时有效的行",
             numerator=n,
             denominator=d,
-            valid_rows=str(len(paired)),
+            valid_rows=str(paired_count),
             observed_rows=str(len(rows)),
         )
+    return output if only is None else {key: output[key] for key in only}
+
+
+def merge_aggregates(parts):
+    """合并不重叠行组的完整聚合；累加精确分子/分母和有效行数，不平均比率。"""
+    observed = sum(int(part["revenue"]["observed_rows"]) for part in parts)
+    output = {}
+    for key in FIELDS:
+        count = sum(int(part[key]["valid_rows"]) for part in parts)
+        value = _sum([part[key]["value"] for part in parts if part[key]["value"] is not None])
+        status = "observed" if observed and count == observed else "partial" if count else "missing"
+        output[key] = dict(
+            value=value,
+            status=status,
+            reason=None if status == "observed" else "字段缺失或无记录",
+            valid_rows=str(count),
+            observed_rows=str(observed),
+        )
+    for key, _, _ in RATIOS:
+        count = sum(int(part[key]["valid_rows"]) for part in parts)
+        n, d = (
+            _sum([part[key][field] for part in parts if part[key][field] is not None])
+            for field in ("numerator", "denominator")
+        )
+        value = divide(n, d)
+        output[key] = dict(
+            value=value,
+            status="not_computable"
+            if value is None
+            else "observed"
+            if count == observed
+            else "partial",
+            reason="无记录或非正分母"
+            if value is None
+            else None
+            if count == observed
+            else "只采用分子分母同时有效的行",
+            numerator=n,
+            denominator=d,
+            valid_rows=str(count),
+            observed_rows=str(observed),
+        )
     return output
+
+
+def daily_aggregates_can_merge(rows):
+    """原行精度包络决定能否分组；BIGINT计数至多19位，超50位保留原窗求和顺序。"""
+    integral, scale, count = 19, 0, 0
+    for row in rows:
+        count += 1
+        value = row.get("product_revenue")
+        if value is not None:
+            value = D(value)
+            integral = max(integral, value.adjusted() + 1)
+            scale = max(scale, -value.as_tuple().exponent)
+    # 额外保留行数可能带来的进位；禁止用已抵消的日小计判定原输入安全。
+    return integral + scale + len(str(count)) <= 50
 
 
 def observed_days(rows, start, end, fields):

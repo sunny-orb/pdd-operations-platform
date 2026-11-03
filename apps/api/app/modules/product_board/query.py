@@ -362,10 +362,10 @@ def overview(repo, q):
     yearly = {day: aggregate(rows, daily=True) for day, rows in card_year_daily.items()}
     year_comparisons = period_comparisons(current, card_year, "去年同期")
     # 环比在前等长日历窗独立筛选，不能被本期商品名单截断，也不向更早日期递补。
-    if pstart >= repo.start:
-        prior_rows = [r for r in loaded_rows if pstart <= r["business_date"] <= pend]
-    else:
-        prior_rows = repo.rows(pstart, pend)
+    prior_rows = [r for r in loaded_rows if pstart <= r["business_date"] <= pend]
+    if pstart < repo.start:
+        # 31日对比需62日：只补未加载的前两日，并保留原查询的日期顺序。
+        prior_rows = repo.rows(pstart, min(pend, repo.start - timedelta(days=1))) + prior_rows
     prior_info, _ = labels(prior_rows, repo.profiles())
     prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
     comparison_past = [r for r in prior_rows if r["listing_id"] in prior_ids]
@@ -584,13 +584,19 @@ def score_cards(repo, q, listing_id=None):
 
     published, computation_status = published_scores(repo)
     q.validate(repo)
-    catalog, groups = new_product_catalog(repo, repo.rows(repo.start, repo.end), repo.profiles())
+    catalog, _ = new_product_catalog(
+        repo, repo.identity_rows(repo.start, repo.end), repo.profiles()
+    )
     info = {lid: item for lid, item in catalog.items() if matches(item, q)}
     end = repo.end
     start = end - timedelta(days=6)
     prior = start - timedelta(days=7)
+    ids = [lid for lid in info if not listing_id or lid == listing_id]
+    groups = defaultdict(list)
+    for r in repo.rows(max(repo.start, prior), end, listing_ids=ids):
+        groups[r["listing_id"]].append(r)
     ads = defaultdict(list)
-    for r in repo.rows(start, end, ads=True):
+    for r in repo.rows(start, end, ads=True, listing_ids=ids):
         ads[r["listing_id"]].append(r)
     cards = []
     for lid, item in info.items():
@@ -717,25 +723,19 @@ def score_cards(repo, q, listing_id=None):
 
 
 def days(repo, q):
-    info, groups = scope(repo, q)
-    rows = selected_rows(groups, q.start, q.end)
-    year_start = previous_year(q.start)
-    year_end = previous_year(q.end)
-    older = repo.rows(
-        year_start or date(q.start.year - 1, 3, 1), year_end or date(q.end.year - 1, 2, 28)
-    )
-    old = {(r["listing_id"], r["business_date"]): r for r in older}
-    rows.sort(
-        key=lambda r: (
-            -r["business_date"].toordinal(),
-            r["source_shop_id"],
-            r["source_product_id"],
-            r["id"],
-        )
-    )
-    items = []
+    q.validate(repo)
     profiles = repo.profiles()
-    for r in rows[(q.page - 1) * q.size : q.page * q.size]:
+    info, _ = labels(repo.identity_rows(q.start, q.end), profiles)
+    info = {lid: item for lid, item in info.items() if matches(item, q)}
+    rows, count = repo.page_rows(q.start, q.end, list(info), q.page, q.size)
+    older = repo.rows_at([
+        (r["listing_id"], day)
+        for r in rows
+        if (day := previous_year(r["business_date"])) is not None
+    ])
+    old = {(r["listing_id"], r["business_date"]): r for r in older}
+    items = []
+    for r in rows:
         item = info[r["listing_id"]]
         p = old.get((r["listing_id"], previous_year(r["business_date"])))
         items.append(
@@ -751,7 +751,7 @@ def days(repo, q):
             )
         )
     return dict(
-        items=items, total=len(rows), page=q.page, size=q.size, scope=dict(start=q.start, end=q.end)
+        items=items, total=count, page=q.page, size=q.size, scope=dict(start=q.start, end=q.end)
     )
 
 

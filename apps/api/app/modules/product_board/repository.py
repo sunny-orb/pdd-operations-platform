@@ -11,6 +11,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
+from . import read_queries
 from .profile_rules import resolve_profile_fields
 from .source import windows
 
@@ -24,6 +25,7 @@ DEFINITION_REVISION = (
                 "query.py",
                 "metrics.py",
                 "repository.py",
+                "read_queries.py",
                 "profile_rules.py",
                 "filter_projection.py",
                 "actions.py",
@@ -282,20 +284,15 @@ class Repository:
         return self._profiles
 
     def identity_rows(self, start, end):
-        """目录仅需所选期间原始身份与名称；保留原行顺序以维持资料回退语义。"""
-        return [
-            dict(row)
-            for row in self.c.execute(
-                sa.text(
-                    "SELECT listing_id,business_date,source_shop_id,source_shop_name,"
-                    "source_product_id,source_product_name FROM public.product_daily_facts "
-                    "WHERE dataset_version_id=:product_daily "
-                    "AND business_date BETWEEN :start AND :end "
-                    "ORDER BY business_date,source_shop_id,source_product_id,source_row_key"
-                ),
-                dict(self.params, start=start, end=end),
-            ).mappings()
-        ]
+        return read_queries.identity_rows(self.c, self.params["product_daily"], start, end)
+
+    def page_rows(self, start, end, listing_ids, page, size):
+        return read_queries.page_rows(
+            self.c, self.params["product_daily"], start, end, listing_ids, page, size
+        )
+
+    def rows_at(self, keys):
+        return read_queries.rows_at(self.c, self.params["product_daily"], keys)
 
     def listing_identities(self, listing_ids):
         """为评分补齐无经营事实的已关联资料链接；仅查本地身份，不读取上游。"""
@@ -328,19 +325,27 @@ class Repository:
         "source_grouping,promotion_name,promotion_type,bidding_method,source_deleted_label"
     )
 
-    def rows(self, start, end, *, ads=False):
+    def rows(self, start, end, *, ads=False, listing_ids=None):
+        if listing_ids is not None and not listing_ids:
+            return []
         table = "product_promotion_records" if ads else "product_daily_facts"
         code = "product_promotion" if ads else "product_daily"
         day = "period_start" if ads else "business_date"
         cols = self._ADS_COLS if ads else self._DAILY_COLS
+        condition = ""
+        params = dict(v=self.params[code], start=start, end=end)
+        if listing_ids is not None:
+            condition = "AND " + read_queries.LISTING_FILTER + " "
+            params.update(read_queries.listing_filter(listing_ids))
         return [
             dict(r)
             for r in self.c.execute(
                 sa.text(
                     f"SELECT {cols} FROM public.{table} WHERE dataset_version_id=:v "
                     f"AND {day} BETWEEN :start AND :end "
+                    f"{condition}"
                     f"ORDER BY {day},source_shop_id,source_product_id,source_row_key"
                 ),
-                dict(v=self.params[code], start=start, end=end),
+                params,
             ).mappings()
         ]

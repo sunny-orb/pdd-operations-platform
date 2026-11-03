@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import type { Overview } from "./contracts";
 import { formatValue, specs } from "./format";
 import type { MetricKey } from "./state";
@@ -6,7 +6,7 @@ import type { MetricKey } from "./state";
 const COLORS = ["#1768d9", "#e88429"];
 
 /** 店铺图沿线上布局；坐标用Number，详情保留原十进制值；无值断线不补0。 */
-export function StoreTrend({
+export const StoreTrend = memo(function StoreTrend({
   data,
   selected,
 }: {
@@ -282,4 +282,4 @@ export function StoreTrend({
       {data && !points.length && <p className="m2-empty">当前范围暂无可用趋势记录</p>}
     </div>
   );
-}
+});

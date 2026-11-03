@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { Overview } from "./contracts";
 import { formatValue, productMetricLabel, specs } from "./format";
 import type { MetricKey } from "./state";
@@ -21,7 +21,7 @@ const selectedSpecs = (selected: MetricKey[]) =>
     .filter((key) => selected.includes(key))
     .map((key) => specs.find((spec) => spec.key === key)!);
 
-export function TrendLegend({ data, selected }: Props) {
+export const TrendLegend = memo(function TrendLegend({ data, selected }: Props) {
   return (
     <div className="legend">
       {selectedSpecs(selected).map((spec) => (
@@ -38,10 +38,10 @@ export function TrendLegend({ data, selected }: Props) {
       )}
     </div>
   );
-}
+});
 
 /** 沿线上SVG布局，Number仅绘制坐标；原值/汇总比率由接口给出，缺值逐指标断线。 */
-export function Trend({ data, selected }: Props) {
+export const Trend = memo(function Trend({ data, selected }: Props) {
   const points = data?.series ?? [];
   const selection = selected.join(",");
   const [cursor, setCursor] = useState<{
@@ -366,4 +366,4 @@ export function Trend({ data, selected }: Props) {
       </svg>
     </>
   );
-}
+});

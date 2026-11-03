@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { memo, Fragment } from "react";
 import type { SalesResult } from "../api/contracts";
 import { localTime } from "../format";
 
@@ -12,7 +12,7 @@ function Dates({ values }: { values: string[] }) {
 }
 
 /** 仅展示当前筛选的记录覆盖；NULL、无记录和真实0分别保留，指标算法由接口负责。 */
-export function SalesCoverage({
+export const SalesCoverage = memo(function SalesCoverage({
   result,
   error,
 }: {
@@ -149,4 +149,4 @@ export function SalesCoverage({
       </details>
     </aside>
   );
-}
+});

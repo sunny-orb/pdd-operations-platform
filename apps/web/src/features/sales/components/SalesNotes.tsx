@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { FiltersResponse, SalesMetrics } from "../api/contracts";
 import { formatFixedDecimal } from "../../../shared/format/decimal";
 import { SalesExplanation } from "./SalesExplanation";
@@ -9,7 +10,7 @@ const basisLabels: Record<string, string> = {
 };
 
 /** 仅展示当前范围内API标记生效的补充；不参与选源或计算，不从零金额推断未投放。 */
-export function SalesNotes({
+export const SalesNotes = memo(function SalesNotes({
   data,
   shops,
   shopId,
@@ -69,4 +70,4 @@ export function SalesNotes({
       )}
     </SalesExplanation>
   );
-}
+});

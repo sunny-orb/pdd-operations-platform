@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Progress } from "antd";
 import type { FiltersResponse, ShopItem } from "../api/contracts";
 import { fixed, money, percent } from "../format";
@@ -12,7 +13,7 @@ function contributionMoney(value: string) {
 }
 
 /** 接收后端六店排名及份额，不重新汇总或按选店改变分母。 */
-export function SalesContribution({
+export const SalesContribution = memo(function SalesContribution({
   shops,
   selected,
   onSelect,
@@ -90,4 +91,4 @@ export function SalesContribution({
       </div>
     </section>
   );
-}
+});

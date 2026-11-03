@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Board } from "./contracts";
 import { format } from "./format";
 
@@ -10,7 +11,7 @@ const steps = [
 ];
 
 /** 五项沿用同一总览响应；仅解释含义，不推算人群转化或补齐空值。 */
-export function ProductFunnel({ data }: { data?: Board }) {
+export const ProductFunnel = memo(function ProductFunnel({ data }: { data?: Board }) {
   return (
     <div className="product-funnel">
       <section className="funnel-card" aria-label="商品流量链路">
@@ -56,4 +57,4 @@ export function ProductFunnel({ data }: { data?: Board }) {
       </details>
     </div>
   );
-}
+});

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Collapse } from "antd";
 import { Link } from "react-router-dom";
 import type { DomainState } from "./data";
@@ -20,7 +21,7 @@ const disclosureIcon = ({ isActive }: { isActive?: boolean }) => (
 );
 
 /** 口径摘要直接展示；覆盖统计沿完整结果，来源详情保持默认折叠。 */
-export function DefinitionsSection({
+export const DefinitionsSection = memo(function DefinitionsSection({
   states,
   counts,
   coverage,
@@ -118,4 +119,4 @@ export function DefinitionsSection({
       </article>
     </section>
   );
-}
+});

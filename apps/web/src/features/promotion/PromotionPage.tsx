@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Alert, Button, Spin } from "antd";
 import {
   BarChartOutlined,
@@ -28,10 +28,13 @@ export function PromotionPage() {
   const [productSelected, setProductSelected] = useState<MetricKey[]>(["revenue", "spend"]);
   const [missingDatesOpen, setMissingDatesOpen] = useState(false);
   const selected = product ? productSelected : storeSelected;
-  const toggle = (key: MetricKey) =>
-    product
-      ? setProductSelected((values) => toggleMetric(values, key, "product"))
-      : setStoreSelected((values) => toggleMetric(values, key, "store"));
+  const toggle = useCallback(
+    (key: MetricKey) =>
+      product
+        ? setProductSelected((values) => toggleMetric(values, key, "product"))
+        : setStoreSelected((values) => toggleMetric(values, key, "store")),
+    [product],
+  );
   const meta = state.meta.data?.data;
   const data = state.overview.data?.data;
   const roiNote = product ? roiExclusionNote(data) : "";

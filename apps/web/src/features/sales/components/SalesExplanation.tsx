@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import "./sales-explanation.css";
 
 /** 店铺销售页的简短说明共用无边框折叠；内容和数据由各业务区块提供。 */
-export function SalesExplanation({
+export const SalesExplanation = memo(function SalesExplanation({
   title,
   children,
   className = "",
@@ -17,4 +17,4 @@ export function SalesExplanation({
       {children}
     </details>
   );
-}
+});

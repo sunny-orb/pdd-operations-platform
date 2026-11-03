@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Button, Popover } from "antd";
 import type { FiltersResponse, SalesMetrics, ShopItem } from "../api/contracts";
 import { decimalParts, formatFixedDecimal } from "../../../shared/format/decimal";
@@ -37,7 +38,14 @@ function excludedRecords(shops: ShopItem[], shopId: string) {
 }
 
 /** 展示后端实际分子、分母和结果；弹层随当前范围更新，金额不取整、不重新计算比率。 */
-export function RefundDetails({ data, shops, shopId, shopName, rangeLabel, source }: Props) {
+export const RefundDetails = memo(function RefundDetails({
+  data,
+  shops,
+  shopId,
+  shopName,
+  rangeLabel,
+  source,
+}: Props) {
   const match = data?.refund_match;
   const excluded = data ? excludedRecords(shops, shopId) : [];
   const status = { ...match?.source, ...source };
@@ -105,4 +113,4 @@ export function RefundDetails({ data, shops, shopId, shopName, rangeLabel, sourc
       </Button>
     </Popover>
   );
-}
+});

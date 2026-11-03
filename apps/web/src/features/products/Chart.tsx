@@ -1,5 +1,7 @@
+import { memo, useMemo } from "react";
 import {
   CartesianGrid,
+  getNiceTickValues,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -10,7 +12,7 @@ import {
 import type { Board } from "./contracts";
 import { format, type Kind } from "./format";
 import { TREND_COLORS } from "./chartColors";
-export function Trend({ data, metrics }: { data: Board; metrics: string[] }) {
+export const Trend = memo(function Trend({ data, metrics }: { data: Board; metrics: string[] }) {
   const compare = metrics.length === 1 && (data.comparison_series?.length ?? 0) > 1;
   const lines = compare
     ? data.comparison_series.map((s, i) => ({
@@ -27,20 +29,26 @@ export function Trend({ data, metrics }: { data: Board; metrics: string[] }) {
         color: TREND_COLORS[i % TREND_COLORS.length],
         type: data.metrics[k].type,
       }));
-  const points: Record<string, string | number | null>[] = data.series.map((row, i) => ({
-    date: row.date,
-    ...Object.fromEntries(
-      compare
-        ? data.comparison_series.map((s) => [
-            s.listing_id,
-            s.points[i]?.values[metrics[0]] == null ? null : Number(s.points[i].values[metrics[0]]),
-          ])
-        : metrics.flatMap((k) => [
-            [k, row.values[k] == null ? null : Number(row.values[k])],
-            [`old_${k}`, row.previous[k] == null ? null : Number(row.previous[k])],
-          ]),
-    ),
-  }));
+  const points: Record<string, string | number | null>[] = useMemo(
+    () =>
+      data.series.map((row, i) => ({
+        date: row.date,
+        ...Object.fromEntries(
+          compare
+            ? data.comparison_series.map((s) => [
+                s.listing_id,
+                s.points[i]?.values[metrics[0]] == null
+                  ? null
+                  : Number(s.points[i].values[metrics[0]]),
+              ])
+            : metrics.flatMap((k) => [
+                [k, row.values[k] == null ? null : Number(row.values[k])],
+                [`old_${k}`, row.previous[k] == null ? null : Number(row.previous[k])],
+              ]),
+        ),
+      })),
+    [data, metrics, compare],
+  );
   return (
     <div className="m1-trend">
       <div role="img" aria-label={lines.map((k) => k.label).join("、") + "逐日趋势"}>
@@ -172,22 +180,61 @@ export function Trend({ data, metrics }: { data: Board; metrics: string[] }) {
       )}
     </div>
   );
-}
-export function MiniTrend({ values }: { values: (string | null)[] }) {
+});
+export const MiniTrend = memo(function MiniTrend({ values }: { values: (string | null)[] }) {
+  const nums = values.map((v) => (v == null ? null : Number(v)));
+  const valid = nums.filter((v): v is number => v !== null);
+  if (!valid.length) {
+    return <div className="m1-mini" aria-label="近7日趋势" />;
+  }
+  // 沿用原LineChart默认的[0, auto]数值轴和5个自适应刻度，仅复用刻度计算。
+  const ticks = getNiceTickValues([Math.min(0, ...valid), Math.max(...valid)], 5, true, "adaptive");
+  const min = ticks[0];
+  const max = ticks[ticks.length - 1];
+  const range = max - min || 1;
+  // 与.m1-mini的108×28尺寸和原图默认5px边距一致，不挂载图表容器。
+  const w = 108;
+  const h = 28;
+  const pad = 5;
+  const segments: string[][] = [[]];
+  for (let i = 0; i < nums.length; i++) {
+    const v = nums[i];
+    if (v === null) {
+      if (segments[segments.length - 1].length) segments.push([]);
+      continue;
+    }
+    const x = nums.length === 1 ? w / 2 : pad + (i / (nums.length - 1)) * (w - 2 * pad);
+    const y = pad + (1 - (v - min) / range) * (h - 2 * pad);
+    segments[segments.length - 1].push(`${x.toFixed(3)},${y.toFixed(3)}`);
+  }
   return (
     <div className="m1-mini" aria-label="近7日趋势">
-      <ResponsiveContainer width="100%" height={28} minWidth={0}>
-        <LineChart data={values.map((value) => ({ value: value == null ? null : Number(value) }))}>
-          <Line
-            dataKey="value"
-            dot={false}
-            stroke="#d84a4a"
-            strokeWidth={2}
-            isAnimationActive={false}
-            connectNulls={false}
-          />
-        </LineChart>
-      </ResponsiveContainer>
+      <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={28} preserveAspectRatio="none">
+        {segments.map(
+          (seg, i) =>
+            seg.length > 1 && (
+              <polyline
+                key={i}
+                points={seg.join(" ")}
+                fill="none"
+                stroke="#d84a4a"
+                strokeWidth={2}
+                vectorEffect="non-scaling-stroke"
+              />
+            ),
+        )}
+        {segments.map((seg, i) =>
+          seg.length === 1 ? (
+            <circle
+              key={`d${i}`}
+              cx={parseFloat(seg[0])}
+              cy={parseFloat(seg[0].split(",")[1])}
+              r={2}
+              fill="#d84a4a"
+            />
+          ) : null,
+        )}
+      </svg>
     </div>
   );
-}
+});

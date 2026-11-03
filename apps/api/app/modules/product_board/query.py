@@ -362,7 +362,10 @@ def overview(repo, q):
     yearly = {day: aggregate(rows, daily=True) for day, rows in card_year_daily.items()}
     year_comparisons = period_comparisons(current, card_year, "去年同期")
     # 环比在前等长日历窗独立筛选，不能被本期商品名单截断，也不向更早日期递补。
-    prior_rows = repo.rows(pstart, pend)
+    if pstart >= repo.start:
+        prior_rows = [r for r in loaded_rows if pstart <= r["business_date"] <= pend]
+    else:
+        prior_rows = repo.rows(pstart, pend)
     prior_info, _ = labels(prior_rows, repo.profiles())
     prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
     comparison_past = [r for r in prior_rows if r["listing_id"] in prior_ids]

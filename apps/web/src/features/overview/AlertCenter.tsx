@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Button, Empty, Pagination, Tag, Tooltip } from "antd";
 import { Link } from "react-router-dom";
 import { SourceLinks } from "./SourceLinks";
@@ -8,7 +8,7 @@ import { OVERVIEW_PAGE_SIZE as PAGE_SIZE } from "./presentation";
 const levels = ["全部", "P0", "P1", "P2", "未评级"];
 
 /** 来源优先级只筛本区对象，分页不影响全量统计；不创建中心正式评级。 */
-export function AlertCenter({
+export const AlertCenter = memo(function AlertCenter({
   observations,
   available,
   preview,
@@ -193,4 +193,4 @@ export function AlertCenter({
       </div>
     </section>
   );
-}
+});

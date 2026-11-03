@@ -5,6 +5,7 @@ import json
 from contextlib import contextmanager
 from datetime import date, timedelta
 from decimal import Decimal
+from functools import cached_property
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -238,7 +239,8 @@ class Repository:
             ],
         )
 
-    def profiles(self):
+    @cached_property
+    def _profiles(self):
         """关系先收敛为一行/链接，保留共识状态及冲突候选，任何资料重复均不放大事实。"""
         rows = self.c.execute(
             sa.text("""SELECT l.listing_id,
@@ -276,6 +278,9 @@ class Repository:
             result[r["listing_id"]] = item
         return result
 
+    def profiles(self):
+        return self._profiles
+
     def identity_rows(self, start, end):
         """目录仅需所选期间原始身份与名称；保留原行顺序以维持资料回退语义。"""
         return [
@@ -308,15 +313,31 @@ class Repository:
             ).mappings()
         ]
 
+    _DAILY_COLS = (
+        "id,listing_id,business_date,source_shop_id,source_shop_name,"
+        "source_product_id,source_product_name,"
+        "views,visitors,favorites,buyers,orders,units,product_revenue"
+    )
+    _ADS_COLS = (
+        "id,source_row_key,listing_id,period_start,source_shop_id,source_shop_name,"
+        "source_product_id,source_product_name,"
+        "spend,transaction_spend,attributed_revenue,attributed_deals,"
+        "net_attributed_revenue,net_attributed_deals,"
+        "settled_attributed_revenue,settled_attributed_deals,"
+        "impressions,clicks,"
+        "source_grouping,promotion_name,promotion_type,bidding_method,source_deleted_label"
+    )
+
     def rows(self, start, end, *, ads=False):
         table = "product_promotion_records" if ads else "product_daily_facts"
         code = "product_promotion" if ads else "product_daily"
         day = "period_start" if ads else "business_date"
+        cols = self._ADS_COLS if ads else self._DAILY_COLS
         return [
             dict(r)
             for r in self.c.execute(
                 sa.text(
-                    f"SELECT * FROM public.{table} WHERE dataset_version_id=:v "
+                    f"SELECT {cols} FROM public.{table} WHERE dataset_version_id=:v "
                     f"AND {day} BETWEEN :start AND :end "
                     f"ORDER BY {day},source_shop_id,source_product_id,source_row_key"
                 ),

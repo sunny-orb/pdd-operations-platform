@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { localTime } from "../format";
 type State = {
   state: string;
@@ -6,7 +7,13 @@ type State = {
   last_success_at?: string | null;
 };
 /** 旧成功值继续可读时，逐来源失败与成功时间保持可见，不能用店铺日状态代替。 */
-export function SourceState({ source, label }: { source?: State | null; label: string }) {
+export const SourceState = memo(function SourceState({
+  source,
+  label,
+}: {
+  source?: State | null;
+  label: string;
+}) {
   const status = source?.last_attempt_status;
   const failed = status === "failed" || status === "abandoned";
   const text = failed
@@ -24,4 +31,4 @@ export function SourceState({ source, label }: { source?: State | null; label: s
       {source?.last_attempt_at ? localTime(source.last_attempt_at) : "—"}
     </span>
   );
-}
+});

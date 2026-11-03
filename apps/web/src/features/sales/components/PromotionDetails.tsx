@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { SalesMetrics, FiltersResponse } from "../api/contracts";
 import { localTime } from "../format";
 import "./promotion-details.css";
@@ -88,7 +89,7 @@ function RecordIssues({ channel, name }: { channel: Channel; name: (id: string) 
 }
 
 /** 只展示影响本期指标的缺失或更新失败；正常数据及历史补充不单独占用页面。 */
-export function PromotionDetails({
+export const PromotionDetails = memo(function PromotionDetails({
   data,
   sources,
   shops,
@@ -146,4 +147,4 @@ export function PromotionDetails({
       </details>
     </aside>
   );
-}
+});

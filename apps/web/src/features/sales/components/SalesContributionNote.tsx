@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { FiltersResponse, ShopItem } from "../api/contracts";
 import { REFUND_SOURCE } from "../sourceLinks";
 
@@ -58,7 +59,7 @@ function feishuSource(source?: { state: string }) {
 }
 
 /** 与左侧排名共用全店、同日期结果；仅展示来源覆盖，不重新计算经营指标。 */
-export function SalesContributionNote({
+export const SalesContributionNote = memo(function SalesContributionNote({
   shops,
   sources,
   error,
@@ -115,4 +116,4 @@ export function SalesContributionNote({
       </a>
     </aside>
   );
-}
+});

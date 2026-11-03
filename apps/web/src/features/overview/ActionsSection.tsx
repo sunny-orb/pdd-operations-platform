@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Button, Drawer, Pagination, Table, Tag, Tooltip, type TableColumnsType } from "antd";
 import { Link } from "react-router-dom";
 import { formatMetric, sourceLabel, type ActionObject } from "./model";
@@ -103,7 +103,7 @@ const columns: TableColumnsType<ActionObject> = [
 ];
 
 /** 对完整来源建议做展示分页；不改建议内容、处理状态、定位或全量待办数。 */
-export function ActionsSection({
+export const ActionsSection = memo(function ActionsSection({
   actions,
   preview,
   total,
@@ -235,4 +235,4 @@ export function ActionsSection({
       </Drawer>
     </section>
   );
-}
+});

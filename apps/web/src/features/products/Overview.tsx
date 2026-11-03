@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Empty } from "antd";
 import dayjs from "dayjs";
 import type { Board } from "./contracts";
@@ -11,7 +12,7 @@ import { PeriodWindows } from "./PeriodWindows";
 import { MetricComparison, MetricComparisons } from "./MetricComparisons";
 import { formatProductLevel } from "../../shared/products/levels";
 
-export function Brief({
+export const Brief = memo(function Brief({
   data,
   onSelect,
   updating = false,
@@ -174,8 +175,8 @@ export function Brief({
       </div>
     </section>
   );
-}
-export function Health({ data }: { data?: Board }) {
+});
+export const Health = memo(function Health({ data }: { data?: Board }) {
   return (
     <section className={`health-bar ${data?.health.tone ?? "neutral"}`}>
       <div>
@@ -188,8 +189,8 @@ export function Health({ data }: { data?: Board }) {
       </small>
     </section>
   );
-}
-export function Metrics({
+});
+export const Metrics = memo(function Metrics({
   data,
   active,
   toggle,
@@ -242,8 +243,8 @@ export function Metrics({
       <MetricComparisons periods={data?.comparison_periods} metrics={data?.metrics} />
     </>
   );
-}
-export function Trends({ data, active }: { data?: Board; active: string[] }) {
+});
+export const Trends = memo(function Trends({ data, active }: { data?: Board; active: string[] }) {
   const metric = active[0];
   const definition = data?.metrics[metric];
   const comparing = active.length === 1 && (data?.comparison_series?.length ?? 0) > 1;
@@ -311,4 +312,4 @@ export function Trends({ data, active }: { data?: Board; active: string[] }) {
       </section>
     </>
   );
-}
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert, Button, Input, Pagination, Spin } from "antd";
 import {
   diagnosis,
@@ -385,7 +385,7 @@ function RemoteObjectTable({ state, group }: { state: PromotionState; group: Obj
   );
 }
 
-export function Diagnosis({ state }: { state: PromotionState }) {
+export const Diagnosis = memo(function Diagnosis({ state }: { state: PromotionState }) {
   const query = useResource(
     "diagnosis",
     diagnosis,
@@ -416,8 +416,8 @@ export function Diagnosis({ state }: { state: PromotionState }) {
       )}
     />
   );
-}
-export function DiagnosisView({
+});
+export const DiagnosisView = memo(function DiagnosisView({
   data,
   pending = false,
   error,
@@ -710,4 +710,4 @@ export function DiagnosisView({
       </DiagnosisDetails>
     </section>
   );
-}
+});

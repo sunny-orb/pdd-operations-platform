@@ -1,8 +1,15 @@
+import { memo } from "react";
 import type { Board } from "./contracts";
 import { change, format } from "./format";
 
 /** 固定周期展示；金额、涨跌及比较日期均取同一次接口响应。 */
-export function PeriodWindows({ data, metric }: { data?: Board; metric: string }) {
+export const PeriodWindows = memo(function PeriodWindows({
+  data,
+  metric,
+}: {
+  data?: Board;
+  metric: string;
+}) {
   const definition = data?.metrics[metric];
   const kind = definition?.type ?? "currency";
   return (
@@ -62,4 +69,4 @@ export function PeriodWindows({ data, metric }: { data?: Board; metric: string }
       </details>
     </div>
   );
-}
+});

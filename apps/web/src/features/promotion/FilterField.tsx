@@ -1,7 +1,15 @@
-import { cloneElement, useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import {
+  memo,
+  cloneElement,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
 
 /** 单值筛选的开合交互；只取消弹层和鼠标焦点，不清空业务条件。 */
-export function FilterField({
+export const FilterField = memo(function FilterField({
   label,
   children,
 }: {
@@ -43,7 +51,6 @@ export function FilterField({
   }, []);
 
   // cloneElement只传递事件回调；不会在渲染时执行回调或读取ref。
-  // eslint-disable-next-line react-hooks/refs
   const control = cloneElement(children, { open, onOpenChange });
 
   return (
@@ -71,4 +78,4 @@ export function FilterField({
       {control}
     </label>
   );
-}
+});

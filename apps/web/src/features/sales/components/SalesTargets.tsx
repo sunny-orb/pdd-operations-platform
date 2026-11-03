@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Card, Progress, Button } from "antd";
 import { detailPath, targetsSchema, useSalesDetail } from "../api/details";
 import { money, percent } from "../format";
@@ -5,7 +6,7 @@ import { TARGET_SOURCE } from "../sourceLinks";
 import "./sales-targets.css";
 
 /** 目标三卡仅格式化接口值；说明放在卡片外，展开不改变三卡高度。 */
-export function SalesTargets({
+export const SalesTargets = memo(function SalesTargets({
   month,
   version,
   onConflict,
@@ -173,4 +174,4 @@ export function SalesTargets({
       )}
     </section>
   );
-}
+});

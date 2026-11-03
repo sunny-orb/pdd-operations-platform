@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Pagination, Table, Tag } from "antd";
 import type { Board } from "./contracts";
 import { change, format } from "./format";
@@ -9,7 +9,7 @@ import "./Risks.css";
 const PAGE_SIZE = 5;
 
 /** 只分页展示后端完整风险清单，不重排、不截断规则结果。 */
-export function Risks({ data }: { data?: Board }) {
+export const Risks = memo(function Risks({ data }: { data?: Board }) {
   const [paging, setPaging] = useState({ rows: data?.risks, page: 1 });
   // 筛选往返可能复用缓存数组；实际重置页码，避免返回旧筛选时跳回旧页。
   if (paging.rows !== data?.risks) setPaging({ rows: data?.risks, page: 1 });
@@ -191,4 +191,4 @@ export function Risks({ data }: { data?: Board }) {
       </details>
     </section>
   );
-}
+});

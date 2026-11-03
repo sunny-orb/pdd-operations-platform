@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Overview } from "./contracts";
 import { formatMetric } from "./format";
 
@@ -26,7 +27,7 @@ function netMessage(data: Overview, channel: string, shop: string): string | nul
   return null;
 }
 
-export function StoreNet({
+export const StoreNet = memo(function StoreNet({
   data,
   channel = "",
   shop = "",
@@ -50,4 +51,4 @@ export function StoreNet({
       {message && <p>{message}</p>}
     </section>
   );
-}
+});

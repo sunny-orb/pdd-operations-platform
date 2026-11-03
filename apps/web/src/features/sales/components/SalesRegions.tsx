@@ -1,7 +1,7 @@
 import { ProductRegionNotes } from "./ProductRegionNotes";
 import { formatFixedDecimal } from "../../../shared/format/decimal";
 import { SalesRegionNotes } from "./SalesRegionNotes";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Button, DatePicker, Input, Select, Table } from "antd";
 import dayjs from "dayjs";
 import type { FiltersResponse } from "../api/contracts";
@@ -63,14 +63,14 @@ function DatesFilter({
     </div>
   );
 }
-export function SalesRegions({ filters, onConflict }: Props) {
+export const SalesRegions = memo(function SalesRegions({ filters, onConflict }: Props) {
   return (
     <>
       <RegionPanel filters={filters} onConflict={onConflict} />
       <RegionPanel filters={filters} onConflict={onConflict} product />
     </>
   );
-}
+});
 function RegionPanel({ filters, onConflict, product = false }: Props & { product?: boolean }) {
   const code = product ? "product_regions" : "shop_regions";
   const source = filters?.data.sources?.[code];

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { z } from "zod";
 import type { FiltersResponse } from "../api/contracts";
 import type { regionSchema } from "../api/details";
@@ -5,7 +6,7 @@ import { localTime } from "../format";
 import { SalesExplanation } from "./SalesExplanation";
 
 /** 只解释本区结果；无记录按约定列为未销售，不改金额，也不把空字段或请求失败归入未销售。 */
-export function ProductRegionNotes({
+export const ProductRegionNotes = memo(function ProductRegionNotes({
   data,
   shops,
   source,
@@ -74,4 +75,4 @@ export function ProductRegionNotes({
       </p>
     </SalesExplanation>
   );
-}
+});

@@ -1,10 +1,11 @@
+import { memo } from "react";
 import type { Overview } from "./contracts";
 import { periodChangeNote, formatMetric, formatValue, productMetricLabel, specs } from "./format";
 import type { MetricKey, Mode } from "./state";
 import { Trend, TrendLegend } from "./Trend";
 import { StoreTrend } from "./StoreTrend";
 
-export function Metrics({
+export const Metrics = memo(function Metrics({
   data,
   selected,
   toggle,
@@ -51,8 +52,8 @@ export function Metrics({
       ))}
     </section>
   );
-}
-export function Trends({
+});
+export const Trends = memo(function Trends({
   data,
   selected,
   product,
@@ -126,8 +127,8 @@ export function Trends({
       </article>
     </section>
   );
-}
-export function TopDates({ data }: { data: Overview | undefined }) {
+});
+export const TopDates = memo(function TopDates({ data }: { data: Overview | undefined }) {
   return (
     <section className="panel daily-ranking" id="promotion-top-dates">
       <div className="panel-title">
@@ -158,8 +159,8 @@ export function TopDates({ data }: { data: Overview | undefined }) {
       </div>
     </section>
   );
-}
-export function MissingDays({
+});
+export const MissingDays = memo(function MissingDays({
   data,
   open,
   onToggle,
@@ -199,4 +200,4 @@ export function MissingDays({
       {data?.coverage.missing_truncated === true && <p>共 {count} 条，此处展示前200条。</p>}
     </details>
   ) : null;
-}
+});

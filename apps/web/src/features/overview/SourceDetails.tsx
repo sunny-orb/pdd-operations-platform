@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { DomainState } from "./data";
 import { domains, localTime, type ObservationCoverage } from "./model";
 import { Button } from "antd";
@@ -14,7 +15,7 @@ const coverageLabels: Record<ObservationCoverage["status"], string> = {
 };
 
 /** 二级展开保留真实来源、覆盖和运行记录；刷新仅调用原有本地查询。 */
-export function SourceDetails({
+export const SourceDetails = memo(function SourceDetails({
   states,
   coverage,
 }: {
@@ -92,4 +93,4 @@ export function SourceDetails({
       </div>
     </>
   );
-}
+});

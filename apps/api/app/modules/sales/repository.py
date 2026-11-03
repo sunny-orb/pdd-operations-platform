@@ -51,11 +51,17 @@ def read_snapshot(engine, version=None):
             ).hexdigest()
             if version is not None and token != version:
                 raise SalesError("DATA_VERSION_CHANGED", 409)
+            _SHOP_FACT_COLS = (
+                "shop_id,source_shop_name,business_date,"
+                "shop_revenue,shop_visitors,shop_views,product_visitors,product_views,"
+                "buyers,orders,source_aov,source_uv_value,source_conversion_rate"
+            )
             facts = (
                 c.execute(
                     sa.text(
-                        "SELECT * FROM public.shop_daily_facts WHERE dataset_version_id=:v "
-                        "ORDER BY business_date,shop_id,source_row_key"
+                        f"SELECT {_SHOP_FACT_COLS} FROM public.shop_daily_facts "
+                        "WHERE dataset_version_id=:v "
+                        "ORDER BY business_date,shop_id"
                     ),
                     dict(v=current["id"]),
                 )

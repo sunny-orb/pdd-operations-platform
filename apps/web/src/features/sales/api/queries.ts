@@ -51,6 +51,12 @@ function readScope(search: URLSearchParams, filters: FiltersResponse) {
   return { scope: { month, from, to, shop: shop?.shop_id ?? "" }, error: null };
 }
 
+const resultCache = new Map<string, SalesResult>();
+const MAX_CACHE = 8;
+export function _resetCacheForTesting() {
+  resultCache.clear();
+}
+
 /** 取消旧组请求；仅展示当前筛选同版本结果，连续409只自动恢复一次。 */
 export function useSalesData() {
   const location = useLocation();
@@ -85,9 +91,18 @@ export function useSalesData() {
           return;
         }
         if (scopeError || !scope.from || !scope.to) return;
+        const cached = resultCache.get(key);
+        if (cached) {
+          setResult({ ...cached, key });
+          setError(null);
+          return;
+        }
         const next = await getSalesResult(scope, filters.meta.data_version, signal);
         if (signal.aborted) return;
-        setResult({ ...next, key });
+        const entry = { ...next, key };
+        if (resultCache.size >= MAX_CACHE) resultCache.delete(resultCache.keys().next().value!);
+        resultCache.set(key, entry);
+        setResult(entry);
         setError(null);
       } catch (cause) {
         if (signal.aborted) return;
@@ -175,11 +190,13 @@ export function useSalesData() {
     setError(null);
     setResult(null);
     setFilters(null);
+    resultCache.clear();
     setRefresh((n) => n + 1);
   }, []);
   const invalidateVersion = useCallback(() => {
     if (!recovered.current) {
       recovered.current = true;
+      resultCache.clear();
       setFilters(null);
       setResult(null);
     } else setError("数据版本持续变化，请重新读取本地数据。");

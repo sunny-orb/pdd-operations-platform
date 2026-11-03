@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Alert, Button, Spin, Tooltip } from "antd";
 import {
   BarChartOutlined,
@@ -40,14 +40,17 @@ export function ProductsPage() {
     !updating,
   );
   const meta = state.metadata.data;
-  const toggle = (key: string) =>
-    setActive((keys) =>
-      keys.includes(key)
-        ? keys.length === 1
-          ? keys
-          : keys.filter((k) => k !== key)
-        : [...keys, key],
-    );
+  const toggle = useCallback(
+    (key: string) =>
+      setActive((keys) =>
+        keys.includes(key)
+          ? keys.length === 1
+            ? keys
+            : keys.filter((k) => k !== key)
+          : [...keys, key],
+      ),
+    [],
+  );
   return (
     <DashboardLayout
       currentPage="products"

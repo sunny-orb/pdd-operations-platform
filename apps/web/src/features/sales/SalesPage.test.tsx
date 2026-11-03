@@ -7,6 +7,7 @@ import type { SalesResult } from "./api/contracts";
 import { testMeta, testMetrics } from "./testFixtures";
 import { SalesPage } from "./SalesPage";
 import { syntheticResponse, testShops, syntheticAllShops } from "./testFixtures";
+import { _resetCacheForTesting } from "./api/queries";
 
 beforeEach(() => {
   window.matchMedia = vi.fn().mockImplementation(() => ({
@@ -32,6 +33,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  _resetCacheForTesting();
 });
 
 it("接口失败仍保留八卡及其他折叠，不创建无依据的推广异常", async () => {

@@ -1,8 +1,9 @@
+import { memo } from "react";
 import { Link } from "react-router-dom";
 import { Button, Popover } from "antd";
 import { sourceLabel, type DomainId } from "./model";
 /** 归并后保留各来源原始定位参数，重复地址只展示一次。 */
-export function SourceLinks({
+export const SourceLinks = memo(function SourceLinks({
   members,
 }: {
   members: readonly { domain?: DomainId; link: string }[];
@@ -26,4 +27,4 @@ export function SourceLinks({
   ) : (
     content
   );
-}
+});

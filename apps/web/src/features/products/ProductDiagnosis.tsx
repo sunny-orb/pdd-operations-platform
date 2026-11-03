@@ -1,8 +1,15 @@
+import { memo } from "react";
 import type { Board } from "./contracts";
 import { change, format } from "./format";
 
 /** 展示后端规则结论及同一响应的七卡值；指标切换只改变底部关注数值。 */
-export function ProductDiagnosis({ data, metric }: { data?: Board; metric: string }) {
+export const ProductDiagnosis = memo(function ProductDiagnosis({
+  data,
+  metric,
+}: {
+  data?: Board;
+  metric: string;
+}) {
   const diagnosis = data?.diagnosis;
   const selected = data?.metrics[metric];
   const revenue = data?.metrics.revenue;
@@ -46,4 +53,4 @@ export function ProductDiagnosis({ data, metric }: { data?: Board; metric: strin
       </div>
     </aside>
   );
-}
+});

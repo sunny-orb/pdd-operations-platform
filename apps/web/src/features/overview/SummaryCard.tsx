@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import { Card } from "antd";
 
 /** 四张经营摘要卡共用排版；数值和状态由中心传入，不在组件内计算指标。 */
-export function SummaryCard({
+export const SummaryCard = memo(function SummaryCard({
   label,
   value,
   unit,
@@ -30,4 +30,4 @@ export function SummaryCard({
       <small className="m6-summary-description">{description}</small>
     </Card>
   );
-}
+});

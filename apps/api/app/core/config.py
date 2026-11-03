@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     database_url: SecretStr = SecretStr("")
     cors_origins: list[str] = ["http://127.0.0.1:5173", "http://localhost:5173"]
-    db_pool_size: int = Field(default=3, ge=1, le=20)
-    db_max_overflow: int = Field(default=0, ge=0, le=10)
+    db_pool_size: int = Field(default=8, ge=1, le=20)
+    db_max_overflow: int = Field(default=4, ge=0, le=10)
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=30)
 
     @field_validator("database_url")

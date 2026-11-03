@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { Empty, Pagination, Spin } from "antd";
 import { scorePage, type ScoreCard } from "./contracts";
 import { useResource, type ProductsState } from "./data";
@@ -8,7 +8,13 @@ import { ScoreDialog } from "./ScoreDialog";
 import { formatSignal as format } from "./format";
 import type { Scope } from "./scope";
 
-export function Scores({ state, scope }: { state: ProductsState; scope: Scope }) {
+export const Scores = memo(function Scores({
+  state,
+  scope,
+}: {
+  state: ProductsState;
+  scope: Scope;
+}) {
   const queryScope = {
     ...scope,
     level: "新品",
@@ -134,7 +140,7 @@ export function Scores({ state, scope }: { state: ProductsState; scope: Scope })
       )}
     </section>
   );
-}
+});
 function ScoreTile({ item, open }: { item: ScoreCard; open: () => void }) {
   return (
     <article

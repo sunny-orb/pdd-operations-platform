@@ -3,7 +3,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
-import { useSalesData } from "./queries";
+import { useSalesData, _resetCacheForTesting } from "./queries";
 import { getSalesFilters, getSalesResult } from "./salesApi";
 import { testFilters, testMeta, testMetrics, testShops } from "../testFixtures";
 import { metricsSchema } from "./contracts";
@@ -12,6 +12,7 @@ vi.mock("./salesApi", () => ({ getSalesFilters: vi.fn(), getSalesResult: vi.fn()
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
+  _resetCacheForTesting();
 });
 it("渠道DTO保留来源支付日汇总状态，完整性仍由覆盖字段表达", () => {
   const basis = {

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { z } from "zod";
 import type { FiltersResponse } from "../api/contracts";
 import type { regionSchema } from "../api/details";
@@ -11,7 +12,7 @@ const fieldNames: Record<string, string> = {
 };
 
 /** 只展示当前查询的缺行/空字段，真实0不列异常；不在展示层重算经营指标。 */
-export function SalesRegionNotes({
+export const SalesRegionNotes = memo(function SalesRegionNotes({
   data,
   shops,
   source,
@@ -77,4 +78,4 @@ export function SalesRegionNotes({
       </SalesExplanation>
     </div>
   );
-}
+});

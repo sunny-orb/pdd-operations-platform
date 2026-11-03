@@ -153,12 +153,18 @@ class Repository:
         """仅经营查询加载事实；元信息、商品目录不经过整批事实反序列化。"""
         if self.mode == "product":
             return self.rows_for_windows(None)
+        _STORE_COLS = (
+            "id,dataset_version_id,source_row_key,shop_id,channel_code,"
+            "source_shop_id,source_shop_name,source_channel_label,"
+            "business_date,spend,attributed_revenue,net_attributed_revenue,"
+            "attributed_deals,impressions,clicks"
+        )
         ids = [v["id"] for k, v in self.versions.items() if k in STORE_CODES]
         rows = [
             dict(r)
             for r in self.c.execute(
                 sa.text(
-                    "SELECT * FROM public.shop_channel_promotion_daily "
+                    f"SELECT {_STORE_COLS} FROM public.shop_channel_promotion_daily "
                     "WHERE dataset_version_id=ANY(:ids) "
                     "ORDER BY source_row_key,id"
                 ),

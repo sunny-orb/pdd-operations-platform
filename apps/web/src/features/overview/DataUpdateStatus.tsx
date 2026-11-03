@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { DatabaseOutlined, ReloadOutlined, SyncOutlined } from "@ant-design/icons";
 import { Button, Empty, Modal, Table, Tabs, Tag } from "antd";
 import type { DomainState } from "./data";
@@ -7,7 +7,11 @@ import { updateRows, updateState } from "./updateStatus";
 import "./data-update-status.css";
 
 /** 状态骨架复用本地元信息；上游检查、同步命令未接入时保持禁用。 */
-export function DataUpdateStatus({ states }: { states: readonly DomainState[] }) {
+export const DataUpdateStatus = memo(function DataUpdateStatus({
+  states,
+}: {
+  states: readonly DomainState[];
+}) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState("sources");
   const rows = updateRows(states);
@@ -198,4 +202,4 @@ export function DataUpdateStatus({ states }: { states: readonly DomainState[] })
       </Modal>
     </>
   );
-}
+});

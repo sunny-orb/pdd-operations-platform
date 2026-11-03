@@ -1,5 +1,5 @@
 import { Button, DatePicker, Select } from "antd";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import type { PromotionState } from "./data";
@@ -7,7 +7,7 @@ import type { Scope } from "./state";
 import { FilterField } from "./FilterField";
 import { formatProductLevel } from "./format";
 
-export function Filters({ state }: { state: PromotionState }) {
+export const Filters = memo(function Filters({ state }: { state: PromotionState }) {
   const { scope, mode, change } = state;
   const data = state.options.data?.data;
   const product = mode === "product";
@@ -227,4 +227,4 @@ export function Filters({ state }: { state: PromotionState }) {
       )}
     </section>
   );
-}
+});

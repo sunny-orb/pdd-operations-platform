@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { HistoricalSupplements } from "../../shared/promotion/HistoricalSupplements";
 import { Tag } from "antd";
 import type { z } from "zod";
@@ -5,7 +6,7 @@ import { metadata } from "./contracts";
 import { localTime } from "./format";
 const text = (value: unknown, fallback = "未知") =>
   typeof value === "string" && value ? value : fallback;
-export function SourceState({
+export const SourceState = memo(function SourceState({
   data,
   version,
   supplements,
@@ -66,4 +67,4 @@ export function SourceState({
       </small>
     </details>
   );
-}
+});

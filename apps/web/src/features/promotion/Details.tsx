@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { Button, Select, Spin } from "antd";
 import type { Days } from "./contracts";
 import type { PromotionState } from "./data";
 import { formatValue } from "./format";
 
-export function Details({ state }: { state: PromotionState }) {
+export const Details = memo(function Details({ state }: { state: PromotionState }) {
   const product = state.mode === "product";
   const data = state.days.data?.data;
   const [progress, setProgress] = useState(0);
@@ -194,4 +194,4 @@ export function Details({ state }: { state: PromotionState }) {
       </p>
     </section>
   );
-}
+});

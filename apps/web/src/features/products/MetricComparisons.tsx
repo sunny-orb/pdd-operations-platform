@@ -1,10 +1,11 @@
+import { memo } from "react";
 import type { Board } from "./contracts";
 import { change } from "./format";
 
 type Comparison = Board["metrics"][string]["yoy_comparison"];
 
 /** 只展示后端期间增幅及空值原因，前端不重算经营结果。 */
-export function MetricComparison({
+export const MetricComparison = memo(function MetricComparison({
   comparison,
   period,
   rate,
@@ -20,10 +21,10 @@ export function MetricComparison({
       {rate == null ? (comparison?.message ?? "暂无比较结果") : change(rate)}
     </Tag>
   );
-}
+});
 
 /** 主卡沿线上简洁布局，实际日期和需要注意的范围放入折叠区。 */
-export function MetricComparisons({
+export const MetricComparisons = memo(function MetricComparisons({
   periods,
   metrics,
 }: {
@@ -72,4 +73,4 @@ export function MetricComparisons({
       </details>
     </div>
   );
-}
+});

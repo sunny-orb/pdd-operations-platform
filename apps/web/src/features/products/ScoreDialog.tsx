@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Button, Empty, Modal } from "antd";
 import { card, type ScoreCard } from "./contracts";
 import { useResource, type ProductsState } from "./data";
@@ -20,7 +21,7 @@ function signalTone(signal: Signal) {
   return signal.grade === "未达基础" ? "missed" : "met";
 }
 
-export function ScoreDialog({
+export const ScoreDialog = memo(function ScoreDialog({
   state,
   selected,
   close,
@@ -82,7 +83,7 @@ export function ScoreDialog({
       {item && <ScoreDetails item={item} />}
     </Modal>
   );
-}
+});
 
 function ScoreDetails({ item }: { item: ScoreCard }) {
   const counted = item.signals.filter((signal) => signal.points != null);

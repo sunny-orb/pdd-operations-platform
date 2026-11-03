@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { Button, Card, Checkbox, DatePicker, Table } from "antd";
 import dayjs from "dayjs";
 import {
@@ -44,7 +44,7 @@ function trendValue(point?: { state: string; score: string | null; raw_score: st
   if (point.state === "legacy_basis") return `${fixed(point.raw_score)}（旧口径）`;
   return fixed(point.score);
 }
-export function SalesRatings({
+export const SalesRatings = memo(function SalesRatings({
   filters,
   shop,
   onConflict,
@@ -337,4 +337,4 @@ export function SalesRatings({
       </div>
     </>
   );
-}
+});

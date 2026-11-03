@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Card } from "antd";
 import type { FiltersResponse, SalesMetrics, ShopItem } from "../api/contracts";
 import { count, fixed, money, percent } from "../format";
@@ -5,7 +6,7 @@ import { RefundDetails } from "./RefundDetails";
 import "./sales-kpis.css";
 
 /** 八卡仅格式化API指标；日期、适用渠道和退款解释共用本次筛选结果。 */
-export function SalesKpis({
+export const SalesKpis = memo(function SalesKpis({
   data,
   shops,
   shopId,
@@ -65,4 +66,4 @@ export function SalesKpis({
       ))}
     </div>
   );
-}
+});

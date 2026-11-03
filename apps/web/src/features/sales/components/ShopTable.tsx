@@ -1,8 +1,9 @@
+import { memo } from "react";
 import { Button, Table } from "antd";
 import type { ShopItem } from "../api/contracts";
 import { count, fixed, money, percent } from "../format";
 
-export function ShopTable({
+export const ShopTable = memo(function ShopTable({
   shops,
   selected,
   onSelect,
@@ -91,4 +92,4 @@ export function ShopTable({
       </div>
     </section>
   );
-}
+});

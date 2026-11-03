@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "antd";
 import { dayPage, type DayPage } from "./contracts";
 import { useDebounced, useResource, type ProductsState } from "./data";
@@ -21,7 +21,7 @@ const headings = [
 ];
 
 /** 独立商品日明细；仅同版本、同筛选的翻页/换容量保留旧页，失败可重试。 */
-export function Days({ state, scope }: { state: ProductsState; scope: Scope }) {
+export const Days = memo(function Days({ state, scope }: { state: ProductsState; scope: Scope }) {
   const keyword = useDebounced(scope.keyword);
   const result = useResource("days", dayPage, { ...scope, keyword }, state);
   const key = JSON.stringify([
@@ -209,4 +209,4 @@ export function Days({ state, scope }: { state: ProductsState; scope: Scope }) {
       </div>
     </section>
   );
-}
+});

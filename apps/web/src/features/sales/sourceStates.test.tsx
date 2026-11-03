@@ -104,7 +104,7 @@ it("产品逐格部分缺值及份额分母缺项明确标星，全空保留空�
     ).toBeTruthy(),
   );
   const cells = within(screen.getByRole("table", { name: "聚水潭产品地区数据" }))
-    .getAllByRole("row")[1]
+    .getByRole("row", { name: /浙江/ })
     .querySelectorAll("td");
   expect(cells[1].textContent).toContain("*");
   expect(cells[2].textContent).toContain("*");
@@ -153,8 +153,13 @@ it("各来源失败明确保留上次成功值及日期，退款也独立显示"
     </>,
   );
   await waitFor(() =>
-    expect(container.textContent?.match(/保留上次成功值/g)?.length).toBeGreaterThanOrEqual(5),
+    expect(
+      container.textContent?.match(/保留上次成功值|当前显示上次成功数据/g)?.length,
+    ).toBeGreaterThanOrEqual(5),
   );
+  expect(
+    screen.getByText(/商品推广：最近检查未成功，当前显示上次成功数据/).closest("details"),
+  ).toBeNull();
   expect(container.textContent).toContain("最近成功");
   expect(container.textContent).toContain("2026");
 });

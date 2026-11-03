@@ -1,9 +1,10 @@
-import { useState } from "react";
-import { Empty, Modal, Pagination, Table } from "antd";
-import { card, scorePage, type ScoreCard } from "./contracts";
+import { useLayoutEffect, useRef, useState } from "react";
+import { Empty, Pagination, Spin } from "antd";
+import { scorePage, type ScoreCard } from "./contracts";
 import { useResource, type ProductsState } from "./data";
 import { Filters } from "./Filters";
 import { State } from "./State";
+import { ScoreDialog } from "./ScoreDialog";
 import { formatSignal as format } from "./format";
 import type { Scope } from "./scope";
 
@@ -17,6 +18,12 @@ export function Scores({ state, scope }: { state: ProductsState; scope: Scope })
   const result = useResource("scores", scorePage, queryScope, state);
   const [selected, setSelected] = useState<string | null>(null);
   const data = result.data;
+  const turningPage = result.isPlaceholderData;
+  const grid = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    // 新页从卡片列表顶部开始，保持整个看板的滚动位置。
+    if (!turningPage && grid.current) grid.current.scrollTop = 0;
+  }, [scope.page, turningPage]);
   return (
     <section className="new-potential-section" id="product-scores">
       <div className="new-potential-heading">
@@ -25,17 +32,42 @@ export function Scores({ state, scope }: { state: ProductsState; scope: Scope })
           <h2>查看表现档位与放量建议</h2>
           <p>只纳入商品资料明确标记为“新品”的商品。评分区独立筛选，点击卡片查看十项指标。</p>
         </div>
-        <div className="potential-meta">
-          <b>{data?.total ?? "—"} 款新品</b>
-          <small>近7日截至 {data?.end ?? "—"}</small>
-          <small>当前资料归属 · 完整日未知</small>
-          {data?.status === "trial_active" && <small>新试行标准已启用 · 待验证</small>}
+        <div className="new-potential-meta" role="region" aria-label="新品评分概况">
+          <b>
+            {data?.total ?? "—"} / {data?.total_count ?? "—"} 款新品
+          </b>
+          <small>
+            已计算 {data?.scored_count ?? "—"} 款 · 评分截至：
+            {data?.end ?? "—"}
+          </small>
         </div>
       </div>
       <details className="potential-guide">
         <summary>评分与放量口径</summary>
         <p>
-          十项权重合计100分；基础、良好、优秀、突出分别计单项25%、50%、75%、100%。缺项不计零、不重分权重；缺少相容四档线时保留原值。收藏按7日新增累计、未扣取消，使用同定义试行参照；推广沿来源支付日汇总，参照效果与完整日待验证，暂不放量。75分不是爆款概率，不自动调整预算。
+          新品按当前商品资料认定；数量依次为筛选后的款数和全部新品款数。已计算数量按全部新品统计，包含部分计分，不代表十项都已计分。评分截至日是本次评分的统计结束日期。
+        </p>
+        <p>
+          <b>分数怎么看：</b>
+          十项权重合计100分；基础、良好、优秀、突出分别拿到本项权重的25%、50%、75%、100%。例如交易额占18分，达到优秀得13.5分。指标有效但没达到基础线，才记0分。
+        </p>
+        <p>
+          <b>部分得分怎么算：</b>
+          暂不能判断的指标不计分，也不把权重分给其他项。已计分60分、待验证16分，不能相加成76分，也不能折算成满分100分的成绩；十项都能判断后，才有完整评分。
+        </p>
+        <p>
+          <b>推广与增长：</b>
+          推广三项共16分，近7日曝光至少2,000且字段、分母有效才参与评分；曝光达标不等于自动得分。增长项需比较相邻两个完整7日，前7日至少5单且交易额达到历史基数线；基数合格但没有增长，增长项得0分。
+        </p>
+        <p>
+          <b>放量前先看：</b>
+          SOP要求完整评分至少75分，投产和支付转化达到良好、点击转化达到基础，且交易倍数大于1。再由运营确认库存、保本投产和近期转化；每次加预算10%～20%，观察3天，每天复评。投产跌破良好线或保本线、转化下降或缺货时，停止加量并回撤新增预算。75分不是75%的爆款概率，本页不自动调整预算。
+        </p>
+        <p>
+          <b>当前使用说明：</b>
+          {data?.status === "trial_active" &&
+            "当前仍显示此前试行结果，原版评分标准尚未接入；增长评分和正式放量判断暂未启用，不据现有试行分加预算。"}
+          收藏按7日新增累计、未扣取消；推广沿来源支付日汇总。来源完整日尚未确认，当前参照的效果仍待核对。
         </p>
       </details>
       <Filters name="score" scope={queryScope} state={state} />
@@ -57,19 +89,27 @@ export function Scores({ state, scope }: { state: ProductsState; scope: Scope })
               暂未评分 <b>{data.groups.unscored}</b>
             </span>
           </div>
-          <div className="new-potential-grid">
-            {data.items.map((item) => (
-              <ScoreTile
-                key={item.listing_id}
-                item={item}
-                open={() => setSelected(item.listing_id)}
-              />
-            ))}
-          </div>
+          <Spin spinning={turningPage} tip={`正在加载第 ${scope.page} 页…`}>
+            <div
+              className="new-potential-grid"
+              ref={grid}
+              aria-busy={turningPage}
+              inert={turningPage}
+            >
+              {data.items.map((item) => (
+                <ScoreTile
+                  key={item.listing_id}
+                  item={item}
+                  open={() => setSelected(item.listing_id)}
+                />
+              ))}
+            </div>
+          </Spin>
           {!data.items.length && (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前筛选没有新品记录" />
           )}
           <Pagination
+            disabled={turningPage}
             current={scope.page}
             pageSize={12}
             total={data.total}
@@ -124,7 +164,7 @@ function ScoreTile({ item, open }: { item: ScoreCard; open: () => void }) {
         <small>商品ID：{item.product_id}</small>
         <p className="tier-card-status pending">{item.decision_label}</p>
         <p>
-          已计分 {format(item.score)} / 100 · 待验证权重 {item.pending_weight} 分
+          已计分 {format(item.score)} 分 · 待验证权重 {item.pending_weight} 分
         </p>
         <p>
           近7日交易 {format(item.revenue, "currency")} · 访客 {format(item.visitors)} · 支付{" "}
@@ -143,164 +183,5 @@ function ScoreTile({ item, open }: { item: ScoreCard; open: () => void }) {
         </p>
       </div>
     </article>
-  );
-}
-function ScoreDialog({
-  state,
-  selected,
-  close,
-  scope,
-}: {
-  state: ProductsState;
-  selected: string;
-  close: () => void;
-  scope: Scope;
-}) {
-  const result = useResource(`scores/${selected}`, card.nullable(), scope, state);
-  const item = result.data;
-  const columns = [
-    {
-      title: "评分指标 / 历史参照",
-      key: "label",
-      width: 205,
-      render: (_: unknown, r: ScoreCard["signals"][number]) => (
-        <>
-          <b>{r.label}</b>
-          <small>{r.reference_group ?? "历史参照未接入"}</small>
-          <small>样本数 {r.sample_count ?? "—"}</small>
-        </>
-      ),
-    },
-    { title: "权重", dataIndex: "weight", width: 65, render: (v: number) => `${v}分` },
-    {
-      title: "近7日当前值",
-      key: "value",
-      width: 120,
-      render: (_: unknown, r: ScoreCard["signals"][number]) => format(r.value, r.type),
-    },
-    ...(
-      [
-        ["basic", "基础 ≥25%"],
-        ["good", "良好 ≥50%"],
-        ["excellent", "优秀 ≥75%"],
-        ["outstanding", "突出 ≥100%"],
-      ] as const
-    ).map(([key, title]) => ({
-      title,
-      key,
-      width: 100,
-      render: (_: unknown, r: ScoreCard["signals"][number]) => format(r[key], r.type),
-    })),
-    {
-      title: "当前档位",
-      dataIndex: "grade",
-      width: 90,
-      render: (v: string | null) => v ?? "待验证",
-    },
-    {
-      title: "实际得分",
-      dataIndex: "points",
-      width: 90,
-      render: (v: string | null) => (v == null ? "—" : `${format(v)}分`),
-    },
-    {
-      title: "状态与原因",
-      dataIndex: "reason",
-      width: 220,
-    },
-  ];
-  return (
-    <Modal
-      open
-      title="新品潜力四档评分 · 指标详情"
-      onCancel={close}
-      footer={null}
-      width={1180}
-      getContainer={false}
-      className="m1-score-dialog"
-      destroyOnHidden
-    >
-      <State
-        pending={!!state.version && result.isPending}
-        error={result.error}
-        retry={() => void result.refetch()}
-      />
-      {result.isSuccess && !item && (
-        <Empty description="当前版本没有该新品对象，请关闭后重新筛选" />
-      )}
-      {item && (
-        <>
-          <div className="potential-modal-heading">
-            <h2>{item.product_name ?? item.product_id}</h2>
-            <p>
-              {item.shop_name} · {item.category ?? "品类待匹配"} · {item.operator ?? "运营待匹配"} ·{" "}
-              {item.start} 至 {item.end}
-            </p>
-          </div>
-          <div className="tier-score-modal-summary">
-            <div>
-              <span>已计分得分</span>
-              <b>{format(item.score)} / 100</b>
-              <small>新试行标准 · 待验证</small>
-            </div>
-            <div>
-              <span>待验证权重</span>
-              <b>{item.pending_weight} 分</b>
-              <small>
-                {item.signals.filter((signal) => signal.points == null).length} 项指标待验证
-              </small>
-            </div>
-            <div>
-              <span>完整评分</span>
-              <b>{format(item.complete_score)}</b>
-              <small>缺项未齐，不生成完整总分</small>
-            </div>
-            <div>
-              <span>达标 / 有效指标</span>
-              <b>
-                {
-                  item.signals.filter(
-                    (signal) => signal.points != null && !/^0(?:\.0*)?$/.test(signal.points),
-                  ).length
-                }{" "}
-                / {item.signals.filter((signal) => signal.points != null).length}
-              </b>
-              <small>不以缺项作零分</small>
-            </div>
-          </div>
-          <div className="potential-detail-note">
-            <b>放量判断：{item.decision_label}</b>
-            <p>{item.reason}。当前原值仅代表已接收观察记录，完整日未知。</p>
-          </div>
-          <Table
-            rowKey="code"
-            size="small"
-            pagination={false}
-            scroll={{ x: 1070 }}
-            columns={columns}
-            dataSource={item.signals}
-          />
-          <div className="m1-score-notes">
-            <p>
-              <b>四档计分：</b>
-              基础/良好/优秀/突出分别获得本项权重的25%/50%/75%/100%；没有标准时不猜测分档。
-            </p>
-            <p>
-              <b>历史参照：</b>
-              新试行标准只用已接收的当期60日，训练窗口截止评分日前14日；每个店铺商品先取完整7日特征的中位数，同品类至少12款，否则全品类至少24款硬回退，不足则待验证。阶段与季节不猜测，标准不代表爆款概率。
-            </p>
-            <p>
-              <b>推广门槛：</b>
-              近7日曝光不足2,000时，广告三项不计分；推广成交沿用来源已归因的支付日汇总，不重算点击归因，源比率仅作参考。
-            </p>
-            <p>
-              <b>增长基数：</b>
-              近7日交易倍数需相邻两个7日观察齐全、前期订单不少于5且金额正基数，历史基数线还需相容标准。收藏缺日、缺值或缺同定义参照时不计分；累计新增不代表净增或跨日去重人数。
-            </p>
-            <p>75分是执行门槛，不代表爆款概率；本页不自动调整预算或生成处理进度。</p>
-          </div>
-        </>
-      )}
-    </Modal>
   );
 }

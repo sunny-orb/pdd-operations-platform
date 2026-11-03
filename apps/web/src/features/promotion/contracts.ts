@@ -1,3 +1,4 @@
+import { supplementSchema } from "../../shared/promotion/contracts";
 import { z } from "zod";
 export const metric = z.object({
   value: z.string().nullable(),
@@ -7,6 +8,17 @@ export const metric = z.object({
   type: z.string(),
   previous: z.string().nullable().optional(),
   change: z.string().nullable().optional(),
+  comparison_status: z
+    .enum([
+      "available",
+      "reference",
+      "no_current",
+      "no_previous",
+      "zero_base",
+      "invalid_base",
+      "history_short",
+    ])
+    .nullish(),
   business_date_basis: z.literal("payment_date").nullish(),
   attribution_state: z.literal("source_reported_payment_date").nullish(),
 });
@@ -26,6 +38,7 @@ export const metadata = z.object({
   attribution_state: z.literal("source_reported_payment_date").optional(),
   attribution_window_days: z.null().optional(),
   sources: z.array(source),
+  historical_supplements: z.array(supplementSchema).optional(),
 });
 const option = z.object({ value: z.string(), label: z.string() });
 const product = option.extend({
@@ -33,6 +46,11 @@ const product = option.extend({
   product_id: z.string(),
   shop_id: z.string(),
   product_name: z.string().nullable(),
+  category: z.string().nullable().optional(),
+  level: z.string().nullable().optional(),
+  level_details: z.array(z.string()).optional(),
+  operator: z.string().nullable().optional(),
+  search_names: z.array(z.string()).optional(),
 });
 export const options = z.object({
   shops: z.array(option),
@@ -50,6 +68,7 @@ export const coverage = z
     stale: z.boolean().optional(),
     observed_through: z.string().nullable().optional(),
     covered_days: z.number().optional(),
+    observed_days: z.number().optional(),
     missing_dates: z.array(z.string()).optional(),
     missing_truncated: z.boolean().optional(),
     missing_count: z.number().optional(),
@@ -58,7 +77,14 @@ export const coverage = z
     complete_through: z.string().nullable().optional(),
   })
   .catchall(z.unknown());
+const roiExclusions = z.object({
+  missing_spend_rows: z.number(),
+  missing_revenue_rows: z.number(),
+  revenue_without_spend: z.string(),
+});
 export const overview = z.object({
+  roi_exclusions: roiExclusions.nullish(),
+  historical_supplements: z.array(supplementSchema).optional(),
   metrics: metricMap,
   net: metricMap,
   series: z.array(
@@ -84,6 +110,8 @@ export const overview = z.object({
       roi: z.string().nullable(),
       spend: z.string().nullable(),
       revenue: z.string().nullable(),
+      roi_status: z.string(),
+      roi_exclusions: roiExclusions,
     }),
   ),
   coverage,
@@ -102,6 +130,7 @@ export const day = z.object({
   channel: z.string().optional(),
   channel_label: z.string().optional(),
   source: z.string().optional(),
+  source_label: z.enum(["数仓", "飞书", "人工确认"]).optional(),
   spend: z.string().nullable(),
   revenue: z.string().nullable(),
   net_revenue: z.string().nullable(),
@@ -144,6 +173,16 @@ const result = z.object({
   clues: z.array(clue),
   notes: z.array(z.string()),
   priority: z.string(),
+  evaluation_state: z.enum(["rated", "partial", "unrated"]),
+  rule_results: z.array(
+    z.object({
+      key: z.string(),
+      label: z.string(),
+      state: z.enum(["triggered", "clear", "not_applicable", "unavailable"]),
+      reason: z.string().nullable(),
+    }),
+  ),
+  exclusions: z.object({ current: roiExclusions, previous: roiExclusions }),
   current_days: z.number(),
   previous_days: z.number(),
   current_record_count: z.string(),
@@ -181,3 +220,11 @@ export const diagnosis = z.object({
 });
 export type DiagnosisData = z.infer<typeof diagnosis>;
 export type DiagnosisObject = z.infer<typeof object>;
+export const diagnosisObjects = z.object({
+  items: z.array(object),
+  total: z.number(),
+  group_total: z.number(),
+  page: z.number(),
+  size: z.number(),
+  total_pages: z.number(),
+});

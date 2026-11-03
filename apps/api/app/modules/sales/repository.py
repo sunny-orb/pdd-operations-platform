@@ -7,8 +7,10 @@ from contextlib import contextmanager
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.modules.promotion import metrics as promotion_metrics
+
 from .contracts import SalesError
-from .datasets import SPECS
+from .datasets import READ_SPECS
 
 
 @contextmanager
@@ -38,14 +40,15 @@ def read_snapshot(engine, version=None):
                         " public.dataset_versions v ON v.id=d.version_id WHERE "
                         "v.state='published' AND d.dataset_code = ANY(:codes)"
                     ),
-                    {"codes": ["shop_daily", *SPECS, "sales_targets"]},
+                    {"codes": ["shop_daily", *READ_SPECS, "sales_targets"]},
                 ).all()
             )
-            token = (
-                current["id"]
-                if len(versions) == 1
-                else hashlib.sha256(json.dumps(versions, sort_keys=True).encode()).hexdigest()
-            )
+            token = hashlib.sha256(
+                json.dumps(
+                    {"inputs": versions, "promotion_rule": promotion_metrics.definition_revision()},
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()
             if version is not None and token != version:
                 raise SalesError("DATA_VERSION_CHANGED", 409)
             facts = (

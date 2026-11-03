@@ -8,15 +8,18 @@ from fastapi import APIRouter, Depends, Query, Request
 from app.api.promotion_schemas import (
     DaysData,
     DiagnosisData,
+    DiagnosisObjectsData,
     Envelope,
     ErrorEnvelope,
     MetaData,
+    Metric,
     OptionsData,
     OverviewData,
+    SelectedOptionsData,
 )
 from app.modules.product_board.repository import wire
-from app.modules.promotion.diagnosis import diagnosis
-from app.modules.promotion.query import PromotionQuery, days, options, overview
+from app.modules.promotion.diagnosis import diagnosis, diagnosis_objects
+from app.modules.promotion.query import PromotionQuery, days, options, overview, selected_options
 from app.modules.promotion.repository import snapshot
 
 router = APIRouter(
@@ -30,6 +33,39 @@ def response(request, data, repo):
     return wire(
         dict(data=data, meta=dict(data_version=repo.token, request_id=request.state.request_id))
     )
+
+
+def display_overview(data):
+    """展示投影只去掉前端不消费的逐日覆盖及指标审计字段，保留完整计算结果。"""
+
+    def project(item, *fields):
+        return {
+            **item,
+            **{
+                field: {
+                    key: {
+                        name: value for name, value in metric.items() if name in Metric.model_fields
+                    }
+                    for key, metric in item[field].items()
+                }
+                for field in fields
+            },
+        }
+
+    return {
+        **project(data, "metrics", "net"),
+        "series": [
+            project(
+                {key: value for key, value in point.items() if key != "coverage"},
+                "metrics",
+                "previous",
+            )
+            for point in data["series"]
+        ],
+        "channel_summaries": [
+            project(item, "metrics", "net") for item in data["channel_summaries"]
+        ],
+    }
 
 
 def query(
@@ -75,6 +111,7 @@ def get_options(
     data_version: str = Query(min_length=1, max_length=100),
     selected_ids: Annotated[list[str] | None, Query(max_length=20)] = None,
     selected_listing_ids: Annotated[list[str] | None, Query(max_length=20)] = None,
+    catalog: bool = False,
 ):
     with snapshot(request.app.state.engine, q.mode, data_version) as repo:
         return response(
@@ -83,6 +120,7 @@ def get_options(
                 repo,
                 q,
                 tuple(dict.fromkeys([*(selected_ids or ()), *(selected_listing_ids or ())])),
+                catalog=catalog,
             ),
             repo,
         )
@@ -93,9 +131,22 @@ def get_overview(
     request: Request,
     q: Annotated[PromotionQuery, Depends(query)],
     data_version: str = Query(min_length=1, max_length=100),
+    detail: Literal["full", "display"] = "full",
 ):
     with snapshot(request.app.state.engine, q.mode, data_version) as repo:
-        return response(request, overview(repo, q), repo)
+        data = overview(repo, q)
+        return response(request, display_overview(data) if detail == "display" else data, repo)
+
+
+@router.get("/options/selected", response_model=Envelope[SelectedOptionsData])
+def get_selected_options(
+    request: Request,
+    data_version: str = Query(min_length=1, max_length=100),
+    selected_ids: Annotated[list[str] | None, Query(max_length=20)] = None,
+    mode: Literal["product"] = "product",
+):
+    with snapshot(request.app.state.engine, mode, data_version) as repo:
+        return response(request, selected_options(repo, tuple(selected_ids or ())), repo)
 
 
 @router.get("/days", response_model=Envelope[DaysData])
@@ -113,6 +164,21 @@ def get_diagnosis(
     request: Request,
     q: Annotated[PromotionQuery, Depends(query)],
     data_version: str = Query(min_length=1, max_length=100),
+    detail: Literal["full", "summary", "alerts"] = "full",
 ):
     with snapshot(request.app.state.engine, q.mode, data_version) as repo:
-        return response(request, diagnosis(repo, q), repo)
+        return response(request, diagnosis(repo, q, detail=detail), repo)
+
+
+@router.get("/diagnosis/objects", response_model=Envelope[DiagnosisObjectsData])
+def get_diagnosis_objects(
+    request: Request,
+    q: Annotated[PromotionQuery, Depends(query)],
+    data_version: str = Query(min_length=1, max_length=100),
+    group: Literal[
+        "products", "flagged_products", "focused_products", "shops", "categories"
+    ] = "products",
+    search: str = Query("", max_length=200),
+):
+    with snapshot(request.app.state.engine, q.mode, data_version) as repo:
+        return response(request, diagnosis_objects(repo, q, group, search), repo)

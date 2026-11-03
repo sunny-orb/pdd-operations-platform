@@ -139,3 +139,15 @@ def test_issue_comparison_requires_the_same_frozen_dictionary():
     ] = "限定词"
     assert not compatible(now, old, "quality")
     assert compatible(now, old, "size")
+
+
+def test_prepared_rules_freeze_report_dictionary_without_changing_classification():
+    from app.modules.aftersales.classification import PreparedParameters, classify, rule_parameters
+    source = rule_parameters()
+    prepared = PreparedParameters(source)
+    row = {'source_return_reason': '尺码偏大'}
+    expected = classify(row, source)
+    assert classify(row, prepared) == expected
+    source['dictionaries'].clear()
+    assert classify(row, prepared) == expected
+    assert classify(row, source) != expected

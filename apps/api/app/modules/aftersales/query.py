@@ -26,6 +26,8 @@ def roles(repo, q, report=None):
     if q.focus != "all" and not enabled(parameters, q.focus):
         return [None, None, None]
     blocks = [repo.rows(role, report) for role in ROLES]
+    if not q.category and not q.keyword and q.focus == "all":
+        return blocks
     chosen = {identity(row) for block in blocks for row in block or [] if matches(row, q)}
     if q.focus != "all":
         focused = {
@@ -171,13 +173,14 @@ def overview(repo, q):
     ]
     trend = []
     for r in list(reversed(history_reports(repo, q)[:8])):
+        returns = repo.source_summary("j1_returns", r)
         trend.append(
             dict(
                 id=r["id"],
                 label=public_report(r)["label"],
                 period_start=str(r["period_start"]),
                 period_end=str(r["period_end"]),
-                qty=report_totals(repo, r)["returned_qty"],
+                qty=returns["actual_returned_qty"] if returns else None,
             )
         )
 

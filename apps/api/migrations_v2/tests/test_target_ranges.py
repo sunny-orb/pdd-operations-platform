@@ -85,7 +85,7 @@ class TargetRangePostgreSQLTests(unittest.TestCase):
         cls.engine = sa.create_engine(local_url(cls.database), hide_parameters=True)
         cls.addClassCleanup(cls.cleanup_database)
         with cls.engine.begin() as c:
-            migrate(c)
+            command.upgrade(alembic_config(c), "20261028_08")
 
     @classmethod
     def cleanup_database(cls):

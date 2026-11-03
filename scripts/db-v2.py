@@ -25,7 +25,7 @@ from migrations_v2.local import local_url, migrate
 
 PRIVATE = ROOT / "var/database-v2"
 EVIDENCE = PRIVATE / "verified.json"
-CURRENT_HEAD = "20261028_08"
+CURRENT_HEAD = "20261031_09"
 WRITER_UPDATE_COLUMNS = {
     "dataset_versions": {
         "state",
@@ -115,6 +115,8 @@ def fingerprint() -> str:
         ROOT / "scripts/render-db-schema.py",
         ROOT / "scripts/upgrade-targets-local.py",
         ROOT / "docs/database-schema/target-ranges.sql",
+        ROOT / "scripts/upgrade-query-indexes-local.py",
+        ROOT / "docs/database-schema/query-performance.sql",
         Path(__file__).resolve(),
     ]
     digest = hashlib.sha256()
@@ -260,41 +262,47 @@ def schema_backup(expected_cluster: str, *, database: str = "pdd_operations") ->
         "exec",
         "pdd-operations-platform-postgres-1",
     ]
-    identity = (
-        subprocess.run(
+    try:
+        identity = (
+            subprocess.run(
+                [
+                    *prefix,
+                    "psql",
+                    "-X",
+                    "-U",
+                    "pdd_admin",
+                    "-d",
+                    database,
+                    "-At",
+                    "-c",
+                    "SELECT current_database() || '|' || system_identifier::text FROM pg_control_system()",
+                ],
+                capture_output=True,
+                check=True,
+                timeout=10,
+            )
+            .stdout.decode()
+            .strip()
+        )
+        if identity != database + "|" + expected_cluster:
+            raise RuntimeError("备份Docker集群与已核验的TCP迁移目标不一致")
+        return subprocess.run(
             [
                 *prefix,
-                "psql",
-                "-X",
+                "pg_dump",
                 "-U",
                 "pdd_admin",
                 "-d",
                 database,
-                "-At",
-                "-c",
-                "SELECT current_database() || '|' || system_identifier::text FROM pg_control_system()",
+                "--schema-only",
+                "--lock-wait-timeout=10s",
             ],
             capture_output=True,
             check=True,
-        )
-        .stdout.decode()
-        .strip()
-    )
-    if identity != database + "|" + expected_cluster:
-        raise RuntimeError("备份Docker集群与已核验的TCP迁移目标不一致")
-    return subprocess.run(
-        [
-            *prefix,
-            "pg_dump",
-            "-U",
-            "pdd_admin",
-            "-d",
-            database,
-            "--schema-only",
-        ],
-        capture_output=True,
-        check=True,
-    ).stdout
+            timeout=30,
+        ).stdout
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("本机结构备份进程超时，已中止后续迁移") from None
 
 
 def create(*, database: str = "pdd_operations") -> None:
@@ -305,7 +313,7 @@ def create(*, database: str = "pdd_operations") -> None:
     if ScriptDirectory.from_config(
         Config(str(ROOT / "apps/api/alembic-v2.ini"))
     ).get_heads() != [CURRENT_HEAD]:
-        raise RuntimeError("初始化仅验证至08，须先审查新的迁移head")
+        raise RuntimeError("初始化仅验证至09，须先审查新的迁移head")
     if database == "postgres":
         raise ValueError("管理库不是初始化目标")
     engine = sa.create_engine(
@@ -376,7 +384,7 @@ def create(*, database: str = "pdd_operations") -> None:
             json.dumps(result, ensure_ascii=False, indent=2),
         )
         print(
-            "本地08空结构已提交并由独立连接核对：31业务表/506字段/51FK，31表均0行；"
+            "本地09空结构已提交并由独立连接核对：31业务表/506字段/51FK，31表均0行；"
             "另有1张Alembic技术版本表；未导入数据或启动同步"
         )
     finally:
@@ -431,7 +439,7 @@ def inspect_empty(connection) -> dict:
 
 
 def inspect_permissions(connection) -> None:
-    """逐表/逐列检查08有效权限；允许列表仅取既有revision，不扩大写范围。"""
+    """逐表/逐列检查09有效权限；允许列表仅取既有revision，不扩大写范围。"""
     inspect_roles(connection)
     metadata = current_metadata()
     for role in ("pdd_app", "pdd_ingest"):

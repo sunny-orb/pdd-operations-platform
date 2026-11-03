@@ -12,6 +12,7 @@ from app.main import create_app
 from app.modules.sales.datasets import SPECS
 from app.modules.sales.normalization import normalize_shop_daily
 from app.modules.sales.source_normalization import normalize_source
+from app.modules.sales.source_policy import SHOPS
 from app.modules.sales.storage import ShopDailyStore
 
 pytest_plugins = ["sales_pg_support"]
@@ -94,8 +95,54 @@ def test_vector_refund_and_channels(sales_pg, tmp_path):
     assert d["refund_match"]["matched_sales"] == "100.00" and d["refund_match"]["matched_days"] == 1
     assert d["refund_match"]["excluded_sales"] == "0.00"
     assert d["promotion_spend"] == "12.00" and d["promotion_ctr"] == "0.054545454545"
-    assert d["promotion_roi"] is None and len(d["promotion_channels"]) == 2
+    assert d["promotion_roi"] == "7.500000000000" and len(d["promotion_channels"]) == 2
     assert len(r.json()["meta"]["input_versions"]) == 4
+
+
+def test_promotion_record_issues_follow_shop_date_and_keep_zero(sales_pg, tmp_path):
+    client = setup(sales_pg, tmp_path)
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_channel_product_promotion",
+        [
+            sample(
+                "shop_channel_product_promotion",
+                metrics={
+                    "总花费(元)": "0",
+                    "交易额(元)": None,
+                    "曝光量": "0",
+                    "点击量": "0",
+                },
+            )
+        ],
+    )
+    q = {**params(client), "shop_id": "spigf"}
+    data = client.get("/api/v1/sales/performance", params=q).json()["data"]
+    product, star = data["promotion_channels"]
+    assert product["record_issues"] == [
+        {
+            "shop_id": "spigf",
+            "date": "2026-10-26",
+            "kind": "null_fields",
+            "fields": ["attributed_revenue"],
+        },
+        {"shop_id": "spigf", "date": "2026-10-27", "kind": "missing_record", "fields": []},
+    ]
+    assert len(star["record_issues"]) == 2
+    assert data["promotion_spend"] == "0.00" and data["promotion_roi"] is None
+    one = client.get("/api/v1/sales/performance", params={**q, "date_to": "2026-10-26"}).json()[
+        "data"
+    ]
+    assert one["promotion_channels"][0]["record_issues"] == product["record_issues"][:1]
+    outdoor = client.get("/api/v1/sales/performance", params={**q, "shop_id": "spihw"}).json()[
+        "data"
+    ]
+    assert len(outdoor["promotion_channels"]) == 1
+    assert all(
+        x["shop_id"] == "spihw" and x["kind"] == "missing_record"
+        for x in outdoor["promotion_channels"][0]["record_issues"]
+    )
 
 
 def test_rating_latest_does_not_fall_back_and_breaks_old_scores(sales_pg, tmp_path):
@@ -123,6 +170,56 @@ def test_rating_latest_does_not_fall_back_and_breaks_old_scores(sales_pg, tmp_pa
     assert d["latest"][0]["score"] is None
     assert d["latest"][1]["score"] is None and d["latest"][1]["raw_score"] == "4.8"
     assert all(p["score"] is None for p in d["points"])
+
+
+def test_ratings_distinguish_null_missing_negative_zero_and_legacy(sales_pg, tmp_path):
+    """异常负分不冒充旧口径；缺行、空字段与真实零各自保留。"""
+    c = setup(sales_pg, tmp_path)
+    values = [
+        ("663599807", "0.9525"),
+        ("799193231", "0"),
+        ("191467219", None),
+        ("343339448", "-0.2"),
+        ("271470254", "4.8"),
+    ]
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_ratings",
+        [
+            sample(
+                "shop_ratings",
+                id=shop,
+                shop_id=shop,
+                shop_name=SHOPS[shop][1],
+                shop_rating_score=value,
+            )
+            for shop, value in values
+        ],
+    )
+    # 趋势窗口不含最新日，卡片仍保留全局最新日。
+    response = c.get(
+        "/api/v1/sales/ratings",
+        params={
+            **params(c),
+            "date_from": "2026-10-27",
+            "date_to": "2026-10-27",
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["latest_date"] == "2026-10-26" and data["points"] == []
+    cards = {p["shop_id"]: p for p in data["latest"]}
+    assert cards["spigf"]["score"] == "95.2500"
+    assert cards["spihw"]["score"] == "0" and cards["spihw"]["state"] == "observed"
+    assert cards["spifs"]["state"] == "field_null"
+    assert cards["spixb"]["state"] == "no_records"
+    assert cards["spiyj"]["state"] == "invalid_score"
+    assert cards["spiyj"]["raw_score"] == "-0.2" and cards["spiyj"]["score"] is None
+    assert cards["spitztx"]["state"] == "legacy_basis"
+    assert cards["spitztx"]["raw_score"] == "4.8" and cards["spitztx"]["score"] is None
+    points = c.get("/api/v1/sales/ratings", params=params(c)).json()["data"]["points"]
+    assert next(p for p in points if p["shop_id"] == "spiyj")["state"] == "invalid_score"
 
 
 def test_regions_null_zero_weighted_rates_and_product_keys(sales_pg, tmp_path):
@@ -274,6 +371,12 @@ def test_selected_products_can_be_found_beyond_first_page(sales_pg, tmp_path):
         "data"
     ]
     assert first["total"] == 220 and len(first["products"]) == 100
+    empty = c.get(
+        "/api/v1/sales/product-regions/filters", params={"data_version": v, "offset": 1000}
+    ).json()["data"]
+    assert empty["total"] == 220 and empty["products"] == []
+    assert empty["categories"] == first["categories"]
+
     remote = c.get(
         "/api/v1/sales/product-regions/filters", params={"data_version": v, "search": "0219"}
     ).json()["data"]
@@ -320,13 +423,69 @@ def test_no_refund_match_keeps_known_excluded_sales(sales_pg, tmp_path):
     assert d["refund_rate"] is None and d["refund_match"]["excluded_sales"] == "100.00"
 
 
+def test_coverage_separates_absent_null_and_zero_within_selected_dates(sales_pg, tmp_path):
+    c = setup(sales_pg, tmp_path)
+    p = {**params(c), "shop_id": "spigf", "date_from": "2026-10-25"}
+    d = c.get("/api/v1/sales/performance", params=p).json()["data"]
+    assert d["refund_coverage"] == dict(
+        state="not_connected", missing_record_dates=[], null_amount_dates=[]
+    )
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_refunds",
+        [
+            sample("shop_refunds", **{"统计退款金额": None}),
+            sample(
+                "shop_refunds",
+                record_id="zero",
+                **{"日期": "2026-10-25T00:00:00+08:00", "统计退款金额": "0"},
+            ),
+        ],
+    )
+    publish(
+        sales_pg,
+        tmp_path,
+        "shop_channel_product_promotion",
+        [
+            sample("shop_channel_product_promotion", id="earlier", dt="2026-10-25"),
+            sample("shop_channel_product_promotion", id="later", dt="2026-10-27"),
+        ],
+    )
+    p = {**p, "data_version": params(c)["data_version"]}
+    d = c.get("/api/v1/sales/performance", params=p).json()["data"]
+    assert d["refund_coverage"] == dict(
+        state="observed",
+        missing_record_dates=["2026-10-27"],
+        null_amount_dates=["2026-10-26"],
+    )
+    assert d["refund_match"]["missing_dates"] == ["2026-10-26"]
+    assert d["refund_rate"] is None and d["refund_match"]["excluded_sales"] == "100.00"
+    shops = c.get(
+        "/api/v1/sales/shops", params={k: v for k, v in p.items() if k != "shop_id"}
+    ).json()["data"]["items"]
+    official = next(s for s in shops if s["shop_id"] == "spigf")
+    assert official["refund_coverage"] == d["refund_coverage"]
+    for day in ("2026-10-25", "2026-10-26", "2026-10-27"):
+        one = c.get(
+            "/api/v1/sales/performance", params={**p, "date_from": day, "date_to": day}
+        ).json()["data"]
+        assert one["refund_coverage"]["null_amount_dates"] == ([day] if day == "2026-10-26" else [])
+        assert one["refund_coverage"]["missing_record_dates"] == (
+            [day] if day == "2026-10-27" else []
+        )
+        channel = one["promotion_channels"][0]
+        assert channel["latest_observed_date"] == (None if day == "2026-10-26" else day)
+        assert channel["source"]["observed_through"] == "2026-10-27"
+
+
 def test_single_star_channel_enables_partial_promotion(sales_pg, tmp_path):
     c = setup(sales_pg, tmp_path)
     publish(sales_pg, tmp_path, "shop_channel_star_shop", [sample("shop_channel_star_shop")])
     assert c.get("/api/v1/sales/filters").json()["data"]["capabilities"]["promotion"] is True
 
 
-def test_confirmed_channels_roi_uses_complete_same_shop_payment_day(sales_pg, tmp_path):
+def test_confirmed_channels_roi_keeps_existing_payment_days(sales_pg, tmp_path):
     c = setup(sales_pg, tmp_path)
     publish(
         sales_pg,
@@ -362,17 +521,16 @@ def test_confirmed_channels_roi_uses_complete_same_shop_payment_day(sales_pg, tm
     assert data["field_states"]["promotion_roi"] == "source_reference"
     assert all(c["business_date_basis"] == "payment_date" for c in data["promotion_channels"])
     assert all(
-        c["attribution_state"] == "source_reported_payment_date"
-        for c in data["promotion_channels"]
+        c["attribution_state"] == "source_reported_payment_date" for c in data["promotion_channels"]
     )
     partial = c.get("/api/v1/sales/performance", params={**q, "date_to": "2026-10-27"}).json()[
         "data"
     ]
-    assert partial["promotion_roi"] is None
-    assert partial["field_states"]["promotion_roi"] == "incomplete_channel_coverage"
+    assert partial["promotion_roi"] == "2.500000000000"
+    assert partial["field_states"]["promotion_roi"] == "observed_partial"
 
 
-def test_confirmed_channels_roi_rejects_missing_source_and_null_required_field(sales_pg, tmp_path):
+def test_confirmed_channels_roi_keeps_existing_channel_but_rejects_null_field(sales_pg, tmp_path):
     c = setup(sales_pg, tmp_path)
     publish(
         sales_pg,
@@ -382,8 +540,8 @@ def test_confirmed_channels_roi_rejects_missing_source_and_null_required_field(s
     )
     q = {**params(c), "shop_id": "spigf", "date_to": "2026-10-26"}
     missing = c.get("/api/v1/sales/performance", params=q).json()["data"]
-    assert missing["promotion_roi"] is None
-    assert missing["field_states"]["promotion_roi"] == "incomplete_channel_coverage"
+    assert missing["promotion_roi"] == "9.802941176471"
+    assert missing["field_states"]["promotion_roi"] == "observed_partial"
     publish(
         sales_pg,
         tmp_path,

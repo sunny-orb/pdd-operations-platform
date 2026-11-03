@@ -62,7 +62,7 @@ def build_steps(engine: Engine, paths: ProjectPaths, warehouse_password: Callabl
 
     def sales(code):
         reader = None
-        window = approved_window()
+        window = approved_window(code)
         try:
 
             def receive(hb):
@@ -136,12 +136,12 @@ def build_steps(engine: Engine, paths: ProjectPaths, warehouse_password: Callabl
 
         def receive(heartbeat):
             return FeishuTargetReader(root=paths.feishu_root, heartbeat=heartbeat).read_stable(
-                basis="base"
+                basis="original_gmv"
             )
 
         return asdict(
             SalesTargetStore(
-                engine, archive_root=paths.ingestion_root / "sales_targets", basis="base"
+                engine, archive_root=paths.ingestion_root / "sales_targets", basis="original_gmv"
             ).run(receive)
         )
 

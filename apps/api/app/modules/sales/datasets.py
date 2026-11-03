@@ -45,6 +45,8 @@ class DatasetSpec:
 
     @property
     def locator(self):
+        if self.source_system == "historical_evidence":
+            return "原版历史推广清单（飞书6条/原版停投声明5条）"
         return (
             "cubeappdata." + self.source_table
             if self.source_system == "warehouse"
@@ -143,3 +145,14 @@ PROMOTION_METRICS = {
     "曝光量": "impressions",
     "点击量": "clicks",
 }
+
+
+HISTORY_SPEC = DatasetSpec(
+    "shop_promotion_history",
+    "shop_channel_promotion_daily",
+    "promotion-supplements",
+    (),
+    channel="product_promotion",
+    source_system="historical_evidence",
+)
+READ_SPECS = {**SPECS, HISTORY_SPEC.code: HISTORY_SPEC}

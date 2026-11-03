@@ -1,0 +1,94 @@
+/* 保留线上贡献布局；进度条外观显式设置，避免随组件默认主题变化。 */
+.m3-sales-scope #shops .store-layout {
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: stretch;
+}
+
+.m3-sales-scope #shops .sales-rank button {
+  grid-template-columns: 30px 104px minmax(0, 1fr);
+  border-radius: 0;
+}
+
+.m3-sales-scope #shops .sales-rank button > div {
+  min-width: 0;
+}
+
+.m3-sales-scope #shops .sales-rank .ant-progress {
+  min-width: 0;
+  line-height: 1;
+}
+
+.m3-sales-scope #shops .sales-rank strong {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.m3-sales-scope #shops .sales-rank .rank {
+  background: #eef3f9;
+  color: #57708e;
+}
+
+.m3-sales-scope #shops .sales-rank .rank.first {
+  background: #fff0c8;
+  color: #a26800;
+}
+
+.m3-sales-scope #shops .sales-rank button:focus-visible {
+  outline: 2px solid var(--sales-blue);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.m3-sales-scope #shops .data-note {
+  display: block;
+}
+
+.m3-sales-scope #shops .data-note .contribution-period {
+  color: var(--sales-navy);
+  margin-bottom: 12px;
+}
+
+.m3-sales-scope #shops .data-note time {
+  white-space: nowrap;
+}
+
+.m3-sales-scope #shops .data-note p + p {
+  margin-top: 8px;
+}
+
+.m3-sales-scope #shops .data-note dl > div {
+  gap: 12px;
+}
+
+.m3-sales-scope #shops .data-note dt {
+  flex-shrink: 0;
+}
+
+.m3-sales-scope #shops .data-note dd {
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1000px) {
+  .m3-sales-scope #shops .store-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .m3-sales-scope #shops .sales-rank button {
+    grid-template-columns: 28px 88px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .m3-sales-scope #shops .sales-rank button {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .m3-sales-scope #shops .sales-rank button > div {
+    grid-column: 2;
+    width: 100%;
+  }
+}

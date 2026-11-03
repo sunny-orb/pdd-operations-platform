@@ -1,22 +1,94 @@
+import { useId, useState } from "react";
 import { Alert, Button, Empty, Select, Spin, Tag } from "antd";
 import { ReloadOutlined } from "@ant-design/icons";
 import { localTime, safeLink } from "./model";
-import { useWeather } from "./weather";
-/** 全国天气按真实发布日/修订展示；天气筛选不进入经营请求参数。 */
+import { useWeather, type WeatherDocument, type WeatherState } from "./weather";
+import { weatherTime } from "./weatherFormat";
+
+const blockStatus = (status: string) => (status === "boundary" ? "跨范围原文，待核边界" : "待核");
+
+/** 仅折叠来源长文，不截改正文或生成新的天气结论。 */
+function WeatherText({ title, detail }: { title: string; detail: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const id = useId();
+  const long = detail.length > 120;
+  return (
+    <>
+      <p id={id} className={long && !expanded ? "m6-weather-preview" : undefined}>
+        {detail || "未取得可核正文"}
+      </p>
+      {long && (
+        <Button
+          type="link"
+          className="m6-weather-expand"
+          aria-label={`${expanded ? "收起" : "展开"}${title}全文`}
+          aria-controls={id}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? "收起正文" : "展开全文"}
+        </Button>
+      )}
+    </>
+  );
+}
+
+function WeatherBlock({ title, value }: { title: string; value: WeatherDocument["today_rain"] }) {
+  return (
+    <article className="m6-weather-metric">
+      <span>
+        {title}
+        {value.status !== "parsed" && <Tag color="gold">{blockStatus(value.status)}</Tag>}
+      </span>
+      <strong>涉及地区：{value.regions.length ? value.regions.join("、") : "未识别"}</strong>
+      <WeatherText title={title} detail={value.detail} />
+    </article>
+  );
+}
+
+function WeatherRecords({ state }: { state: WeatherState }) {
+  const d = state.publication?.document;
+  return (
+    <details className="m6-weather-records" aria-label="天气来源与更新记录">
+      <summary>来源与更新记录</summary>
+      <div className="m6-weather-record-body">
+        <p>
+          发布日 {state.publication?.issue_date ?? "尚无发布"} · 修订{" "}
+          {state.publication?.revision_no ?? "—"}
+        </p>
+        <p>
+          最近成功：{localTime(state.meta?.last_success_at)} · 最近尝试：
+          {localTime(state.meta?.last_attempt_at)}（{state.meta?.last_attempt_status ?? "尚无记录"}
+          ）。
+        </p>
+        <p>未识别文本不能解释为无天气风险；历史发布中的当前官方预报链接不代表历史原图。</p>
+        {d?.note && <p>{d.note}</p>}
+        {d?.sources.map((source, i) => (
+          <section key={`${source.url}:${i}`}>
+            <b>
+              {source.name} · 实际发布 {weatherTime(source.issue_time)}
+            </b>
+            <p>{source.text}</p>
+          </section>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/** 全国天气只展示已有发布；折叠与日期格式化不改变来源、解析状态和查询范围。 */
 export function WeatherSection() {
   const state = useWeather();
   const d = state.publication?.document;
-  const blockStatus = (status: string) =>
-    ({ parsed: "已识别", unidentified: "待核", boundary: "跨范围原文，待核边界" })[status] ??
-    status;
-  const block = (title: string, value: NonNullable<typeof d>["today_rain"]) => (
-    <article className="m6-weather-metric">
-      <span>{title}</span>
-      <strong>涉及地区：{value.regions.length ? value.regions.join("、") : "未识别"}</strong>
-      <p>{value.detail || "未取得可核正文"}</p>
-      <Tag>{blockStatus(value.status)}</Tag>
-    </article>
-  );
+  const latest = state.options.find((p) => p.id === state.meta?.default_publication_id);
+  const notices = [
+    state.error,
+    state.meta?.status === "source_unavailable" ? "天气来源不可用" : null,
+    state.meta?.last_attempt_status === "failed"
+      ? `天气最近更新失败（原因：${state.meta.error_code ?? "未提供"}）`
+      : null,
+  ].filter(Boolean);
+  const futureRegions = [...new Set(d?.next_7_days.flatMap((p) => p.regions) ?? [])];
   return (
     <section className="m6-section m6-weather" id="weather">
       <div className="m6-section-title">
@@ -25,6 +97,7 @@ export function WeatherSection() {
           <h2>全国关键天气</h2>
         </div>
         <div className="m6-weather-control">
+          {state.meta?.status === "partial" && <Tag color="gold">天气部分字段待核</Tag>}
           <label htmlFor="weather-publication">查询日期</label>
           <Select
             id="weather-publication"
@@ -32,7 +105,7 @@ export function WeatherSection() {
             value={state.selection}
             onChange={state.select}
             options={[
-              { value: "latest", label: "跟随最新发布" },
+              { value: "latest", label: latest ? `${latest.issue_date}（最新）` : "跟随最新发布" },
               ...state.options.map((p) => ({
                 value: p.id,
                 label: `${p.issue_date} · 修订 ${p.revision_no}`,
@@ -41,34 +114,28 @@ export function WeatherSection() {
           />
           <Button
             aria-label="重试天气本地查询"
+            title="刷新本地天气"
             icon={<ReloadOutlined />}
             loading={state.refreshing}
             onClick={state.refresh}
           />
         </div>
       </div>
-      {state.error && (
+      {notices.length > 0 && (
         <Alert
           type="warning"
           showIcon
-          title={state.error}
-          description="天气来源独立；其余经营卡片可继续查看。"
-        />
-      )}
-      {state.meta && state.meta.status !== "ready" && (
-        <Alert
-          type="warning"
-          showIcon
-          title={state.meta.status === "partial" ? "天气部分字段待核" : "天气来源不可用"}
-          description="成功接收不代表解析齐备；未识别文本不能解释为无天气风险。"
-        />
-      )}
-      {state.meta?.last_attempt_status === "failed" && (
-        <Alert
-          type="warning"
-          showIcon
-          title="天气最近更新失败"
-          description={`保留已发布内容${state.publication ? `（${state.publication.issue_date} · 修订 ${state.publication.revision_no}）` : "，尚无可用发布"}；原因：${state.meta.error_code ?? "未提供"}。`}
+          title={
+            <>
+              <span>{notices.join("；")}</span>
+              {state.publication && (
+                <span>
+                  ；当前显示 {state.publication.issue_date} · 修订 {state.publication.revision_no}{" "}
+                  的发布内容
+                </span>
+              )}
+            </>
+          }
         />
       )}
       {state.loading && !d ? (
@@ -76,14 +143,11 @@ export function WeatherSection() {
           <Spin size="small" /> 正在读取天气发布归档…
         </div>
       ) : d ? (
-        <article className="m6-weather-card">
+        <article className="m6-weather-card" key={state.publication!.id}>
           <header>
             <div>
               <span className="m6-weather-kicker">{d.title}</span>
-              <h3>{d.issue_time} 发布</h3>
-              <small>
-                发布日 {state.publication?.issue_date} · 修订 {state.publication?.revision_no}
-              </small>
+              <h3>{weatherTime(d.issue_time)} 发布</h3>
             </div>
             {safeLink(d.forecast_url) && (
               <Button href={safeLink(d.forecast_url)} target="_blank" rel="noreferrer">
@@ -98,51 +162,60 @@ export function WeatherSection() {
             </span>
           </p>
           <div className="m6-weather-grid">
-            {block("今日降水", d.today_rain)}
-            {block("今日气温", d.today_temperature)}
+            <WeatherBlock title="今日降水" value={d.today_rain} />
+            <WeatherBlock title="今日气温" value={d.today_temperature} />
           </div>
           <div className="m6-weather-outlook">
             <b>未来 7 天天气</b>
             {d.next_7_days.length ? (
-              <ul>
-                {d.next_7_days.map((p, i) => (
-                  <li key={`${p.period}:${i}`}>
-                    <strong>{p.period}</strong> {p.regions.join("、")}
-                    <p>{p.detail}</p>
-                    <Tag>{blockStatus(p.status)}</Tag>
-                  </li>
-                ))}
-              </ul>
+              <details className="m6-weather-outlook-details" aria-label="未来7天天气">
+                <summary>
+                  <span>
+                    共 {d.next_7_days.length} 条预报过程 · 涉及地区：
+                    {futureRegions.length ? futureRegions.join("、") : "未识别"}
+                    {d.next_7_days.some((p) => p.status !== "parsed") && (
+                      <Tag color="gold">含待核时段</Tag>
+                    )}
+                  </span>
+                  <span className="m6-weather-disclosure-label">
+                    <span className="m6-weather-open-label">查看全部预报</span>
+                    <span className="m6-weather-close-label">收起预报</span>
+                  </span>
+                </summary>
+                <ul>
+                  {d.next_7_days.map((p, i) => (
+                    <li key={`${p.period}:${i}`}>
+                      <strong>{p.period}</strong> {p.regions.join("、")}
+                      <p>{p.detail}</p>
+                      {p.status !== "parsed" && <Tag color="gold">{blockStatus(p.status)}</Tag>}
+                    </li>
+                  ))}
+                </ul>
+              </details>
             ) : (
               <p>未取得可靠裁剪的过程文本，不能据此判定无风险。</p>
             )}
           </div>
           <footer>
-            {d.sources.map((s) => (
-              <div key={s.url}>
-                <b>
-                  {safeLink(s.url) ? (
-                    <a href={safeLink(s.url)} target="_blank" rel="noreferrer">
-                      {s.name} ↗
-                    </a>
-                  ) : (
-                    s.name
-                  )}
-                </b>
-                <span>实际发布：{s.issue_time}</span>
-                <details>
-                  <summary>查看来源原文</summary>
-                  <p>{s.text}</p>
-                </details>
-              </div>
+            {d.sources.map((source, i) => (
+              <span className="m6-weather-source" key={`${source.url}:${i}`}>
+                {safeLink(source.url) ? (
+                  <a href={safeLink(source.url)} target="_blank" rel="noreferrer">
+                    {source.name} ↗
+                  </a>
+                ) : (
+                  source.name
+                )}{" "}
+                {weatherTime(source.issue_time)}
+              </span>
             ))}
             {safeLink(d.reference_url) && (
               <a href={safeLink(d.reference_url)} target="_blank" rel="noreferrer">
                 全国天气日报表参考 ↗
               </a>
             )}
+            <WeatherRecords state={state} />
           </footer>
-          <p className="m6-note">{d.note}</p>
         </article>
       ) : (
         <Empty
@@ -150,11 +223,7 @@ export function WeatherSection() {
           description="暂无可核天气发布，保留查询和展示位置"
         />
       )}
-      <p className="m6-note">
-        最近成功：{localTime(state.meta?.last_success_at)} · 最近尝试：
-        {localTime(state.meta?.last_attempt_at)}（{state.meta?.last_attempt_status ?? "尚无记录"}
-        ）。历史发布不显示当前预报为历史原图。
-      </p>
+      {!d && state.meta && <WeatherRecords state={state} />}
     </section>
   );
 }

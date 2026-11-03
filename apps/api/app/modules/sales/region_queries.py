@@ -12,8 +12,8 @@ from .query import meta, number, ratio
 from .repository import read_snapshot
 from .source_policy import APPROVED_START, SHOPS, calendar_through
 
-PRODUCT_CTE = """WITH labeled AS (
- SELECT *, coalesce(nullif(btrim(source_product_category),''),'未分类') AS category,
+PRODUCT_CTE_TEMPLATE = """WITH labeled AS (
+ SELECT {columns}, coalesce(nullif(btrim(source_product_category),''),'未分类') AS category,
  CASE WHEN nullif(btrim(source_style_code),'') IS NOT NULL
  AND position('未设置' in source_style_code)=0 THEN 'style'
  WHEN nullif(btrim(source_product_code),'') IS NOT NULL
@@ -30,6 +30,9 @@ PRODUCT_CTE = """WITH labeled AS (
  AND regexp_replace(coalesce(source_product_category,''),'[[:space:]_－—-]','','g')
  NOT IN ('包材','儿童赠品','分类未设置')
 ) """
+PRODUCT_CTE = PRODUCT_CTE_TEMPLATE.format(columns="*")
+# 候选目录只需名称与派生身份，避免物化全部金额/时间/原始列。
+PRODUCT_OPTIONS_CTE = PRODUCT_CTE_TEMPLATE.format(columns="source_product_name")
 
 
 def validate_scope(q):
@@ -83,14 +86,6 @@ class RegionQueries:
                 offset=offset,
                 limit=limit,
             )
-            categories = list(
-                c.execute(
-                    sa.text(
-                        PRODUCT_CTE + "SELECT DISTINCT category FROM labeled ORDER BY category"
-                    ),
-                    params,
-                ).scalars()
-            )
             grouped = """SELECT category,kind,code,
  string_agg(DISTINCT source_product_name,' / ' ORDER BY source_product_name) AS names
             FROM labeled WHERE kind IS NOT NULL
@@ -100,15 +95,32 @@ class RegionQueries:
                 " SELECT * FROM candidates WHERE :search='' OR "
                 "position(lower(:search) in lower(coalesce(names,'') || ' ' || code))>0 "
             )
-            cte = PRODUCT_CTE + ", candidates AS (" + grouped + "), matches AS (" + matched + ") "
-            total = c.execute(sa.text(cte + "SELECT count(*) FROM matches"), params).scalar_one()
-            rows = c.execute(
-                sa.text(
-                    cte + "SELECT * FROM matches ORDER BY category,kind,code LIMIT :limit OFFSET "
-                    ":offset"
-                ),
-                params,
-            ).mappings()
+            cte = (
+                PRODUCT_OPTIONS_CTE
+                + ", candidates AS ("
+                + grouped
+                + "), matches AS ("
+                + matched
+                + ") "
+            )
+            # 分类目录、搜索总数和当前页共用一次原行归类/聚合；空页仍返回真实总数。
+            result = (
+                c.execute(
+                    sa.text(
+                        cte
+                        + """SELECT
+                    ARRAY(SELECT DISTINCT category FROM labeled ORDER BY category) categories,
+                    (SELECT count(*) FROM matches) total,
+                    COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY category,kind,code)
+                        FROM (SELECT * FROM matches ORDER BY category,kind,code
+                              LIMIT :limit OFFSET :offset) p), '[]'::jsonb) products"""
+                    ),
+                    params,
+                )
+                .mappings()
+                .one()
+            )
+            categories, total, rows = result["categories"], result["total"], result["products"]
             products = [
                 dict(
                     key=json.dumps(
@@ -154,6 +166,7 @@ class RegionQueries:
             items = []
             null_counts = {f: 0 for f in fields}
             missing = []
+            field_gaps = []
             if v:
                 params = dict(v=v, lo=q.date_from, hi=q.date_to, shop=q.shop_id, **selected)
                 if product:
@@ -224,15 +237,34 @@ class RegionQueries:
                     items.append(item)
                     for f in fields:
                         null_counts[f] += r[f + "_null"]
+                # 店铺日覆盖同时返回各字段空值条数，只作说明，不改变金额/比率集合。
+                coverage_sql = cte + f"SELECT DISTINCT shop_id,{day} AS day FROM {table}" + where
+                if not product:
+                    counts = ",".join(f"count(*) FILTER (WHERE {f} IS NULL) AS {f}" for f in fields)
+                    coverage_sql = (
+                        f"SELECT shop_id,{day} AS day,{counts} FROM {table}"
+                        + where
+                        + f" GROUP BY shop_id,{day} ORDER BY shop_id,{day}"
+                    )
                 observed = (
                     s["connection"]
                     .execute(
-                        sa.text(cte + f"SELECT DISTINCT shop_id,{day} AS day FROM {table}" + where),
+                        sa.text(coverage_sql),
                         params,
                     )
                     .mappings()
                     .all()
                 )
+                if not product:
+                    field_gaps = [
+                        dict(
+                            shop_id=r["shop_id"],
+                            date=r["day"].isoformat(),
+                            fields={f: r[f] for f in fields if r[f] > 0},
+                        )
+                        for r in observed
+                        if any(r[f] > 0 for f in fields)
+                    ]
                 observed = {(r["shop_id"], r["day"]) for r in observed}
                 identities = [q.shop_id] if q.shop_id else [r[0] for r in SHOPS.values()]
 
@@ -272,6 +304,7 @@ class RegionQueries:
                     region_count=len(items),
                     null_counts=null_counts,
                     missing_shop_days=missing,
+                    **({"field_gaps": field_gaps} if not product else {}),
                     source=info,
                 ),
                 meta=meta(s),

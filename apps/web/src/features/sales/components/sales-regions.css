@@ -1,0 +1,139 @@
+/* 店铺后台地区区块对齐线上；不影响聚水潭地区、评分日期或公共表格。 */
+.m3-sales-scope #regions .section-heading {
+  flex-wrap: wrap;
+}
+.m3-sales-scope #regions .section-heading > div {
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 0 auto;
+}
+.m3-sales-scope #regions .section-heading > p {
+  flex: 1 1 180px;
+}
+.m3-sales-scope #regions .performance-title-row {
+  flex-wrap: wrap;
+}
+.m3-sales-scope #regions .performance-title-row h2 {
+  font-weight: 400;
+  white-space: nowrap;
+}
+.m3-sales-scope #regions .shop-filter,
+.m3-sales-scope #regions .region-date-filter {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.m3-sales-scope #regions .shop-filter > span,
+.m3-sales-scope #regions .region-date-filter > span:first-child {
+  color: #1859af;
+  font-weight: 600;
+}
+.m3-sales-scope #regions .shop-filter .ant-select {
+  min-width: 80px;
+  width: 80px;
+}
+.m3-sales-scope #regions .shop-filter:focus-within {
+  border-color: #1768d9;
+}
+.m3-sales-scope #regions .region-date-filter {
+  flex-wrap: nowrap;
+  gap: 7px;
+  padding: 5px 8px;
+}
+.m3-sales-scope #regions .region-date-filter > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.m3-sales-scope #regions .region-date-filter .ant-picker {
+  width: 125px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.m3-sales-scope #regions .region-date-filter .ant-picker input {
+  width: 100%;
+  font: inherit;
+  font-weight: 600;
+}
+.m3-sales-scope
+  #regions
+  :is(.ant-select, .ant-select-selector, .ant-select-input, .ant-picker input) {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.m3-sales-scope #regions .region-date-filter .ant-picker:focus-within {
+  outline: 1px solid #1768d9;
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+.m3-sales-scope #regions .region-table {
+  max-height: none;
+  overflow: hidden;
+}
+.m3-sales-scope #regions .region-table .ant-table-body {
+  scrollbar-color: #abc4e4 #f4f7fb;
+  scrollbar-width: thin;
+}
+.m3-sales-scope #regions .region-table .ant-table.ant-table-small .ant-table-thead > tr > th {
+  position: static;
+  padding: 13px 16px;
+  line-height: 17px;
+  text-align: left;
+}
+.m3-sales-scope #regions .region-table .ant-table.ant-table-small .ant-table-tbody > tr > td {
+  padding: 13px 16px;
+  line-height: 18px;
+  text-align: left;
+}
+.m3-sales-scope #regions .region-table .ant-table-tbody > tr > td:first-child {
+  color: var(--sales-navy);
+}
+.m3-sales-scope #regions .region-table .ant-table-measure-row > td {
+  padding-block: 0 !important;
+  border: 0;
+}
+.m3-sales-scope #regions .region-sales i {
+  flex-shrink: 0;
+}
+@media (max-width: 1200px) {
+  .m3-sales-scope #regions .section-heading {
+    flex-wrap: wrap;
+  }
+  .m3-sales-scope #regions .section-heading > p {
+    flex-basis: 100%;
+    max-width: none;
+    text-align: left;
+  }
+}
+@media (max-width: 700px) {
+  .m3-sales-scope #regions .performance-title-row h2 {
+    white-space: normal;
+  }
+  .m3-sales-scope #regions .region-date-filter {
+    box-sizing: border-box;
+    width: 100%;
+    gap: 5px;
+  }
+  .m3-sales-scope #regions .region-date-filter > span {
+    min-width: 0;
+    gap: 5px;
+  }
+  .m3-sales-scope #regions .region-date-filter .ant-picker {
+    width: 112px;
+    max-width: 100%;
+  }
+}
+
+.m3-sales-scope #regions .region-notes {
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--sales-muted);
+  overflow-wrap: anywhere;
+}
+.m3-sales-scope #regions .region-data-notice {
+  margin: 0;
+  color: #795b23;
+}

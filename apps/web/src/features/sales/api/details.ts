@@ -23,7 +23,7 @@ export const targetsSchema = z.object({
     annual_ratio: numeric,
     gap: numeric,
     state: z.string(),
-    target_basis: z.enum(["base", "stretch"]).optional(),
+    target_basis: z.literal("original_gmv").optional(),
     target_basis_label: z.string().optional(),
     target_coverage: z
       .object({
@@ -89,6 +89,15 @@ export const regionSchema = z.object({
     region_count: z.number(),
     null_counts: z.record(z.string(), z.number()),
     missing_shop_days: z.array(z.string()),
+    field_gaps: z
+      .array(
+        z.object({
+          shop_id: z.string(),
+          date: z.string(),
+          fields: z.record(z.string(), z.number().int().nonnegative()),
+        }),
+      )
+      .optional(),
     source: sourceSchema,
   }),
   meta: metaSchema,

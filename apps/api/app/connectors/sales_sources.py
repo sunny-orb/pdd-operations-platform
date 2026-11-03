@@ -83,7 +83,7 @@ class SalesSourceReader:
         return rows
 
     def read_stable(self, code, window):
-        validate_read_window(window)
+        validate_read_window(window, code)
         spec = SPECS[code]
         if spec.source_system != "warehouse":
             raise SalesError("SOURCE_READER_MISMATCH")

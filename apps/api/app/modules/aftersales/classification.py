@@ -2,6 +2,8 @@
 
 from decimal import Decimal, localcontext
 
+from .rowset import record_count
+
 EVIDENCE = "docs/source-evidence.md#m5-live-sources-20261028"
 SIZE_LABELS = {
     "larger": "尺码偏大",
@@ -179,6 +181,17 @@ def rule_parameters(*, targets_available=False):
     )
 
 
+class PreparedParameters(dict):
+    """一个报告读取快照内的规则副本；词典校验只做一次，不跨请求共享。"""
+
+    def __init__(self, parameters):
+        from copy import deepcopy
+
+        raw = deepcopy(parameters)
+        super().__init__(raw)
+        self.dictionaries = {code: dictionary(raw, code) for code in DICTIONARIES}
+
+
 def branch_enabled(parameters, code):
     if not isinstance(parameters, dict):
         return False
@@ -194,6 +207,8 @@ def branch_enabled(parameters, code):
 
 def dictionary(parameters, code):
     """只启用报告包中已验且字段封闭的词典；旧空包或不完整包不补当前默认值。"""
+    if isinstance(parameters, PreparedParameters):
+        return parameters.dictionaries.get(code)
     if not isinstance(parameters, dict):
         return None
     candidates = [d for d in parameters.get("dictionaries", []) if d.get("dictionary_code") == code]
@@ -311,15 +326,15 @@ def observations(rows, parameters):
     missing, conflicts, text_rows = 0, 0, 0
     for row, result in classify_rows(rows or [], parameters):
         if result["has_text"]:
-            text_rows += 1
+            text_rows += row.get("_record_count", 1)
         else:
-            missing += 1
+            missing += row.get("_record_count", 1)
         if result["size"]:
             size_rows.append(row)
             code = result["size"]
             if code == "conflict":
                 code = "unspecified"
-                conflicts += 1
+                conflicts += row.get("_record_count", 1)
             sizes[code].append(row)
         if result["quality"]:
             quality_rows.append(row)
@@ -351,7 +366,7 @@ def observations(rows, parameters):
         ],
         note=(
             "已接原原因文本识别的观察量，有限词典不代表完整语义；"
-            f"未填写原因{missing}/{len(rows or [])}行，当前无已核辅助备注，覆盖不足不表示无问题。"
+            f"未填写原因{missing}/{record_count(rows)}行，当前无已核辅助备注，覆盖不足不表示无问题。"
             "质量任一标签命中则每原行Q只计一次，细标签可重叠、合计不是质量总量；"
             f"尺码方向冲突{conflicts}行归未说明，份额以当前范围全部实退Q为分母。"
             if size_enabled or quality_enabled

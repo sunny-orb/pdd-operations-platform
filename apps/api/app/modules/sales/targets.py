@@ -16,19 +16,17 @@ from .normalization import canonical as raw_canonical
 from .source_policy import APPROVED_START, FISCAL_END, SHOPS
 from .storage import ShopDailyStore
 
-TARGET_BASE = "G1dNbVRapaTGlwsL9QbcNKBmnSd"
-TARGET_TABLE = "tblA7OYXSZJ2G5Wq"
+TARGET_BASE = "XGzTbd9xJaASV3soYnycMmf0nY3"
+TARGET_TABLE = "tblwEjKpt1k51M3j"
 TARGET_URL = f"https://kocotree.feishu.cn/base/{TARGET_BASE}?table={TARGET_TABLE}"
 TARGET_FIELDS = {
-    "fldTUdWNDg": ("渠道", "select"),
-    "fldR8oVi9y": ("年份", "select"),
-    "fldzk8T1b8": ("月份", "select"),
-    "fldXQ3SJ4o": ("GMV基础", "number"),
-    "fldm8ydecS": ("GMV冲刺", "number"),
-    "fldO8ecVcc": ("记录名称", "text"),
+    "fldGdr3oOJ": ("平台", "text"),
+    "fld5tezqp3": ("年份", "text"),
+    "fldnBczHp9": ("月份", "text"),
+    "fldZq41Hnj": ("gmv目标", "number"),
 }
-TARGET_REVISION = "m3-channel-gmv-targets-v1"
-BASIS = {"base": ("GMV基础", "基础目标"), "stretch": ("GMV冲刺", "冲刺目标")}
+TARGET_REVISION = "m3-original-gmv-targets-v2"
+BASIS = {"original_gmv": ("gmv目标", "原版 GMV 目标")}
 MEMBERS = tuple(value[0] for value in SHOPS.values())
 
 
@@ -54,13 +52,13 @@ def target_window():
 
 
 def _selection(value):
-    if not isinstance(value, list) or len(value) != 1 or not isinstance(value[0], str):
+    if not isinstance(value, str) or not value or value != value.strip():
         raise SalesError("TARGET_LABEL_AMBIGUOUS")
-    return value[0]
+    return value
 
 
-def normalize_targets(rows, *, basis="base", source_metadata=None):
-    """输入必要六字段/真实record_id；输出财年内唯一月目标（元），不分摊到店。"""
+def normalize_targets(rows, *, basis="original_gmv", source_metadata=None):
+    """输入原版四字段/真实record_id；输出财年内唯一月目标（元），不分摊到店。"""
     if basis not in BASIS:
         raise SalesError("INVALID_TARGET_BASIS")
     raw, output, seen, months = [], [], set(), set()
@@ -77,7 +75,7 @@ def normalize_targets(rows, *, basis="base", source_metadata=None):
             if not isinstance(key, str) or not key.strip() or key in seen:
                 raise SalesError("TARGET_SOURCE_ID_INVALID")
             seen.add(key)
-            if _selection(original["渠道"]) != "拼多多":
+            if _selection(original["平台"]) != "拼多多":
                 raise SalesError("TARGET_CHANNEL_NOT_APPROVED")
             year, month = _selection(original["年份"]), _selection(original["月份"])
             if not re.fullmatch(r"\d{4}年", year) or not re.fullmatch(r"(?:[1-9]|1[0-2])月", month):
@@ -86,15 +84,13 @@ def normalize_targets(rows, *, basis="base", source_metadata=None):
             if start in months:
                 raise SalesError("TARGET_MONTH_CONFLICT")
             months.add(start)
-            if start == date(2026, 1, 1):
-                continue
             if not APPROVED_START <= start <= FISCAL_END:
-                raise SalesError("TARGET_PERIOD_NOT_APPROVED")
+                continue
             try:
                 value = original[selected]
                 if isinstance(value, bool) or value is None:
                     raise ValueError()
-                amount = Decimal(str(value)) * 10000
+                amount = Decimal(str(value))
                 if (
                     not amount.is_finite()
                     or amount < 0
@@ -117,7 +113,7 @@ def normalize_targets(rows, *, basis="base", source_metadata=None):
                     period_status="confirmed",
                     target_amount=amount,
                     scope_status="complete",
-                    evidence_note=f"新正式目标表；{selected}万元×10000转元；六店范围沿原型/SHOPS，不拆分渠道目标",
+                    evidence_note=f"原版目标表；{selected}原值单位元；六店范围沿原型/SHOPS，不拆分渠道目标",
                 )
             )
     if not output:
@@ -144,8 +140,8 @@ def _producer():
 class SalesTargetStore(ShopDailyStore):
     """复用既有任务锁/租约/失败恢复；短事务只写目标、成员及发布支撑表。"""
 
-    def __init__(self, engine, *, archive_root, basis="base"):
-        if basis != "base":
+    def __init__(self, engine, *, archive_root, basis="original_gmv"):
+        if basis != "original_gmv":
             raise SalesError("TARGET_BASIS_NOT_APPROVED")
         self.engine, self.archive_root, self.basis = engine, Path(archive_root), basis
         self.code, self.approved = "sales_targets", target_window()
@@ -199,10 +195,13 @@ class SalesTargetStore(ShopDailyStore):
                 fields=TARGET_FIELDS,
                 metadata=candidate.source_metadata,
                 member_mapping=SHOPS,
-                units="来源万元；规范人民币元",
+                units="来源及规范均为人民币元",
                 fiscal_start=APPROVED_START,
                 fiscal_end=FISCAL_END,
-                excluded_period="2026-01",
+                excluded_periods=sorted(
+                    {f"{r['年份']}/{r['月份']}" for r in candidate.raw_rows}
+                    - {r["source_period_label"] for r in candidate.rows}
+                ),
                 fingerprint=candidate.fingerprint,
                 producer_revision=self.loaded_producer,
                 input_sha256=hashlib.sha256(raw).hexdigest(),
@@ -353,8 +352,8 @@ class SalesTargetStore(ShopDailyStore):
         return PublishResult(run_id, version, bool(reused), "succeeded")
 
 
-def run_sales_targets(engine, archive_root, basis="base"):
-    """项目编排回调；已登记任务后才创建只读reader，不读取旧目标源。"""
+def run_sales_targets(engine, archive_root, basis="original_gmv"):
+    """项目编排回调；已登记任务后才创建只读reader，只读取已批准原版目标源。"""
 
     def receive(heartbeat):
         from app.connectors.sales_targets import FeishuTargetReader
@@ -365,11 +364,11 @@ def run_sales_targets(engine, archive_root, basis="base"):
     return SalesTargetStore(engine, archive_root=archive_root, basis=basis).run(receive)
 
 
-def query_targets(snapshot, start, cutoff, basis="base"):
+def query_targets(snapshot, start, cutoff, basis="original_gmv"):
     """固定RR版本；目标金额只取一次，按目标固定成员汇总数仓原值。"""
     from .query import number, ratio, total
 
-    if basis != "base":
+    if basis != "original_gmv":
         raise SalesError("TARGET_BASIS_NOT_APPROVED")
     c, version = snapshot["connection"], snapshot["versions"].get("sales_targets")
     target_rows, members = [], {}
@@ -483,7 +482,7 @@ def query_targets(snapshot, start, cutoff, basis="base"):
         else "source_unavailable"
     )
     note = "目标最近更新失败，保留上次成功目标。" if source_state == "failed_retained" else ""
-    note += "基础目标按万元精确转元，固定六店渠道范围；完成额为数仓原值，不重复扣退款或做单。"
+    note += "原版 GMV 目标按元读取，固定六店渠道范围；完成额为数仓原值，不重复扣退款或做单。"
     if not version:
         note += "目标尚未接收，目标/达成率/缺口暂不可用。"
     elif missing_months:
@@ -519,7 +518,7 @@ def query_targets(snapshot, start, cutoff, basis="base"):
             state=source_state,
             url=TARGET_URL,
             version=version,
-            field_id="fldXQ3SJ4o",
+            field_id="fldZq41Hnj",
             last_success_at=success.isoformat() if success else None,
             last_attempt_status=attempt["status"] if attempt else None,
             last_attempt_at=(

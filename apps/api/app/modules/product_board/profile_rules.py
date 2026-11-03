@@ -74,3 +74,37 @@ def resolve_product_name(names: Iterable[str | None]) -> str | None:
         base = next(iter(bases))
         return base if len(base) >= 2 else None
     return None
+
+
+def resolve_profile_fields(candidates: dict[str, list[str]]) -> dict:
+    """收敛一个完整店铺商品链接的多规格资料；类别/等级集合不拆分经营事实。"""
+    item = dict(candidates={}, field_status={}, resolution_method={})
+    for name, raw in candidates.items():
+        choices = sorted({v.strip() for v in raw if v and v.strip()})
+        value = choices[0] if len(choices) == 1 else None
+        status = "matched" if value is not None else "conflict" if choices else "missing"
+        method = "unique" if value is not None else "unresolved"
+        if len(choices) > 1:
+            if name == "product_name":
+                value = resolve_product_name(choices)
+                status = "matched" if value else "multiple"
+                method = "common_variant_base" if value else "platform_name_fallback"
+            elif name == "category":
+                value, status, method = "多品类组合", "combined", "multi_category_link"
+            elif name == "level":
+                value, status, method = "/".join(choices) + "混合", "multiple", "level_set"
+        item[name] = value
+        item["candidates"][name] = choices
+        item["field_status"][name] = status
+        item["resolution_method"][name] = method
+    levels = item["candidates"].get("level", [])
+    # A/B等共同允许评风险；混含清仓/未匹配不替业务猜整链接资格。
+    item["risk_eligible"] = bool(levels) and all(v not in ("清仓", "未匹配") for v in levels)
+    return item
+
+
+def matches_keyword(item: dict, keyword: str) -> bool:
+    """显示名、完整商品ID或任一规格原名命中均选链接一次，不展开别名行。"""
+    names = item.get("candidates", {}).get("product_name", [])
+    text = " ".join((item.get("product_id", ""), item.get("product_name") or "", *names))
+    return not keyword or keyword.casefold() in text.casefold()

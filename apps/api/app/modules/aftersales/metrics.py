@@ -4,6 +4,7 @@ from decimal import Decimal, localcontext
 
 from .classification import observations
 from .repository import IDENTITY_FIELDS
+from .rowset import record_count
 
 
 def total(rows, field):
@@ -27,14 +28,19 @@ def ratio(a, b):
 
 
 def summarize(returns, shipped, cancelled, parameters=None):
+    result = numeric_summary(returns, shipped, cancelled)
+    observed = observations(returns, parameters)
+    result.update(size_qty=observed["size_qty"], quality_qty=observed["quality_qty"])
+    return result
+
+
+def numeric_summary(returns, shipped, cancelled):
+    """三个独立角色→数量/金额/比率；按需另算词典，分组规模排序不重复分类。"""
     q = total(returns, "actual_returned_qty")
     a = total(returns, "actual_inbound_amount")
     s = total(shipped, "sales_amount")
     p = total(cancelled, "sales_amount")
-    result = from_values(q, a, s, p, str(len(returns)) if returns is not None else None)
-    observed = observations(returns, parameters)
-    result.update(size_qty=observed["size_qty"], quality_qty=observed["quality_qty"])
-    return result
+    return from_values(q, a, s, p, str(record_count(returns)) if returns is not None else None)
 
 
 def from_values(q, a, s, p, records):
@@ -95,6 +101,11 @@ def groups(roles, level="style", parameters=None):
             found.setdefault(key, []).append(r)
         by_role.append(found)
     keys = set().union(*(set(g) for g in by_role))
+    missing_sales_category = (
+        {i for i in (1, 2) if any(not r.get("source_product_category") for r in roles[i] or [])}
+        if level == "category"
+        else set()
+    )
     result = []
     for key in sorted(keys, key=str):
         block = [
@@ -103,9 +114,8 @@ def groups(roles, level="style", parameters=None):
         exemplar = next(r[0] for r in block if r)
         # 分类缺失的销售组不能被静默抛除后宣称某分类分母完整。
         if level == "category":
-            for i in (1, 2):
-                if any(not r.get("source_product_category") for r in roles[i] or []):
-                    block[i] = None
+            for i in missing_sales_category:
+                block[i] = None
         elif not complete_key(exemplar):
             block[1] = block[2] = None
         result.append(
@@ -113,7 +123,7 @@ def groups(roles, level="style", parameters=None):
                 key=key,
                 example=exemplar,
                 roles=block,
-                metrics=summarize(*block, parameters=parameters),
+                metrics=numeric_summary(*block),
             )
         )
     return result

@@ -1,3 +1,4 @@
+import { HistoricalSupplements } from "../../shared/promotion/HistoricalSupplements";
 import { Tag } from "antd";
 import type { z } from "zod";
 import { metadata } from "./contracts";
@@ -7,9 +8,11 @@ const text = (value: unknown, fallback = "未知") =>
 export function SourceState({
   data,
   version,
+  supplements,
 }: {
   data: z.infer<typeof metadata> | undefined;
   version: string;
+  supplements?: z.infer<typeof metadata>["historical_supplements"];
 }) {
   return (
     <details className="m2-source-state">
@@ -51,6 +54,12 @@ export function SourceState({
         })}
       </ul>
       {!data?.sources.length && <p>暂无可用来源元信息</p>}
+      {data?.mode === "store" &&
+        (supplements ? (
+          <HistoricalSupplements rows={supplements} />
+        ) : (
+          <p>当前筛选尚无可用补齐状态，请检查日期范围或等待加载。</p>
+        ))}
       <small>
         查询版本 {version || "尚未接收"}
         ；页面刷新仅重读本地已发布结果。各来源分别报告观察日，不将最慢来源的截止日当作全页截止。

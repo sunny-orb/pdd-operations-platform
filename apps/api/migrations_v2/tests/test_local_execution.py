@@ -59,6 +59,43 @@ class LocalExecutionTests(unittest.TestCase):
             self.assertTrue(command[command.index("--host") + 1].startswith("unix://"))
             self.assertNotIn("pg_dump", command)
 
+    def test_backup_bounds_both_processes_and_database_lock_wait(self):
+        runner = self.runner()
+        with patch.object(
+            runner.subprocess,
+            "run",
+            side_effect=[
+                subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=b"pdd_operations|cluster\n"
+                ),
+                subprocess.CompletedProcess(args=[], returncode=0, stdout=b"synthetic schema"),
+            ],
+        ) as run:
+            self.assertEqual(runner.schema_backup("cluster"), b"synthetic schema")
+        self.assertEqual([call.kwargs.get("timeout") for call in run.call_args_list], [10, 30])
+        self.assertIn("--lock-wait-timeout=10s", run.call_args_list[1].args[0])
+
+    def test_backup_timeout_is_safe_and_does_not_start_next_process(self):
+        runner = self.runner()
+        for phase in ("identity", "dump"):
+            results = (
+                []
+                if phase == "identity"
+                else [
+                    subprocess.CompletedProcess(
+                        args=[], returncode=0, stdout=b"pdd_operations|cluster\n"
+                    )
+                ]
+            )
+            results.append(subprocess.TimeoutExpired("synthetic process", 0.01))
+            with (
+                self.subTest(phase=phase),
+                patch.object(runner.subprocess, "run", side_effect=results) as run,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "备份.*超时"):
+                    runner.schema_backup("cluster")
+                self.assertEqual(run.call_count, 1 if phase == "identity" else 2)
+
     def test_unapproved_database_is_rejected_before_reading_credentials(self):
         with patch.object(Path, "read_text", side_effect=AssertionError("不得读取凭据")):
             for name in (

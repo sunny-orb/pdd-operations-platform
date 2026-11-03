@@ -141,7 +141,7 @@ it("各来源接入后原位显示退款推广评分和地区，地区筛选独�
       <SalesPage />
     </MemoryRouter>,
   );
-  await waitFor(() => expect(screen.getByText("98.76")).toBeTruthy());
+  await waitFor(() => expect(screen.getByText("98.76 分")).toBeTruthy());
   expect(screen.getByTestId("sales-kpis").textContent).toContain("¥1,234");
   expect(screen.getByTestId("sales-kpis").textContent).toContain("20.00%");
   await waitFor(() => expect(screen.getByText("¥321")).toBeTruthy());
@@ -149,5 +149,9 @@ it("各来源接入后原位显示退款推广评分和地区，地区筛选独�
   fireEvent.change(screen.getByLabelText("查找产品名称或编码"), { target: { value: "遥远款号" } });
   await waitFor(() => expect(calls.some((p) => p.includes("search=%E9%81%A5"))).toBe(true));
   expect(calls.filter((p) => p.includes("/performance"))).toHaveLength(before);
-  expect(document.querySelectorAll("details")).toHaveLength(4);
+  expect(document.querySelectorAll("details:not(.target-details)")).toHaveLength(6);
+  expect(screen.getByText("查看地区交易明细与口径").closest("details")!.open).toBe(false);
+  expect(screen.getByText("查看统计口径与历史补充").closest("details")!.open).toBe(false);
+  expect(screen.queryByLabelText("推广数据提示")).toBeNull();
+  expect(document.querySelector("#targets .target-details")?.hasAttribute("open")).toBe(false);
 });

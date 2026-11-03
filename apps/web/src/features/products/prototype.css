@@ -110,8 +110,9 @@
   gap: 10px;
   border-radius: 8px;
 }
-.m1-products-scope .filters input,
-.m1-products-scope .filters select {
+/* 原生控件样式只限直接子元素，避免覆盖 Ant Design 内部输入框。 */
+.m1-products-scope .filters > input,
+.m1-products-scope .filters > select {
   height: 38px;
   border: 1px solid #d8dee8;
   background: #fff;
@@ -121,8 +122,8 @@
   font-size: 13px;
   min-width: 0;
 }
-.m1-products-scope .filters input:focus,
-.m1-products-scope .filters select:focus {
+.m1-products-scope .filters > input:focus,
+.m1-products-scope .filters > select:focus {
   outline: 2px solid #bbd3ee;
   border-color: #5e94c9;
 }
@@ -431,8 +432,8 @@
   grid-template-columns: 1.15fr repeat(6, 1fr) auto;
   gap: 10px;
 }
-.m1-products-scope .detail-filters input,
-.m1-products-scope .detail-filters select,
+.m1-products-scope .detail-filters > input,
+.m1-products-scope .detail-filters > select,
 .m1-products-scope .detail-pager select {
   height: 36px;
   border: 1px solid #d8dee8;
@@ -937,6 +938,30 @@
 .m1-products-scope .conclusion-action li {
   padding-left: 1px;
 }
+.m1-products-scope .conclusion-action-content {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.m1-products-scope .conclusion-action-status {
+  color: #52657c;
+  font-size: 12px;
+}
+.m1-products-scope .conclusion-action > b > small {
+  display: block;
+  color: #52657c;
+  font-size: 11px;
+  font-weight: 400;
+}
+.m1-products-scope .conclusion-action-content p {
+  margin: 2px 0 6px;
+  color: inherit;
+}
+.m1-products-scope .conclusion-action .conclusion-action-summary {
+  list-style: none;
+  padding-left: 0;
+  gap: 6px;
+}
 .m1-products-scope .new-potential-section {
   margin: 0 0 16px;
   background: #fff;
@@ -1129,6 +1154,9 @@
 }
 .m1-products-scope .health-bar {
   display: grid;
+  font-family: Geist, "Geist Fallback", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
   grid-template-columns: 210px minmax(0, 1fr);
   align-items: center;
   gap: 18px;
@@ -1160,11 +1188,13 @@
 .m1-products-scope .health-bar small {
   grid-column: 2;
 }
-.m1-products-scope .health-bar.watch {
+.m1-products-scope .health-bar.watch,
+.m1-products-scope .health-bar.neutral {
   border-left-color: var(--orange);
   background: #fffdf9;
 }
-.m1-products-scope .health-bar.watch b {
+.m1-products-scope .health-bar.watch b,
+.m1-products-scope .health-bar.neutral b {
   color: #9a5a12;
 }
 .m1-products-scope .health-bar.healthy {
@@ -1495,7 +1525,7 @@
   gap: 10px;
   margin: 12px 0 0;
 }
-.m1-products-scope .new-potential-filters select {
+.m1-products-scope .new-potential-filters > select {
   height: 38px;
   min-width: 0;
   border: 1px solid #d8dee8;
@@ -1505,7 +1535,7 @@
   color: var(--ink);
   font-size: 13px;
 }
-.m1-products-scope .new-potential-filters select:focus {
+.m1-products-scope .new-potential-filters > select:focus {
   outline: 2px solid #bbd3ee;
   border-color: #5e94c9;
 }
@@ -1927,8 +1957,8 @@
   border-radius: 14px;
   box-shadow: 0 9px 22px rgba(16, 47, 87, 0.045);
 }
-.m1-products-scope .filters input,
-.m1-products-scope .filters select,
+.m1-products-scope .filters > input,
+.m1-products-scope .filters > select,
 .m1-products-scope .date-range {
   border-radius: 8px;
 }

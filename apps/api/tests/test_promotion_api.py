@@ -118,7 +118,7 @@ def test_product_uses_ad_max_date_and_full_identity_not_operating_scope(sales_pg
         )
         all_data = client.get("/api/v1/promotion/overview", params=q).json()["data"]
         assert all_data["metrics"]["spend"]["status"] == "partial"
-        assert Decimal(all_data["metrics"]["roi"]["value"]) == 4  # 成对有效范围
+        assert Decimal(all_data["metrics"]["roi"]["value"]) == 14  # 成交照常计入，花费合计10
         daily = client.get("/api/v1/promotion/days", params=q).json()["data"]
         assert daily["total"] == 1 and daily["row_grain"] == "day"
         diagnosis = client.get("/api/v1/promotion/diagnosis", params=q).json()["data"]
@@ -227,19 +227,19 @@ def test_sop_net_zero_and_confirmed_growth_keep_separate_sample_thresholds():
         )
         for n in range(7)
     ]
-    confirmed = assess(current, previous, complete=True)
+    confirmed = assess(current, previous)
     assert confirmed["current"]["net_roi"]["value"] == 0
     assert [(f["level"], f["rule"]) for f in confirmed["findings"]] == [("P1", "净投产下降≥25%")]
-    assert assess(current, previous)["findings"] == []
+    assert assess(current, previous)["findings"] == confirmed["findings"]
     growth = [dict(r, spend=Decimal("650"), net_attributed_revenue=Decimal("500")) for r in current]
-    confirmed_growth = assess(growth, previous, complete=True)
+    confirmed_growth = assess(growth, previous)
     assert any(f["level"] == "P2" and "花费增长" in f["rule"] for f in confirmed_growth["findings"])
     assert not any(c["status"] == "rule_pending" for c in confirmed_growth["clues"])
 
 
 def test_source_payment_days_do_not_reallocate_revenue_to_click_day_or_require_click_window():
     """周一有点击、周三来源有支付成交：保留各日原值，不推1日窗或移动成交。"""
-    from app.modules.promotion.query import aggregate
+    from app.modules.promotion.metrics import aggregate
 
     base = dict(
         spend=Decimal("10"),
@@ -321,7 +321,7 @@ def test_growth_combination_has_no_minimum_spend_or_deal_count(changes, expected
     from app.modules.promotion.diagnosis import assess
 
     current, previous = growth_windows(**changes)
-    result = assess(current, previous, complete=True)
+    result = assess(current, previous)
     growth = [f for f in result["findings"] if "花费增长" in f["rule"]]
     assert bool(growth) is expected
     if growth:
@@ -330,41 +330,46 @@ def test_growth_combination_has_no_minimum_spend_or_deal_count(changes, expected
 
 
 @pytest.mark.parametrize(
-    "defect",
-    ["unknown", "missing_current_day", "missing_previous_day", "null_spend", "null_revenue"],
+    "defect,state",
+    [
+        ("history_short", "unavailable"),
+        ("null_spend", "clear"),
+        ("null_revenue", "clear"),
+        ("all_null_spend", "unavailable"),
+        ("all_null_revenue", "unavailable"),
+    ],
 )
-def test_growth_invalid_or_unknown_window_does_not_publish_formal_priority(defect):
+def test_growth_distinguishes_below_threshold_from_unavailable_totals(defect, state):
     from app.modules.promotion.diagnosis import assess
 
     current, previous = growth_windows()
-    if defect == "missing_current_day":
-        current.pop()
-    elif defect == "missing_previous_day":
-        previous.pop()
-    elif defect == "null_spend":
+    if defect == "null_spend":
         current[0]["spend"] = None
     elif defect == "null_revenue":
         previous[0]["attributed_revenue"] = None
-    result = assess(current, previous, complete=defect != "unknown")
+    elif defect == "all_null_spend":
+        for item in current:
+            item["spend"] = None
+    elif defect == "all_null_revenue":
+        for item in previous:
+            item["attributed_revenue"] = None
+    result = assess(current, previous, previous_available=defect != "history_short")
     assert result["findings"] == []
-    assert result["priority"] == "观察"
-    assert not any(c["status"] == "rule_pending" for c in result["clues"])
-    if defect == "unknown":
-        assert any(
-            "花费增长" in c["label"] and c["status"] == "observation_only" for c in result["clues"]
-        )
+    assert any(
+        r["key"] == "spend_growth" and r["state"] == state for r in result["rule_results"]
+    )
 
 
 def test_growth_combination_inherits_existing_p1_for_same_object():
     from app.modules.promotion.diagnosis import assess
 
     current, previous = growth_windows(previous_spend="100", current_spend="150")
-    result = assess(current, previous, complete=True)
+    result = assess(current, previous)
     assert result["priority"] == "P1"
     assert any("花费增长" in f["rule"] and f["level"] == "P1" for f in result["findings"])
 
 
-def test_fourteen_observed_days_still_require_proven_complete_input(sales_pg, tmp_path):
+def test_fourteen_observed_days_evaluate_rules_without_complete_day_certificate(sales_pg, tmp_path):
     current, previous = growth_windows()
     rows = [
         dict(
@@ -396,17 +401,14 @@ def test_fourteen_observed_days_still_require_proven_complete_input(sales_pg, tm
         ).json()["data"]
         assert data["coverage"]["covered_days"] == 14
         assert data["coverage"]["completeness"] == "unknown"
-        assert data["overall"]["findings"] == []
-        assert data["counts"]["p2"] == 0
-        assert data["rule_states"]["spend_growth"] == "confirmed_no_minimum_sample_inputs_pending"
-        assert any(
-            c["status"] == "observation_only" and "花费增长" in c["label"]
-            for c in data["overall"]["clues"]
-        )
+        assert data["counts"]["p2"] == 1
+        assert data["status"] == "ready"
+        assert data["rule_states"]["spend_growth"] == "confirmed_no_minimum_sample"
+        assert any("花费增长" in f["rule"] for f in data["overall"]["findings"])
 
 
 def test_paired_rates_and_store_missing_net_stays_null():
-    from app.modules.promotion.query import aggregate
+    from app.modules.promotion.metrics import aggregate
 
     rows = [
         dict(
@@ -436,7 +438,7 @@ def test_paired_rates_and_store_missing_net_stays_null():
 
 
 def test_expected_star_absence_cannot_publish_product_only_net_as_combined_total():
-    from app.modules.promotion.query import aggregate
+    from app.modules.promotion.metrics import aggregate
 
     product_only = [
         dict(
@@ -454,7 +456,9 @@ def test_expected_star_absence_cannot_publish_product_only_net_as_combined_total
 
 
 @pytest.mark.parametrize("defect", ["missing_star_day", "missing_star_source", "null_star_revenue"])
-def test_store_combined_partial_coverage_never_looks_like_complete_roi(sales_pg, tmp_path, defect):
+def test_store_absent_days_keep_ratios_but_null_fields_block_affected_ratio(
+    sales_pg, tmp_path, defect
+):
     from app.modules.sales.datasets import SPECS
     from app.modules.sales.storage import ShopDailyStore
 
@@ -485,13 +489,23 @@ def test_store_combined_partial_coverage_never_looks_like_complete_roi(sales_pg,
         )
         data = client.get("/api/v1/promotion/overview", params=q).json()["data"]
         assert data["metrics"]["revenue"]["status"] == "partial"
-        assert data["metrics"]["revenue"]["value"] is not None
-        assert data["metrics"]["roi"]["value"] is None
-        if defect != "null_star_revenue":
-            assert data["metrics"]["cvr"]["value"] is None
+        assert (data["metrics"]["revenue"]["value"] is None) == (defect == "null_star_revenue")
+        if defect == "null_star_revenue":
+            assert data["metrics"]["roi"]["value"] is None
+        else:
+            roi = data["metrics"]["roi"]
+            assert Decimal(roi["value"]) > 0
+            assert abs(
+                Decimal(roi["value"]) * Decimal(roi["denominator"]) - Decimal(roi["numerator"])
+            ) < Decimal("1e-24")
+            assert data["coverage"]["missing_count"] > 0
+            assert roi["status"] == "partial"
+        assert Decimal(data["metrics"]["cvr"]["value"]) > 0
         assert data["net"]["net_revenue"]["value"] is None
         assert data["net"]["net_roi"]["value"] is None
-        assert data["series"][1]["metrics"]["roi"]["value"] is None
+        assert (data["series"][1]["metrics"]["roi"]["value"] is None) == (
+            defect == "null_star_revenue"
+        )
         if defect != "missing_star_source":
             assert data["series"][0]["metrics"]["roi"]["value"] is not None
         single = client.get(

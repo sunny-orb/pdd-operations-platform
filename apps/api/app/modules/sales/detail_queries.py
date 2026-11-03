@@ -2,13 +2,16 @@
 
 import re
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 import sqlalchemy as sa
 
+from app.modules.promotion.metrics import store_metrics
+
 from .contracts import SalesError
-from .datasets import SPECS
-from .query import meta, number, ratio, total
+from .datasets import READ_SPECS as SPECS
+from .promotion_history import effective_rows, history_rows, supplement_audit
+from .query import days, meta, number, ratio, total
 from .repository import read_snapshot
 from .source_policy import APPROVED_START, SHOPS, calendar_through
 
@@ -80,6 +83,26 @@ def source_info(snapshot, code):
 
 
 def scoped_rows(s, code, q, shops):
+    if code == "shop_channel_product_promotion":
+        warehouse = []
+        if code in s["versions"]:
+            warehouse = list(
+                s["connection"]
+                .execute(
+                    sa.text(
+                        "SELECT * FROM public.shop_channel_promotion_daily "
+                        "WHERE dataset_version_id=:v"
+                    ),
+                    dict(v=s["versions"][code]),
+                )
+                .mappings()
+            )
+        rows = effective_rows(warehouse, history_rows(s["connection"], s["versions"]))
+        return [
+            r
+            for r in rows
+            if q.date_from <= r["business_date"] <= q.date_to and r["shop_id"] in shops
+        ]
     if code not in s["versions"]:
         return []
     spec = SPECS[code]
@@ -97,8 +120,46 @@ def scoped_rows(s, code, q, shops):
     )
 
 
+def promotion_record_issues(rows, start, end, shops):
+    """展示所选店铺日的缺行/空字段；读取已选生效行，不参与任何指标计算。"""
+    by_key = {(r["shop_id"], r["business_date"]): r for r in rows}
+    issues = []
+    for shop in shops:
+        for day in days(start, end):
+            row = by_key.get((shop, day))
+            fields = (
+                [
+                    f
+                    for f in ("spend", "attributed_revenue", "clicks", "impressions")
+                    if row[f] is None
+                ]
+                if row is not None
+                else []
+            )
+            if row is None or fields:
+                issues.append(
+                    dict(
+                        shop_id=shop,
+                        date=str(day),
+                        kind="missing_record" if row is None else "null_fields",
+                        fields=fields,
+                    )
+                )
+    return issues
+
+
+def promotion_value(metrics, key, *, money=False):
+    """仅将推广公共结果适配既有销售API精度，不重新计算指标。"""
+    value = metrics[key]["value"]
+    if value is None:
+        return None
+    if money:
+        return number(value, money=True)
+    return format(value.quantize(Decimal("0.000000000001"), rounding=ROUND_HALF_UP), "f")
+
+
 def enrich_metrics(s, q, data, shops):
-    """退款匹配同店日；独立推广渠道的合计ROI要求支付日覆盖和必要字段齐备。"""
+    """退款匹配同店日；推广复用店铺推广公共计算，覆盖明细只作解释。"""
     refunds = scoped_rows(s, "shop_refunds", q, shops)
     sales = [
         r
@@ -108,6 +169,21 @@ def enrich_metrics(s, q, data, shops):
         and r["shop_revenue"] is not None
     ]
     by_key = {(r["shop_id"], r["business_date"]): r for r in refunds}
+    # 展示覆盖独立核对整个所选期间；整行缺失、金额NULL与真实0分开，不改退款率配对。
+    data["refund_coverage"] = dict(
+        state="observed" if "shop_refunds" in s["versions"] else "not_connected",
+        missing_record_dates=[
+            str(day)
+            for shop in shops
+            for day in days(q.date_from, q.date_to)
+            if (shop, day) not in by_key
+        ]
+        if "shop_refunds" in s["versions"]
+        else [],
+        null_amount_dates=sorted(
+            str(r["business_date"]) for r in refunds if r["reported_refund_amount"] is None
+        ),
+    )
     matched = [
         (r, by_key[(r["shop_id"], r["business_date"])])
         for r in sales
@@ -145,6 +221,22 @@ def enrich_metrics(s, q, data, shops):
         if "shop_refunds" in s["versions"]
         else "not_connected"
     )
+    history = history_rows(s["connection"], s["versions"])
+    warehouse = []
+    if "shop_channel_product_promotion" in s["versions"]:
+        warehouse = list(
+            s["connection"]
+            .execute(
+                sa.text(
+                    "SELECT * FROM public.shop_channel_promotion_daily WHERE dataset_version_id=:v"
+                ),
+                dict(v=s["versions"]["shop_channel_product_promotion"]),
+            )
+            .mappings()
+        )
+    data["promotion_supplements"] = supplement_audit(
+        warehouse, history, q.date_from, q.date_to, shops
+    )
     channels = []
     all_rows = []
     for code in ("shop_channel_product_promotion", "shop_channel_star_shop"):
@@ -153,52 +245,22 @@ def enrich_metrics(s, q, data, shops):
             continue
         rows = scoped_rows(s, code, q, applicable)
         all_rows.extend(rows)
+        metrics = store_metrics(rows, include_star=code == "shop_channel_star_shop")
         observed = {(r["shop_id"], r["business_date"]) for r in rows}
         expected = (q.date_to - q.date_from).days + 1
         channels.append(
             dict(
                 code=code,
+                latest_observed_date=str(max((r["business_date"] for r in rows), default=""))
+                or None,
                 business_date_basis="payment_date",
                 attribution_state="source_reported_payment_date",
-                spend=number(total(rows, "spend"), money=True),
-                revenue=number(total(rows, "attributed_revenue"), money=True),
-                ctr=ratio(
-                    total(
-                        [
-                            r
-                            for r in rows
-                            if r["clicks"] is not None and r["impressions"] is not None
-                        ],
-                        "clicks",
-                    ),
-                    total(
-                        [
-                            r
-                            for r in rows
-                            if r["clicks"] is not None and r["impressions"] is not None
-                        ],
-                        "impressions",
-                    ),
-                ),
-                roi=ratio(
-                    total(
-                        [
-                            r
-                            for r in rows
-                            if r["attributed_revenue"] is not None and r["spend"] is not None
-                        ],
-                        "attributed_revenue",
-                    ),
-                    total(
-                        [
-                            r
-                            for r in rows
-                            if r["attributed_revenue"] is not None and r["spend"] is not None
-                        ],
-                        "spend",
-                    ),
-                ),
+                spend=promotion_value(metrics, "spend", money=True),
+                revenue=promotion_value(metrics, "revenue", money=True),
+                ctr=promotion_value(metrics, "ctr"),
+                roi=promotion_value(metrics, "roi"),
                 missing_shop_days=expected * len(applicable) - len(observed),
+                record_issues=promotion_record_issues(rows, q.date_from, q.date_to, applicable),
                 null_counts={
                     f: sum(r[f] is None for r in rows)
                     for f in ("spend", "attributed_revenue", "clicks", "impressions")
@@ -206,42 +268,43 @@ def enrich_metrics(s, q, data, shops):
                 source=source_info(s, code),
             )
         )
-    paired = [r for r in all_rows if r["clicks"] is not None and r["impressions"] is not None]
-    roi_rows = [
-        r for r in all_rows if r["attributed_revenue"] is not None and r["spend"] is not None
-    ]
-    combined = len(channels) > 1
-    missing_coverage = any(channel["missing_shop_days"] for channel in channels)
-    missing_roi_input = len(roi_rows) != len(all_rows)
-    combined_roi = (
-        ratio(total(roi_rows, "attributed_revenue"), total(roi_rows, "spend"))
-        if not missing_coverage and not missing_roi_input
-        else None
-    )
+    metrics = store_metrics(all_rows, include_star=len(channels) > 1)
     data.update(
         promotion_channels=channels,
-        promotion_spend=number(total(all_rows, "spend"), money=True),
-        promotion_ctr=ratio(total(paired, "clicks"), total(paired, "impressions")),
-        promotion_roi=combined_roi if combined else channels[0]["roi"] if channels else None,
+        promotion_spend=promotion_value(metrics, "spend", money=True),
+        promotion_ctr=promotion_value(metrics, "ctr"),
+        promotion_roi=promotion_value(metrics, "roi"),
     )
-    for f in ("promotion_spend", "promotion_ctr"):
-        data["field_states"][f] = "observed_partial" if all_rows else "not_connected"
-    data["field_states"]["promotion_roi"] = (
-        "not_connected"
-        if not all_rows
-        else "incomplete_channel_coverage"
-        if combined and missing_coverage
-        else "missing_channel_input"
-        if combined and missing_roi_input
-        else "source_reference"
-    )
+    missing_days = any(channel["missing_shop_days"] for channel in channels)
+    connected = any(channel["source"]["state"] != "not_connected" for channel in channels)
+    for field, key in (
+        ("promotion_spend", "spend"),
+        ("promotion_ctr", "ctr"),
+        ("promotion_roi", "roi"),
+    ):
+        status = metrics[key]["status"]
+        data["field_states"][field] = (
+            "not_connected"
+            if status == "no_records" and not connected
+            else "no_records"
+            if status == "no_records"
+            else "missing_channel_input"
+            if status in ("missing", "partial")
+            else "zero_denominator"
+            if status == "zero_denominator"
+            else "observed_partial"
+            if missing_days
+            else "source_reference"
+            if key == "roi"
+            else "observed"
+        )
 
 
 class SalesDetails:
     def __init__(self, engine):
         self.engine = engine
 
-    def targets(self, month, version, target_basis="base"):
+    def targets(self, month, version, target_basis="original_gmv"):
         from .targets import query_targets
 
         if not re.fullmatch(r"\d{4}-\d{2}", month):
@@ -299,6 +362,8 @@ class SalesDetails:
                     score=number(value * 100) if valid else None,
                     state="observed"
                     if valid
+                    else "invalid_score"
+                    if value is not None and value < 0
                     else "legacy_basis"
                     if value is not None
                     else "field_null",

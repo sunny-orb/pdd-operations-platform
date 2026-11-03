@@ -3,7 +3,7 @@ import { aftersalesSpec, promotionSpec, salesSpec } from "./adapters";
 import { aftersalesObjectKey, centerCounts, observationCoverage } from "./model";
 import { testFilters } from "../sales/testFixtures";
 afterEach(() => vi.unstubAllGlobals());
-it("基础目标同版本失败与恢复改变中心查询状态，避免保留旧成功说明", async () => {
+it("GMV目标同版本失败与恢复改变中心查询状态，避免保留旧成功说明", async () => {
   let status = "failed";
   vi.stubGlobal(
     "fetch",
@@ -36,6 +36,8 @@ it("基础目标同版本失败与恢复改变中心查询状态，避免保留�
   expect(recovered.scopeKey).not.toBe(failed.scopeKey);
   expect(failed.notes.join(" ")).toContain("failed");
   expect(recovered.notes.join(" ")).toContain("succeeded");
+  expect(failed.updates?.find((s) => s.id === "sales_targets")?.attemptStatus).toBe("failed");
+  expect(recovered.updates?.find((s) => s.id === "sales_targets")?.kind).toBe("target");
 });
 it("售后同版来源失败和新输入待重算如实进入中心状态", async () => {
   let status = "failed_retained",
@@ -81,6 +83,8 @@ it("售后同版来源失败和新输入待重算如实进入中心状态", asyn
   const pending = await aftersalesSpec.meta(signal);
   expect(pending.version).toBe(failed.version);
   expect(pending.attemptStatus).toBe("pending_report");
+  expect(failed.updates?.[0].attemptStatus).toBe("failed");
+  expect(pending.updates?.[0].sourceStatus).toBe("new_input_pending_report");
 });
 it("售后只用明确报告和对象层级映射，不由同名标题补异常或分类", async () => {
   const source = {
@@ -258,6 +262,20 @@ it("推广未完成证据校验的空清单为待核，已有真实观察不会�
                       clues: [],
                       notes: [],
                       priority: "观察",
+                      evaluation_state: "partial",
+                      rule_results: [],
+                      exclusions: {
+                        current: {
+                          missing_spend_rows: 0,
+                          missing_revenue_rows: 0,
+                          revenue_without_spend: "0",
+                        },
+                        previous: {
+                          missing_spend_rows: 0,
+                          missing_revenue_rows: 0,
+                          revenue_without_spend: "0",
+                        },
+                      },
                       current_days: 7,
                       previous_days: 7,
                       current_record_count: "7",
@@ -265,6 +283,7 @@ it("推广未完成证据校验的空清单为待核，已有真实观察不会�
                     },
                   ]
                 : [],
+              rule_version: "sop-test",
               status: "insufficient_evidence",
             }
           : { metrics: {} },
@@ -301,4 +320,16 @@ it("推广未完成证据校验的空清单为待核，已有真实观察不会�
   expect(observed.observationState).toBe("observed");
   expect(observed.observations).toHaveLength(1);
   expect(observed.observations[0].level).toBe("observation");
+  expect(observed.observations[0].sourcePriority).toBe("观察");
+  expect(observed.observations[0].ruleVersion).toBe("sop-test");
+  expect(observed.observations[0].sourceRules).toEqual(["有花费无成交，归因完整性待核实"]);
+  expect(vi.mocked(fetch).mock.calls.some(([path]) => String(path).includes("detail=alerts"))).toBe(
+    true,
+  );
+  expect(observed.actions[0]).toMatchObject({
+    domain: "promotion",
+    objectKey: '["listing","shop","listing"]',
+    suggestion: "核查归因",
+    link: "/promotion?mode=product&product_from=2026-10-27&product_to=2026-10-27&product_shop=shop&product_products=listing#promotion-diagnosis",
+  });
 });

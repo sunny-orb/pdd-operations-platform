@@ -12,7 +12,7 @@ from pathlib import Path
 from app.connectors.sales_feishu import FeishuRefundReader
 from app.connectors.sales_sources import SalesSourceReader
 from app.jobs.sync_shop_daily import runtime_engine
-from app.modules.sales.contracts import ReadWindow, SalesError
+from app.modules.sales.contracts import SalesError
 from app.modules.sales.datasets import SPECS
 from app.modules.sales.source_policy import SHOPS, approved_window, validate_read_window
 from app.modules.sales.storage import ShopDailyStore
@@ -32,11 +32,23 @@ def _main():
     reader = engine = None
     errors = 0
     try:
-        window = ReadWindow(args.start, args.end, tuple(SHOPS))
-        validate_read_window(window)
-        if args.publish and window != approved_window():
-            raise SalesError("PUBLICATION_SCOPE_MISMATCH")
         selected = list(SPECS) if args.dataset == "all" else [args.dataset]
+        windows = {}
+        for code in selected:
+            approved = approved_window(code)
+            window = type(approved)(args.start, args.end, tuple(SHOPS))
+            validate_read_window(window, code)
+            # 全来源发布仍用原财年参数；推广按已批准专属范围连同同期完整接收。
+            if (
+                args.publish
+                and args.dataset == "all"
+                and args.start == approved_window().start
+                and args.end == approved_window().end
+            ):
+                window = approved
+            if args.publish and window != approved:
+                raise SalesError("PUBLICATION_SCOPE_MISMATCH")
+            windows[code] = window
         if any(SPECS[code].source_system == "warehouse" for code in selected):
             password = getpass.getpass("数仓只读密码（不保存）：")
             reader = SalesSourceReader(password=password)
@@ -44,11 +56,12 @@ def _main():
         if args.publish:
             engine = runtime_engine()
         for code in selected:
+            window = windows[code]
             started = time.monotonic()
             try:
                 source = FeishuRefundReader(root=ROOT) if code == "shop_refunds" else reader
 
-                def receive(heartbeat, source=source, code=code):
+                def receive(heartbeat, source=source, code=code, window=window):
                     source.heartbeat = heartbeat
                     return (
                         source.read_stable(window)

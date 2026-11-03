@@ -1,0 +1,33 @@
+/* 仅经营表现的本期推广异常；无异常时组件不渲染，不保留占位。 */
+.m3-sales-scope .sales-promotion-details {
+  padding: 10px 14px;
+  border: 1px solid #ead6a4;
+  border-radius: 9px;
+  background: #fffbf0;
+  color: #805a1e;
+}
+.m3-sales-scope .sales-promotion-details > p {
+  margin: 0 0 6px;
+}
+.m3-sales-scope .sales-promotion-details time {
+  display: inline-block;
+  white-space: nowrap;
+}
+.m3-sales-scope .promotion-source.sales-promotion-details details[open] {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.m3-sales-scope .sales-promotion-details summary:focus-visible {
+  outline: 2px solid var(--sales-blue);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.m3-sales-scope .sales-promotion-details li + li {
+  margin-top: 4px;
+}
+@media (max-width: 700px) {
+  .m3-sales-scope .sales-promotion-details {
+    padding: 10px;
+  }
+}

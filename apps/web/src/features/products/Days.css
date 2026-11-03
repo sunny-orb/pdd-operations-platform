@@ -1,0 +1,117 @@
+/* 仅商品逐日明细：沿线上固定浏览区，分页与加载不改变页面高度。 */
+.m1-products-scope .m1-product-days {
+  container: product-days / inline-size;
+}
+.m1-products-scope .m1-product-days .detail-heading {
+  min-height: 80px;
+  padding: 19px 22px;
+}
+.m1-products-scope .m1-product-days .detail-body {
+  padding: 16px 18px 18px;
+}
+.m1-products-scope .m1-product-days .detail-filters {
+  grid-template-columns:
+    minmax(100px, 1fr) minmax(230px, 1.8fr) repeat(4, minmax(90px, 1fr))
+    minmax(130px, 1.1fr) auto;
+}
+.m1-products-scope .m1-product-days .detail-filters > .m1-date-range {
+  grid-column: auto;
+}
+.m1-products-scope .m1-product-days .detail-status {
+  min-height: 24px;
+}
+.m1-products-scope .m1-product-days .m1-days-feedback {
+  flex: 0 1 auto;
+  color: var(--muted);
+}
+.m1-products-scope .m1-product-days .m1-days-table {
+  height: 510px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+}
+.m1-products-scope .m1-days-table:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+.m1-products-scope .m1-product-days .m1-days-table table {
+  min-width: 1150px;
+}
+.m1-products-scope .m1-product-days .m1-days-table :is(th, td) {
+  padding: 11px 16px;
+  vertical-align: middle;
+}
+.m1-products-scope .m1-product-days .m1-days-table :is(th, td):nth-child(n + 6) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.m1-products-scope .m1-product-days .m1-days-product b {
+  display: block;
+  min-width: 210px;
+  max-width: 300px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.m1-products-scope .m1-product-days .m1-days-product small {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  max-width: 300px;
+}
+.m1-products-scope .m1-days-empty {
+  padding: 70px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+.m1-products-scope .m1-days-footer {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+}
+.m1-products-scope .m1-days-footer p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.m1-products-scope .m1-days-footer .detail-pager {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+.m1-products-scope .m1-days-footer select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+@container product-days (max-width: 1100px) {
+  .m1-products-scope .m1-product-days .detail-filters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .m1-products-scope .m1-product-days .detail-filters > .m1-date-range {
+    grid-column: span 2;
+  }
+  .m1-products-scope .m1-days-footer {
+    flex-wrap: wrap;
+  }
+  .m1-products-scope .m1-days-footer .detail-pager {
+    margin-left: auto;
+  }
+}
+@container product-days (max-width: 600px) {
+  .m1-products-scope .m1-product-days .detail-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .m1-products-scope .m1-product-days .detail-filters > .m1-date-range {
+    grid-column: auto;
+  }
+  .m1-products-scope .m1-product-days .detail-status {
+    flex-wrap: wrap;
+  }
+  .m1-products-scope .m1-product-days .page-track {
+    display: none;
+  }
+  .m1-products-scope .m1-product-days .m1-days-feedback {
+    flex-basis: 100%;
+    min-height: 24px;
+  }
+}

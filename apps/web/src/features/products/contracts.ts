@@ -54,6 +54,15 @@ export const card = base.extend({
   reason: z.string(),
   action: z.string(),
 });
+const periodComparison = z.object({
+  value: decimal,
+  previous: decimal,
+  change: decimal,
+  reason: z.string().nullable(),
+  message: z.string().nullable(),
+  current_rows: z.number().int().nonnegative(),
+  previous_rows: z.number().int().nonnegative(),
+});
 const metric = z
   .object({
     label: z.string(),
@@ -63,6 +72,9 @@ const metric = z
     previous_period: decimal,
     yoy: decimal,
     mom: decimal,
+    yoy_comparison: periodComparison.optional(),
+    mom_comparison: periodComparison.optional(),
+    observation_note: z.string().nullable().optional(),
     status: z.string(),
     reason: z.string().nullable(),
   })
@@ -90,7 +102,66 @@ const hot = base.extend({
   conversion: decimal,
   coverage: z.string(),
 });
+/** 商品领域专用风险接口，中心直接消费原判断和完整有序名单。 */
+const riskPeriod = z.object({ start: z.string(), end: z.string() });
+export const riskFeed = z.object({
+  risks: z.array(
+    base
+      .pick({
+        listing_id: true,
+        shop_id: true,
+        product_id: true,
+        shop_name: true,
+        product_name: true,
+        category: true,
+        level: true,
+        operator: true,
+      })
+      .extend({
+        period_revenue: decimal,
+        alert: alert.extend({
+          metric: z.enum(["visitors", "orders", "conversion"]),
+          baseline_method: z.enum(["daily_average", "ratio_of_totals"]),
+        }),
+      }),
+  ),
+  total: z.number().int().nonnegative(),
+  counts: z.object({
+    selected: z.number(),
+    excluded: z.number(),
+    evaluated: z.number(),
+    unevaluated: z.number(),
+    flagged: z.number(),
+    unflagged: z.number(),
+  }),
+  status: z.enum(["empty", "not_applicable", "insufficient_data", "partial", "evaluated"]),
+  period: riskPeriod,
+  evaluation_date: z.string(),
+  latest_data_date: z.string(),
+  baseline_period: riskPeriod,
+  trend_period: riskPeriod,
+  generation_method: z.literal("rules"),
+  rule_version: z.string(),
+  impact_kind: z.literal("estimated"),
+});
 const risk = hot.extend({ alert, period_revenue: decimal });
+const actions = z.object({
+  generation_method: z.literal("rules"),
+  ai_status: z.literal("not_connected"),
+  status: z.enum(["empty", "observed_reference", "insufficient_data", "no_match"]),
+  as_of_date: z.string(),
+  message: z.string(),
+  items: z
+    .array(
+      z.object({
+        kind: z.enum(["risk", "opportunity"]),
+        listing_ids: z.array(z.string()).max(3),
+        text: z.string(),
+      }),
+    )
+    .max(2),
+  notices: z.array(z.string()),
+});
 export const meta = z.object({
   data_version: z.string(),
   date_from: z.string(),
@@ -120,6 +191,14 @@ export const meta = z.object({
   ),
 });
 export const board = z.object({
+  diagnosis: z
+    .object({
+      generation_method: z.literal("rules"),
+      growth_title: z.string(),
+      traffic_title: z.string(),
+      action: z.string(),
+    })
+    .optional(),
   metrics: z.record(z.string(), metric),
   comparison_series: z.array(
     z.object({
@@ -141,6 +220,9 @@ export const board = z.object({
       date: z.string(),
       values: z.record(z.string(), decimal),
       previous: z.record(z.string(), decimal),
+      previous_date: z.string().nullable().optional(),
+      partial: z.array(z.string()).optional(),
+      previous_partial: z.array(z.string()).optional(),
     }),
   ),
   windows: z.array(
@@ -148,11 +230,15 @@ export const board = z.object({
       days: z.number(),
       start: z.string(),
       end: z.string(),
+      previous_start: z.string(),
+      previous_end: z.string(),
       metrics: z.record(
         z.string(),
         z.object({
           value: decimal,
           change: decimal,
+          previous: decimal,
+          message: z.string().nullable(),
           status: z.string(),
           reason: z.string().nullable(),
           comparison_status: z.string(),
@@ -163,6 +249,7 @@ export const board = z.object({
   health: z.object({ title: z.string(), tone: z.string(), detail: z.string() }),
   risks: z.array(risk),
   brief: z.object({
+    actions,
     categories: z.array(
       z.object({
         category: z.string(),
@@ -185,11 +272,20 @@ export const board = z.object({
       label: z.string(),
       value: decimal,
       status: z.string(),
+      valid_rows: decimal.optional(),
+      observed_rows: decimal.optional(),
       reason: z.string().nullable(),
     }),
   ),
   observed_rows: z.string(),
   product_count: z.string(),
+  comparison_periods: z
+    .object({
+      current: z.object({ start: z.string(), end: z.string() }),
+      yoy: z.object({ start: z.string(), end: z.string() }).nullable(),
+      mom: z.object({ start: z.string(), end: z.string() }),
+    })
+    .optional(),
   scope: z.object({
     start: z.string(),
     end: z.string(),
@@ -201,6 +297,8 @@ export const board = z.object({
 export const scorePage = z.object({
   items: z.array(card),
   total: z.number(),
+  total_count: z.number(),
+  scored_count: z.number(),
   page: z.number(),
   size: z.number(),
   start: z.string(),
@@ -228,6 +326,12 @@ export const dayPage = z.object({
     previous_end: z.string().nullable().optional(),
   }),
 });
+const productOption = z.object({
+  value: z.string(),
+  label: z.string(),
+  level: z.string().nullable().optional(),
+  level_details: z.array(z.string()).optional(),
+});
 export const options = z.object({
   selection: z.object({
     operator: z.string(),
@@ -235,14 +339,32 @@ export const options = z.object({
     level: z.string(),
     products: z.array(z.string()),
   }),
-  selected_products: z.array(z.object({ value: z.string(), label: z.string() })),
+  selected_products: z.array(productOption),
   shops: z.array(z.object({ value: z.string(), label: z.string().nullable() })),
   operators: z.array(z.string()),
   categories: z.array(z.string()),
   levels: z.array(z.string()),
-  products: z.array(z.object({ value: z.string(), label: z.string() })),
+  products: z.array(productOption),
   total: z.number(),
 });
+export const catalog = z.object({
+  shops: z.array(z.object({ value: z.string(), label: z.string().nullable() })),
+  items: z.array(
+    z.object({
+      value: z.string(),
+      label: z.string(),
+      shop: z.string(),
+      operator: z.string().nullable(),
+      category: z.string().nullable(),
+      level: z.string().nullable(),
+      level_group: z.string().optional(),
+      level_details: z.array(z.string()).optional(),
+      search_text: z.string(),
+    }),
+  ),
+  total: z.number().int().nonnegative(),
+});
+export type Catalog = z.infer<typeof catalog>;
 export type Board = z.infer<typeof board>;
 export type ScoreCard = z.infer<typeof card>;
 export type Meta = z.infer<typeof meta>;

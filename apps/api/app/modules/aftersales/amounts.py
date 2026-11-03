@@ -4,6 +4,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 
+from .rowset import record_count
+
 AmountRows = Sequence[Mapping[str, object]] | None
 
 
@@ -22,20 +24,25 @@ def assess_amount(rows: AmountRows, field: str) -> AmountAssessment:
     """PG Decimal规范行→已知观察与完整值；缺输入/空筛选/字段空/真实零分别表达。"""
     if rows is None:
         return AmountAssessment("not_received", 0, 0, 0, 0, None, None)
-    values = [row.get(field) for row in rows]
+    values = [row.get("_amount_known_subtotal", row.get(field)) for row in rows]
     known = [value for value in values if value is not None]
     if any(not isinstance(v, Decimal) or not v.is_finite() for v in known):
         raise ValueError("AMOUNT_DECIMAL_REQUIRED")
     with localcontext() as context:
         context.prec = 50
         subtotal = sum(known, Decimal(0)) if known else None
-    state = "no_records" if not rows else "field_null" if len(known) != len(rows) else "observed"
+    count = record_count(rows)
+    known_count = sum(
+        row.get("_amount_known_count", int(row.get(field) is not None)) for row in rows
+    )
+    zero_count = sum(row.get("_amount_zero_count", int(row.get(field) == 0)) for row in rows)
+    state = "no_records" if not rows else "field_null" if known_count != count else "observed"
     return AmountAssessment(
         state,
-        len(rows),
-        len(known),
-        len(rows) - len(known),
-        sum(v == 0 for v in known),
+        count,
+        known_count,
+        count - known_count,
+        zero_count,
         subtotal,
         subtotal if state == "observed" else None,
     )

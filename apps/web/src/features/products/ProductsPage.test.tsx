@@ -38,7 +38,7 @@ beforeEach(() => {
     },
   );
 });
-it("retains all six sections and original table fields when upstream is unavailable", async () => {
+it("retains all six sections and available risk fields when upstream is unavailable", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockResolvedValue(
@@ -56,7 +56,7 @@ it("retains all six sections and original table fields when upstream is unavaila
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText("商品经营数据尚未接通")).toBeTruthy();
+  expect(await screen.findByText("商品数据尚未接通")).toBeTruthy();
   for (const id of [
     "product-brief",
     "product-scores",
@@ -66,8 +66,8 @@ it("retains all six sections and original table fields when upstream is unavaila
     "product-days",
   ])
     expect(document.getElementById(id)).toBeTruthy();
-  expect(screen.getAllByText("预计损失")[0]).toBeTruthy();
-  expect(screen.getAllByText("截止时间")[0]).toBeTruthy();
+  expect(screen.getAllByText("估算影响金额")[0]).toBeTruthy();
+  expect(screen.queryByText("截止时间")).toBeNull();
   expect(screen.getAllByText("交易金额同比").length).toBeGreaterThan(0);
   expect(screen.queryByText("¥0.00")).toBeNull();
 });

@@ -32,6 +32,12 @@ class Coverage(BaseModel):
     window_end: str
 
 
+class RefundCoverage(BaseModel):
+    state: Literal["observed", "not_connected"]
+    missing_record_dates: list[str]
+    null_amount_dates: list[str]
+
+
 class SalesMetrics(BaseModel):
     shop_revenue: Numeric | None
     shop_visitors: Numeric | None
@@ -44,6 +50,8 @@ class SalesMetrics(BaseModel):
     promotion_ctr: Numeric | None
     promotion_roi: Numeric | None
     refund_match: dict[str, Any] | None = None
+    refund_coverage: RefundCoverage | None = None
+    promotion_supplements: list[dict[str, Any]] = Field(default_factory=list)
     promotion_channels: list[dict[str, Any]] = Field(default_factory=list)
     coverage: Coverage
     field_states: dict[str, str]

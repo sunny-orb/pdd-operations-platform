@@ -13,7 +13,9 @@ export type DomainState = {
   loading: boolean;
   refreshing: boolean;
   error: string | null;
+  statusError?: string | null;
   refresh: () => void;
+  refreshStatus?: () => void;
 };
 const errorText = (value: unknown) =>
   value instanceof Error ? value.message : "查询失败，保留上次已发布结果。";
@@ -61,6 +63,10 @@ export function useDomain<M>(spec: DomainSpec<M>): DomainState {
     loading: meta.isPending || (meta.isSuccess && Boolean(version) && facts.isPending),
     refreshing: meta.isFetching || facts.isFetching,
     error: meta.error ? errorText(meta.error) : facts.error ? errorText(facts.error) : null,
+    statusError: meta.error ? errorText(meta.error) : null,
+    refreshStatus: () => {
+      void meta.refetch();
+    },
     refresh,
   };
 }

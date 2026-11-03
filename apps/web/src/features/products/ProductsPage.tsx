@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Alert, Button, Tooltip } from "antd";
+import { Alert, Button, Spin, Tooltip } from "antd";
 import {
   BarChartOutlined,
   BulbOutlined,
@@ -10,13 +10,16 @@ import {
 } from "@ant-design/icons";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { board } from "./contracts";
+import { ApiError } from "./api";
 import { useDebounced, useProducts, useResource } from "./data";
 import { Filters } from "./Filters";
+import { Risks } from "./Risks";
 import { Scores } from "./Scores";
 import { Days } from "./Days";
-import { Brief, Health, Metrics, Risks, Trends } from "./Overview";
-import { State } from "./State";
+import { Brief, Health, Metrics, Trends } from "./Overview";
+import { useFilterScrollAnchor, useOverviewPresentation } from "./useOverviewPresentation";
 import { localTime } from "./format";
+import { formatProductLevel } from "../../shared/products/levels";
 import "./prototype.css";
 import "./products.css";
 
@@ -25,9 +28,17 @@ export function ProductsPage() {
   const state = useProducts();
   const main = state.scope("main");
   const keyword = useDebounced(main.keyword);
-  const result = useResource("overview", board, { ...main, keyword }, state);
+  const requestScope = { ...main, keyword };
+  const result = useResource("overview", board, requestScope, state);
   const [active, setActive] = useState(["revenue"]);
-  const data = result.data;
+  const presentation = useOverviewPresentation(result.data, requestScope, state.version);
+  const { data, scope: shownScope } = presentation;
+  const updating = result.isFetching || keyword !== main.keyword;
+  const unavailable = updating || !!result.error;
+  const { ref: filterAnchorRef, capture: captureFilterPosition } = useFilterScrollAnchor(
+    result.data,
+    !updating,
+  );
   const meta = state.metadata.data;
   const toggle = (key: string) =>
     setActive((keys) =>
@@ -40,7 +51,7 @@ export function ProductsPage() {
   return (
     <DashboardLayout
       currentPage="products"
-      context="商品经营 · 本页独立分析"
+      context="商品数据 · 本页独立分析"
       sections={[
         { id: "product-brief", title: "经营结论", icon: <BulbOutlined /> },
         { id: "product-scores", title: "新品评分", icon: <ThunderboltOutlined /> },
@@ -91,7 +102,7 @@ export function ProductsPage() {
             <Alert
               type="error"
               showIcon
-              title="商品经营数据尚未接通"
+              title="商品数据尚未接通"
               description="已保留页面字段与布局；当前无可用本地发布版本，不显示模拟经营数字。"
               action={<Button onClick={() => void state.metadata.refetch()}>重试连接</Button>}
             />
@@ -106,6 +117,7 @@ export function ProductsPage() {
           )}
           <Brief
             data={data}
+            updating={unavailable}
             onSelect={(patch) => {
               state.change("main", { ...patch, page: 1 });
               document
@@ -116,36 +128,86 @@ export function ProductsPage() {
           <Health data={data} />
           <Scores state={state} scope={state.scope("score")} />
           <section id="overview" className="m1-overview">
-            <Filters name="main" scope={main} state={state} />
-            <State
-              pending={!!state.version && result.isPending}
-              error={result.error}
-              retry={() => void result.refetch()}
-            />
-            <div className="product-bar">
-              <div>
-                <span>商品信息</span>
-                <b>{main.products.length ? `已选 ${main.products.length} 款` : "全部商品"}</b>
-                <small>{data?.product_count ?? "—"} 个店铺商品链接</small>
-              </div>
-              <div>
-                <span>店铺名称</span>
-                <b>{data?.selection.shop_name ?? (main.shop ? "所选店铺" : "全部店铺")}</b>
-              </div>
-              <div>
-                <span>款式对应运营</span>
-                <b>{main.operator || "全部运营"}</b>
-              </div>
-              <div>
-                <span>品类</span>
-                <b>{main.category || "全部品类"}</b>
-              </div>
-              <div>
-                <span>产品等级</span>
-                <b>{main.level || "全部等级"}</b>
-              </div>
+            <div
+              className="m1-main-filters"
+              ref={filterAnchorRef}
+              onPointerDownCapture={captureFilterPosition}
+              onKeyDownCapture={(event) => {
+                if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key))
+                  captureFilterPosition();
+              }}
+            >
+              <Filters
+                name="main"
+                scope={main}
+                state={state}
+                onBeforeChange={captureFilterPosition}
+                status={
+                  updating ? (
+                    <>
+                      <Spin size="small" delay={150} />
+                      <span>
+                        {data ? "正在更新筛选结果，暂显示上次结果。" : "正在加载筛选结果…"}
+                      </span>
+                    </>
+                  ) : result.error ? (
+                    <>
+                      <span>
+                        {result.error instanceof ApiError && result.error.status === 422
+                          ? result.error.message
+                          : "结果加载失败。"}
+                        {data ? "仍显示上次结果。" : "请重试。"}
+                      </span>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          captureFilterPosition();
+                          void result.refetch();
+                        }}
+                      >
+                        重试
+                      </Button>
+                    </>
+                  ) : null
+                }
+              />
             </div>
-            <Metrics data={data} active={active} toggle={toggle} />
+            <div aria-busy={updating}>
+              <div className="product-bar">
+                <div>
+                  <span>商品信息</span>
+                  <b>
+                    {shownScope.products.length === 1
+                      ? (data?.selection.product_name ?? "已选商品")
+                      : shownScope.products.length > 1
+                        ? `已选 ${shownScope.products.length} 款商品对比`
+                        : "筛选条件汇总"}
+                  </b>
+                  <small>
+                    {shownScope.products.length > 1
+                      ? "选择一个指标时，可查看各单款趋势"
+                      : `当前筛选范围内 ${data?.product_count ?? "—"} 个店铺商品链接`}
+                  </small>
+                </div>
+                <div>
+                  <span>店铺名称</span>
+                  <b>{data?.selection.shop_name ?? (shownScope.shop ? "所选店铺" : "全部店铺")}</b>
+                </div>
+                <div>
+                  <span>款式对应运营</span>
+                  <b>{shownScope.operator || "全部运营"}</b>
+                </div>
+                <div>
+                  <span>品类</span>
+                  <b>{shownScope.category || "全部品类"}</b>
+                </div>
+                <div>
+                  <span>产品等级</span>
+                  <b>{shownScope.level ? formatProductLevel(shownScope.level) : "全部等级"}</b>
+                </div>
+              </div>
+              <Metrics data={data} active={active} toggle={toggle} />
+            </div>
           </section>
           <Trends data={data} active={active} />
           <Risks data={data} />

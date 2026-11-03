@@ -11,6 +11,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.modules.product_board.repository import BoardError
 
+from .rowset import exact_compaction
+
 ROLES = {
     "j1_returns": ("jst_returns", "return_records", "售后确认期间明细"),
     "j2_shipped_sales": ("jst_shipped_sales", "product_sales_records", "已发货支付期间明细"),
@@ -49,6 +51,7 @@ def revision():
                 "analysis.py",
                 "classification.py",
                 "targets.py",
+                "rowset.py",
             )
         )
     ).hexdigest()
@@ -117,6 +120,8 @@ class Repository:
 
     def classification_parameters(self, report=None):
         """懒读所选报告固定包；旧报告未绑定/空词典不回退当前配置。"""
+        from .classification import PreparedParameters
+
         report = report or self.report
         rule_id = report.get("rule_set_id") if report else None
         if not rule_id:
@@ -131,7 +136,7 @@ class Repository:
                 .first()
             )
             self._classification[rule_id] = (
-                row["parameters"]
+                PreparedParameters(row["parameters"])
                 if row and row["domain"] == "aftersales" and row["schema_revision"] == "v1"
                 else None
             )
@@ -170,6 +175,7 @@ class Repository:
         )
 
     def rows(self, role, report=None):
+        """固定窗原行→完整身份/原原因等价组；保留计数及逐字段NULL证据。"""
         report = report or self.report
         if not report:
             return None
@@ -185,32 +191,75 @@ class Repository:
         if start != report["period_start"] or end != report["period_end"]:
             self._rows[key] = None
             return None
-        fields = (
-            (
-                *COMMON_FIELDS,
-                "actual_returned_qty",
-                "actual_inbound_amount",
-                "source_return_reason",
-                "source_aftersale_type",
-            )
+        dimensions = (
+            (*IDENTITY_FIELDS, "source_return_reason", "source_aftersale_type")
             if role == "j1_returns"
-            else (*COMMON_FIELDS, "sales_amount", "source_sales_qty")
+            else IDENTITY_FIELDS
+        )
+        fields = (
+            ("actual_returned_qty", "actual_inbound_amount")
+            if role == "j1_returns"
+            else ("sales_amount", "source_sales_qty")
+        )
+        amount = "actual_inbound_amount" if role == "j1_returns" else "sales_amount"
+        sums = ",".join(
+            f"CASE WHEN COUNT({field})=COUNT(*) THEN SUM({field}) END AS {field},"
+            f"SUM(ABS({field})) AS _absolute_{field}"
+            for field in fields
         )
         result = [
             dict(r)
             for r in self.c.execute(
                 sa.text(
-                    f"SELECT {','.join(fields)} FROM public.{table} WHERE dataset_version_id=:vid "
+                    f"SELECT {','.join(dimensions)},{sums},COUNT(*) AS _record_count,"
+                    "MIN(source_row_key) AS source_row_key,MIN(period_start) AS period_start,"
+                    "MAX(period_end) AS period_end,"
+                    f"COUNT({amount}) AS _amount_known_count,"
+                    f"COUNT(*) FILTER (WHERE {amount}=0) AS _amount_zero_count,"
+                    f"SUM({amount}) AS _amount_known_subtotal "
+                    f"FROM public.{table} WHERE dataset_version_id=:vid "
                     "AND row_kind='detail' AND period_start>=:start AND period_end<=:end "
                     "AND period_start IS NOT NULL AND period_end IS NOT NULL "
-                    "ORDER BY source_row_key LIMIT 300001"
+                    f"GROUP BY {','.join(dimensions)} ORDER BY MIN(source_row_key) LIMIT 300001"
                 ),
                 dict(vid=source["id"], start=start, end=end),
             ).mappings()
         ]
-        if len(result) > 300000:
+        count = sum(row["_record_count"] for row in result)
+        if count > 300000:
             raise BoardError("REPORT_SCOPE_ROW_LIMIT", 503)
+        if not exact_compaction(result, fields):
+            # 超出已证50位精确范围时维持原行顺序和原Decimal算法，不能因SQL重排改数字。
+            raw_fields = (*COMMON_FIELDS, *fields, *dimensions[len(IDENTITY_FIELDS) :])
+            self._rows[key] = [
+                dict(row)
+                for row in self.c.execute(
+                    sa.text(
+                        f"SELECT {','.join(raw_fields)} FROM public.{table} "
+                        "WHERE dataset_version_id=:vid AND row_kind='detail' "
+                        "AND period_start>=:start AND period_end<=:end "
+                        "AND period_start IS NOT NULL AND period_end IS NOT NULL "
+                        "ORDER BY source_row_key"
+                    ),
+                    dict(vid=source["id"], start=start, end=end),
+                ).mappings()
+            ]
+            return self._rows[key]
         self._rows[key] = result
+        # 元信息复用同一固定窗的完整聚合；空输入仍是已接收但无记录。
+        self._summaries[key] = {
+            "rows": count,
+            "first": min((row["period_start"] for row in result), default=None),
+            "last": max((row["period_end"] for row in result), default=None),
+            **{
+                field: (
+                    sum((row[field] for row in result), 0)
+                    if result and all(row[field] is not None for row in result)
+                    else None
+                )
+                for field in fields
+            },
+        }
         return result
 
     def source_summary(self, role, report=None):

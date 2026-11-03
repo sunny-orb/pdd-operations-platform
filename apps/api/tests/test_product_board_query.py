@@ -11,6 +11,50 @@ from tests.test_product_board_storage import candidate
 pytest_plugins = ["tests.sales_pg_support"]
 
 
+def test_score_catalog_keeps_profile_only_listings_with_filters_and_detail(sales_pg, tmp_path):
+    from app.modules.product_board.query import options
+    from app.modules.product_board.source import normalize
+
+    end, rows = candidate(duplicate_profile=False)
+    rows["profile_records"] = normalize(
+        "profile_records",
+        [
+            dict(__id=1, spigf="123", spmc="有经营款", cpdj="新品", pl="衣"),
+            dict(__id=2, spigf="456", spmc="无经营款", cpdj="新品", pl="帽", yy="甲"),
+            dict(__id=3, spigf="456", spmc="无经营款", cpdj="新品", pl="帽", yy="甲"),
+            dict(__id=4, spihw="456", spmc="另一店新品", cpdj="新品", pl="帽"),
+            dict(__id=5, spigf="789", spmc="等级冲突", cpdj="新品"),
+            dict(__id=6, spigf="789", spmc="等级冲突", cpdj="A级"),
+        ],
+        end,
+    )
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, rows))
+    with snapshot(sales_pg) as repo:
+        q = BoardQuery(repo.start, repo.end, size=12)
+        page = score_cards(repo, q)
+        assert page["total"] == page["total_count"] == 3
+        assert page["scored_count"] == 0
+        assert page["groups"] == dict(complete=0, pending=0, unscored=3)
+        assert len({r["listing_id"] for r in page["items"]}) == 3
+        missing = next(r for r in page["items"] if r["product_name"] == "无经营款")
+        assert missing["revenue"] is None and missing["score"] is None
+        assert missing["decision"] == "unscored"
+        filtered = score_cards(
+            repo, BoardQuery(repo.start, repo.end, shop="663599807", category="帽")
+        )
+        assert filtered["total"] == 1 and filtered["total_count"] == 3
+        assert filtered["items"][0]["listing_id"] == missing["listing_id"]
+        assert score_cards(repo, q, missing["listing_id"])["items"][0] == missing
+        directory = options(repo, q, (missing["listing_id"],), new_only=True)
+        assert directory["total"] == 3
+        assert directory["selection"]["products"] == [missing["listing_id"]]
+        assert options(repo, q)["total"] == 1
+        assert overview(repo, q)["metrics"]["revenue"]["value"] == Decimal("23.17")
+        empty = score_cards(repo, BoardQuery(repo.start, repo.end, category="不存在"))
+        assert empty["total"] == 0 and empty["total_count"] == 3
+        assert score_cards(repo, BoardQuery(repo.start, repo.end, page=2, size=12))["items"] == []
+
+
 def test_real_pg_category_comparison_allows_a_new_listing(sales_pg, tmp_path):
     from app.modules.product_board.source import normalize
 
@@ -133,7 +177,7 @@ def test_cross_shop_identity_conflicts_and_period_name_fallback(sales_pg, tmp_pa
         assert len(result["brief"]["products"]) == 2
         official = next(r for r in result["brief"]["products"] if r["shop_id"] == "663599807")
         assert official["product_name"] == "期间原名"
-        assert official["field_status"]["product_name"] == "conflict"
+        assert official["field_status"]["product_name"] == "multiple"
         scoped = options(repo, BoardQuery(q.start, q.end, shop="663599807", category="衣"))
         assert len(scoped["shops"]) == 2
 
@@ -178,6 +222,6 @@ def test_real_pg_missing_listing_days_remain_partial(sales_pg, tmp_path):
         result = overview(repo, BoardQuery(date(2026, 10, 20), end, products=(lid,)))
         assert result["metrics"]["revenue"]["value"] == Decimal("100")
         assert result["metrics"]["revenue"]["status"] == "partial"
-        assert result["metrics"]["revenue"]["mom"] is None
-        assert result["metrics"]["revenue"]["yoy"] is None
+        assert result["metrics"]["revenue"]["mom"] == 0
+        assert result["metrics"]["revenue"]["yoy"] == 0
         assert result["health"]["tone"] == "neutral"

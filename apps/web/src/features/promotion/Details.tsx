@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button, Select, Spin } from "antd";
 import type { Days } from "./contracts";
 import type { PromotionState } from "./data";
@@ -11,6 +11,12 @@ export function Details({ state }: { state: PromotionState }) {
   const wrap = useRef<HTMLDivElement>(null);
   const current = data?.page ?? state.scope.page;
   const pages = Math.max(1, data?.total_pages ?? 1);
+  const busy = !product && state.days.isFetching;
+  const failedPage = !product && !!state.days.error && current !== state.scope.page;
+  const visiblePage = data?.page;
+  useLayoutEffect(() => {
+    if (!product && visiblePage != null && wrap.current) wrap.current.scrollTop = 0;
+  }, [product, visiblePage]);
   const columns = product
     ? ["日期", "总花费", "交易额", "净交易额", "ROI", "成交笔数", "点击率", "点击转化率"]
     : ["日期", "店铺", "渠道", "花费", "交易额", "净交易额", "成交", "曝光", "点击", "来源"];
@@ -36,16 +42,16 @@ export function Details({ state }: { state: PromotionState }) {
           formatValue(row.deals),
           formatValue(row.impressions),
           formatValue(row.clicks),
-          row.source ?? "—",
+          row.source_label ?? "—",
         ];
   return (
     <section
-      className="panel table-panel"
+      className={`panel table-panel${product ? "" : " m2-store-details"}`}
       id="promotion-days"
       aria-label={product ? "每日推广数据" : "店铺渠道明细"}
     >
       <div className="detail-heading">
-        <span>推广明细</span>
+        {product && <span>推广明细</span>}
         <h2>{product ? "每日推广数据" : "店铺渠道明细"}</h2>
         {product && <small>按日期汇总；右侧进度条可拖动上下浏览</small>}
       </div>
@@ -76,11 +82,11 @@ export function Details({ state }: { state: PromotionState }) {
             </label>
           )}
           <Button
-            disabled={!data || current <= 1}
+            disabled={!data || current <= 1 || busy || failedPage}
             onClick={() => {
               state.change({ page: current - 1 });
               setProgress(0);
-              if (wrap.current) wrap.current.scrollTop = 0;
+              if (product && wrap.current) wrap.current.scrollTop = 0;
             }}
           >
             上一页
@@ -91,22 +97,41 @@ export function Details({ state }: { state: PromotionState }) {
             </div>
           )}
           <Button
-            disabled={!data || current >= pages}
+            disabled={!data || current >= pages || busy || failedPage}
             onClick={() => {
               state.change({ page: current + 1 });
               setProgress(0);
-              if (wrap.current) wrap.current.scrollTop = 0;
+              if (product && wrap.current) wrap.current.scrollTop = 0;
             }}
           >
             下一页
           </Button>
         </div>
       </div>
+      {!product && state.days.error && (
+        <div className="m2-detail-error" role="status">
+          <span>
+            {failedPage
+              ? `第${state.scope.page}页加载失败，仍显示第${current}页。`
+              : "明细暂时无法加载，请重试。"}
+          </span>
+          <Button
+            aria-label="重试"
+            size="small"
+            disabled={busy}
+            onClick={() => void state.days.refetch()}
+          >
+            重试
+          </Button>
+        </div>
+      )}
       <div className={product ? "table-shell" : "m2-store-table"}>
         <div
-          className="table-wrap"
+          className={`table-wrap${!product && data?.items.length ? " has-rows" : ""}`}
+          aria-busy={state.days.isFetching}
           ref={wrap}
           onScroll={(event) => {
+            if (!product) return;
             const element = event.currentTarget;
             setProgress(
               element.scrollHeight <= element.clientHeight
@@ -135,7 +160,7 @@ export function Details({ state }: { state: PromotionState }) {
               ))}
             </tbody>
           </table>
-          {!data?.items.length && (
+          {!data?.items.length && (product || !state.days.error) && (
             <p className="m2-empty">
               {state.days.isPending && state.version ? "正在读取明细…" : "当前筛选范围暂无记录"}
             </p>
@@ -162,6 +187,11 @@ export function Details({ state }: { state: PromotionState }) {
           </label>
         )}
       </div>
+      <p className="m2-detail-note">
+        {product
+          ? "0 表示实际为0；“—”表示未提供数据或无法计算。"
+          : "0 表示实际为0；“—”表示未提供该项数据。"}
+      </p>
     </section>
   );
 }

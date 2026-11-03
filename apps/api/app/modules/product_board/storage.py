@@ -189,7 +189,9 @@ class ProductBoardStore:
                     revision=REVISION,
                     producer=code_hash,
                     end=str(end),
-                    windows=windows(end),
+                    windows={
+                        code: windows(end, code) for code in TABLES if code != "profile_records"
+                    },
                     reused_source_versions=dict(reuse_sources),
                     files={p.name: fingerprint(p.read_text()) for p in archive.iterdir()},
                 )
@@ -329,7 +331,7 @@ class ProductBoardStore:
                     oldkeys = {
                         r["source_row_key"]
                         for r in oldrows
-                        if not fields or any(a <= r[fields[2]] <= b for a, b in windows(end))
+                        if not fields or any(a <= r[fields[2]] <= b for a, b in windows(end, code))
                     }
                     removed = oldkeys - newrows.keys()
                     if removed and not self.reconcile_full_scope:
@@ -444,7 +446,9 @@ class ProductBoardStore:
                         producer_revision=LOADED_PRODUCER_HASH,
                         retained_input_ref=str(archive),
                         received_at=None if code == "profile_links" else sa.func.clock_timestamp(),
-                        period_start=None if code == "profile_records" else windows(end)[0][0],
+                        period_start=None
+                        if code == "profile_records"
+                        else windows(end, code)[0][0],
                         period_end=None if code == "profile_records" else end,
                     )
                 )
@@ -498,7 +502,7 @@ class ProductBoardStore:
                     raise ValueError("STORED_PROJECTION_MISMATCH")
                 if code != "profile_links":
                     for start, finish in (
-                        ((None, None),) if code == "profile_records" else windows(end)
+                        ((None, None),) if code == "profile_records" else windows(end, code)
                     ):
                         date_field = "business_date" if code == "product_daily" else "period_start"
                         observed = (

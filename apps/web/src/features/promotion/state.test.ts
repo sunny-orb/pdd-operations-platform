@@ -2,6 +2,24 @@ import { describe, expect, it } from "vitest";
 import { dateError, readScope, toggleMetric, writeScope } from "./state";
 
 describe("推广独立范围与最新日期", () => {
+  it("旧混合等级链接保留精确条件，不自动扩大为全部多等级", () => {
+    for (const [input, expected] of [
+      ["A级/B级混合", "A级/B级混合"],
+      ["B级/S级混合", "B级/S级混合"],
+      ["多等级", "多等级"],
+      ["A级", "A级"],
+      ["未匹配", "未匹配"],
+    ]) {
+      expect(
+        readScope(
+          new URLSearchParams({ product_level: input }),
+          "product",
+          "2026-10-03",
+          "2026-11-01",
+        ).level,
+      ).toBe(expected);
+    }
+  });
   it("未自选日期随每次元信息推进；其它筛选不冻结默认日期", () => {
     const search = writeScope(new URLSearchParams(), "store", { shop: "663599807" });
     expect(readScope(search, "store", "2026-09-27", "2026-10-26").to).toBe("2026-10-26");

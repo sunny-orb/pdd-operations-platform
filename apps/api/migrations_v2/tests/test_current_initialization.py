@@ -85,7 +85,7 @@ class CurrentInitializationTests(unittest.TestCase):
         with self.engine.begin() as c:
             migrate(c)
             result = self.entry.inspect_empty(c)
-            self.assertEqual(result["revision"], "20261028_08")
+            self.assertEqual(result["revision"], "20261031_09")
             self.assertEqual(result["business_tables"], 31)
             self.assertEqual(result["columns"], 506)
             self.assertEqual(result["foreign_keys"], 51)

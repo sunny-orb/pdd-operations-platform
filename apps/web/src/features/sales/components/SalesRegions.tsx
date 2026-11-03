@@ -1,10 +1,21 @@
-import { SourceState } from "./SourceState";
+import { ProductRegionNotes } from "./ProductRegionNotes";
+import { formatFixedDecimal } from "../../../shared/format/decimal";
+import { SalesRegionNotes } from "./SalesRegionNotes";
 import { useState } from "react";
 import { Button, DatePicker, Input, Select, Table } from "antd";
 import dayjs from "dayjs";
 import type { FiltersResponse } from "../api/contracts";
 import { detailPath, productFiltersSchema, regionSchema, useSalesDetail } from "../api/details";
 import { count, fixed, money, percent } from "../format";
+import "./sales-regions.css";
+import "./product-regions.css";
+
+/** 产品地区沿线上展示元与两位小数；仅格式化API十进制串，不重算金额。 */
+function productValue(value: string | null | undefined, currency = false) {
+  if (value == null) return "—";
+  const formatted = formatFixedDecimal(value, 2, 0, true)!;
+  return currency ? `¥${formatted}` : formatted.replace(/(\.\d*?[1-9])0+$|\.0+$/, "$1");
+}
 type Props = { filters: FiltersResponse | null; onConflict: () => void };
 type Dates = { from: string; to: string };
 function DatesFilter({
@@ -28,6 +39,7 @@ function DatesFilter({
           {i > 0 && "至"}
           <DatePicker
             size="small"
+            format="YYYY/MM/DD"
             variant="borderless"
             allowClear={false}
             disabled={disabled}
@@ -140,7 +152,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
       rendered
     );
   const formatted = (field: string, value: string | null | undefined) =>
-    field.includes("amount") ? money(value, true) : count(value);
+    product ? productValue(value, field.includes("amount")) : count(value);
   return (
     <section
       className={`dashboard-section region-section ${product ? "product-region-section" : ""}`}
@@ -155,14 +167,13 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
               <>
                 {shopFilter}
                 {dateFilter}
-                {(shop || range.from !== latest || range.to !== latest) && (
-                  <Button
-                    className="reset-filter"
-                    onClick={() => {
-                      setShop("");
-                      setDates(null);
-                    }}
-                  >
+                {shop && (
+                  <Button className="reset-filter" onClick={() => setShop("")}>
+                    显示全部店铺
+                  </Button>
+                )}
+                {(range.from !== latest || range.to !== latest) && (
+                  <Button className="reset-filter" onClick={() => setDates(null)}>
                     恢复最新日
                   </Button>
                 )}
@@ -171,13 +182,22 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
           </div>
         </div>
         <p>
-          {source?.observed_from ?? "—"} 至 {latest || "—"} · 默认最新已观察日 · 完整日未确认
+          {product ? (
+            <>
+              可筛选 {source?.observed_from ?? "—"} 至 {latest || "—"} · 默认展示最新数据日
+            </>
+          ) : (
+            <>
+              可筛选 {source?.observed_from ?? "—"} 至 {latest || "—"}{" "}
+              的地区交易数据，默认展示最新数据日（不含当天）。
+            </>
+          )}
         </p>
       </div>
       {product && (
-        <div className="product-region-filters">
+        <div className="product-region-filters" aria-label="产品地区筛选">
           {shopFilter}
-          <div className="shop-filter">
+          <div className="shop-filter product-category">
             <span>品类</span>
             <Select
               variant="borderless"
@@ -192,20 +212,6 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
               onChange={(v) => {
                 setCategory(v);
                 setSearch("");
-                setProductKey("");
-                setOffset(0);
-              }}
-            />
-          </div>
-          <div className="product-search">
-            <span>查找产品</span>
-            <Input
-              disabled={!version}
-              placeholder="产品名称 / 款式编码"
-              aria-label="查找产品名称或编码"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
                 setProductKey("");
                 setOffset(0);
               }}
@@ -228,6 +234,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
               ]}
               onChange={setProductKey}
               popupMatchSelectWidth={360}
+              classNames={{ popup: { root: "m3-product-region-options" } }}
               popupRender={(menu) => (
                 <>
                   {menu}
@@ -259,22 +266,51 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
               )}
             />
           </div>
-          {dateFilter}
-          <Button
-            disabled={!version}
-            className="reset-filter"
-            onClick={() => {
-              setShop("");
-              setCategory("");
-              setSearch("");
-              setProductKey("");
-              setOffset(0);
-              setDates(null);
-            }}
-          >
-            重置筛选
-          </Button>
+          <div className="product-search">
+            <span>查找产品</span>
+            <Input
+              disabled={!version}
+              variant="borderless"
+              placeholder="名称 / 编码"
+              aria-label="查找产品名称或编码"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setProductKey("");
+                setOffset(0);
+              }}
+            />
+          </div>
+          <div className="product-date-actions">
+            {dateFilter}
+            <Button
+              disabled={!version}
+              className="reset-filter"
+              aria-label="重置筛选"
+              title="重置本区全部筛选"
+              onClick={() => {
+                setShop("");
+                setCategory("");
+                setSearch("");
+                setProductKey("");
+                setOffset(0);
+                setDates(null);
+              }}
+            >
+              重置
+            </Button>
+          </div>
         </div>
+      )}
+      {product && search && (
+        <p className="product-filter-hint" role="status">
+          {options.error
+            ? "产品选项读取失败，请重试。"
+            : options.data
+              ? `找到 ${options.data.data.total} 个产品选项，请在“产品”中选择。`
+              : "正在查找产品…"}
+          {!productKey && `当前仍汇总${category ? "该品类" : ""}全部产品。`}
+        </p>
       )}
       {(error || options.error) && (
         <p role="status">
@@ -294,17 +330,33 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
         <div className="region-overview">
           <div>
             <span>{product ? "实发金额（已知值合计）" : "地区成交金额"}</span>
-            <strong>{money(total?.[main])}</strong>
+            <strong>{product ? productValue(total?.[main], true) : money(total?.[main])}</strong>
             <small>
-              {range.from || "—"} 至 {range.to || "—"} ·{" "}
-              {shops.find((x) => x.value === shop)?.label} · {product ? category || "全部品类" : ""}{" "}
-              {productKey ? "· 已选产品" : ""}
+              {product ? (
+                <>
+                  {range.from || "—"}
+                  {range.to !== range.from && ` 至 ${range.to || "—"}`} ·{" "}
+                  {shops.find((x) => x.value === shop)?.label} · {category || "全部品类"}{" "}
+                  {productKey ? "· 已选产品" : ""}
+                </>
+              ) : (
+                <>
+                  {shop
+                    ? `${shops.find((x) => x.value === shop)?.label} · 地区汇总`
+                    : "全部店铺汇总"}{" "}
+                  · {range.from || "—"}
+                  {range.to !== range.from && ` 至 ${range.to || "—"}`}
+                </>
+              )}
             </small>
           </div>
           <dl>
             <div>
               <dt>覆盖地区</dt>
-              <dd>{d?.region_count ?? "—"}</dd>
+              <dd>
+                {d?.region_count ?? "—"}
+                {d && " 个"}
+              </dd>
             </div>
             {fields.slice(1).map((f, i) => (
               <div key={f}>
@@ -322,26 +374,46 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
             rowKey="region"
             dataSource={d?.items ?? []}
             pagination={false}
-            scroll={{ x: 760 }}
+            scroll={product ? { x: 880, y: 452 } : { x: 760, y: 412 }}
             components={{
               table: (p: React.HTMLAttributes<HTMLTableElement>) => (
                 <table {...p} aria-label={product ? "聚水潭产品地区数据" : "店铺后台地区数据"} />
               ),
             }}
-            locale={{ emptyText: version ? "当前条件暂无记录，缺失不补零" : "尚未接入" }}
+            locale={{
+              emptyText: product
+                ? error
+                  ? "产品地区数据读取失败"
+                  : !version
+                    ? "产品地区数据暂不可用"
+                    : !d
+                      ? "正在读取产品地区数据…"
+                      : "所选店铺、品类、产品及时间段暂无记录，请调整筛选条件。"
+                : error
+                  ? "地区交易数据读取失败"
+                  : !version
+                    ? "地区交易数据暂不可用"
+                    : !d
+                      ? "正在读取地区交易数据…"
+                      : d.source.state !== "observed"
+                        ? "地区交易数据暂不可用"
+                        : "暂无地区交易记录",
+            }}
             columns={
               product
                 ? [
-                    { title: "地区", dataIndex: "region" },
+                    { title: "地区", dataIndex: "region", width: 100, render: (v) => <b>{v}</b> },
                     {
                       title: "实发金额",
                       dataIndex: "actual_shipped_amount",
+                      width: 160,
                       render: (v, r) =>
-                        partial(v, r.null_counts.actual_shipped_amount ?? 0, money(v, true)),
+                        partial(v, r.null_counts.actual_shipped_amount ?? 0, productValue(v, true)),
                     },
                     {
                       title: "实发金额占比",
                       dataIndex: "share",
+                      width: 140,
                       render: (v, r) =>
                         v != null &&
                         ((r.null_counts.actual_shipped_amount ?? 0) > 0 ||
@@ -349,34 +421,43 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                           <span
                             title={`占比按已知实发金额计算；分母缺失${d?.null_counts.actual_shipped_amount ?? 0}条，本地区缺失${r.null_counts.actual_shipped_amount ?? 0}条`}
                           >
-                            {percent(v, 1)}*
+                            {percent(v)}*
                           </span>
                         ) : (
-                          percent(v, 1)
+                          percent(v)
                         ),
                     },
                     {
                       title: "实发件数",
                       dataIndex: "actual_shipped_qty",
-                      render: (v, r) => partial(v, r.null_counts.actual_shipped_qty ?? 0, count(v)),
+                      width: 110,
+                      render: (v, r) =>
+                        partial(v, r.null_counts.actual_shipped_qty ?? 0, productValue(v)),
                     },
                     {
                       title: "实退金额",
                       dataIndex: "actual_returned_amount",
+                      width: 150,
                       render: (v, r) =>
-                        partial(v, r.null_counts.actual_returned_amount ?? 0, money(v, true)),
+                        partial(
+                          v,
+                          r.null_counts.actual_returned_amount ?? 0,
+                          productValue(v, true),
+                        ),
                     },
                     {
                       title: "实退件数",
                       dataIndex: "actual_returned_qty",
+                      width: 110,
                       render: (v, r) =>
-                        partial(v, r.null_counts.actual_returned_qty ?? 0, count(v)),
+                        partial(v, r.null_counts.actual_returned_qty ?? 0, productValue(v)),
                     },
                     {
                       title: "退款率",
                       dataIndex: "refund_rate",
+                      width: 110,
                       render: (v, r) => (
-                        <span title="付款日筛选的来源期间参考占比；实退按退货发生周期，不能当同批订单退款率">
+                        <span title="所选期间实退金额÷实发金额；实退与实发可能来自不同批次的订单">
                           {percent(v)}
                           {v != null &&
                           (r.null_counts.actual_shipped_amount > 0 ||
@@ -388,10 +469,16 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                     },
                   ]
                 : [
-                    { title: "地区", dataIndex: "region" },
+                    {
+                      title: "地区",
+                      dataIndex: "region",
+                      width: "11.5%",
+                      render: (v) => <b>{v}</b>,
+                    },
                     {
                       title: "成交金额",
                       dataIndex: "transaction_amount",
+                      width: "29.5%",
                       render: (v, r) => (
                         <span className="region-sales">
                           <i>
@@ -405,9 +492,24 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                         </span>
                       ),
                     },
-                    { title: "销售额占比", dataIndex: "share", render: (v) => percent(v, 1) },
-                    { title: "成交订单数", dataIndex: "transaction_orders", render: count },
-                    { title: "成交买家数", dataIndex: "transaction_buyers", render: count },
+                    {
+                      title: "销售额占比",
+                      dataIndex: "share",
+                      width: "14.7%",
+                      render: (v) => percent(v, 1),
+                    },
+                    {
+                      title: "成交订单数",
+                      dataIndex: "transaction_orders",
+                      width: "14.7%",
+                      render: count,
+                    },
+                    {
+                      title: "成交买家数",
+                      dataIndex: "transaction_buyers",
+                      width: "14.7%",
+                      render: count,
+                    },
                     {
                       title: "成交客单价",
                       dataIndex: "aov",
@@ -417,45 +519,25 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
             }
           />
         </div>
-        {product && (
+        {product && d && fields.some((f) => d.null_counts[f] > 0) && (
           <p className="product-data-warning">
-            字段缺失统计：
+            部分记录未提供：
             {fields
-              .map(
-                (f, i) =>
-                  `${["实发金额", "实发件数", "实退金额", "实退件数"][i]} ${d?.null_counts[f] ?? "—"}`,
+              .map((f, i) =>
+                d.null_counts[f] > 0
+                  ? `${["实发金额", "实发件数", "实退金额", "实退件数"][i]} ${count(String(d.null_counts[f]))}条`
+                  : null,
               )
+              .filter(Boolean)
               .join("、")}
-            ；仅合计已知值，不补零。
-            <br />
-            <SourceState source={source ?? d?.source} label="聚水潭地区" />
+            。“—”表示无已知值，“*”表示部分缺失；仅累计已有数值。
           </p>
         )}
       </div>
       {product ? (
-        <details className="product-region-notes">
-          <summary>查看聚水潭口径</summary>
-          <p>
-            按数仓业务日期（dt）、店铺、省份汇总日粒度记录；品类取商品分类，产品按款式编码合并颜色及规格，款式未设置时按商品编码区分。缺码记录保留在全部产品汇总，不合成一个可选产品。
-          </p>
-          <p>
-            退款率＝实退金额合计÷实发金额合计，不平均源比率；实发金额≤0或无已知值显示“—”，部分金额缺失标“*”。业务日期已确认按付款日、实退计退货发生周期；当前源只有一个dt，仍作来源期间参考占比，不推断同批最终退款，不与后台GMV相加。排除包材、儿童赠品、分类未设置。产品搜索只影响候选，选择产品后才影响汇总。
-          </p>
-          <small>
-            数据表：bwd_rpa_pdd_region_sales_summary_jst_f · 来源更新时间：
-            {d?.source.source_updated_text ?? "—"} · 当前筛选无记录店铺日{" "}
-            {d?.missing_shop_days.length ?? "—"}
-          </small>
-        </details>
+        <ProductRegionNotes data={d} shops={filters?.data.shops ?? []} source={source} />
       ) : (
-        <p className="sales-footer">
-          来源：bwd_rpa_pdd_region_sales_summary_pddht_f · 来源更新时间：
-          {d?.source.source_updated_text ?? "—"}
-          <br />
-          <SourceState source={source ?? d?.source} label="后台地区" />
-          。买家数按店铺、日期、地区累加，不跨日去重。客单价仅用成交金额/买家均有值的记录计算；当前筛选无记录店铺日{" "}
-          {d?.missing_shop_days.length ?? "—"}，不补零。
-        </p>
+        <SalesRegionNotes data={d} shops={filters?.data.shops ?? []} source={source ?? d?.source} />
       )}
     </section>
   );

@@ -115,7 +115,7 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 
 ## 入口与后续结构变更
 
-本轮入口`apps/api/.venv/bin/python scripts/db-v2.py verify`仅写本次随机隔离库，项目仅作只读快照；`create`用于通过相同文件指纹验证的全新空项目库，当前非空`pdd_operations`仍拒绝执行。入口限定本机55432、PG17、pdd_admin、固定Docker Unix socket与同一集群，旧M1链/配置不参与。当前初始化目标明确为`20261028_08`，不能静默跟随未来head；旧01基线、冻结字典及schema.sql保持历史原样。
+本轮入口`apps/api/.venv/bin/python scripts/db-v2.py verify`仅写本次随机隔离库，项目仅作只读快照；`create`用于通过相同文件指纹验证的全新空项目库，当前非空`pdd_operations`仍拒绝执行。入口限定本机55432、PG17、pdd_admin、固定Docker Unix socket与同一集群，旧M1链/配置不参与。当前初始化目标明确为`20261031_09`，不能静默跟随未来head；旧01基线、冻结字典及schema.sql保持历史原样。
 
 ### 当前head新空环境初始化设计与实施（COMMON-ISS-04）
 
@@ -128,7 +128,7 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 1. 增加真实PG反例：现有head空表应通过新校验，旧01校验必须先失败；全新随机库调用同一初始化路径后31业务表506字段/51FK及技术版本表、全表零行、实际运行角色权限准确，重跑拒绝且结构/授权不变。
 2. 在scripts/db-v2.py将当前head定义/结构验收与冻结01分离；备份与snapshot接受同一受控库名供随机库验证，CLI仍只面向固定项目库。核对head、验证指纹、空对象/函数、角色及目标身份后才备份；权限、升级、空表验收在同一事务，提交后独立连接再次核验。
 3. 在随机真实PG库注入迁移中途SQL故障，核对DDL/revision/授权整体回滚、同集群schema-only备份与0600证据保留，随后同一空库可重跑成功；已有对象拒绝且不损坏。验证结束仅清理本次创建的临时库。
-4. 完成v2定向测试、静态检查与冻结派生SQL一致性检查；独立只读核对项目库结构和各表计数前后一致。证据交回validation/问题台账维护者；本轮禁止对当前项目库调用create或执行迁移。
+4. 完成v2定向测试、静态检查与冻结派生SQL一致性检查；独立只读核对项目库结构和各表计数前后一致。证据交回validation/问题台账维护者；该空库初始化验收不授权对当前非空项目库调用create；有数据项目库按下方逐版方案及本轮明确授权升级。
 
 失败恢复：提交前错误由事务整体回滚，保留迁移前schema-only备份/目标身份快照，不清表或自动降级；确认空状态及指纹未变后可重跑。提交后独立验收失败时保留现场和证据，先只读诊断，不自动回退、删库或恢复覆盖。有数据环境的修复另按获准逐版方案执行。
 
@@ -149,3 +149,7 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 沿用户整页接入授权，03仅为既有pdd_ingest追加七表SELECT/INSERT：评分、店铺渠道推广、退款、后台地区、产品地区及目标头/成员。不新增字段/索引，不授删除、封版编辑或其他域写入，01/02保持冻结。受控upgrade-sales-local入口当前精确02→03；先重新db-v2 verify并核对摘要、既有授权及同集群schema备份再执行，已是03只报告不重复变更。目标两表授权不表示目标接收已完成。
 
 回退先停止整页接收任务，在受控本地事务降至02，仅撤本次七表授权；保留全部数据、归档、成功指针及API只读权限，不回退初始表结构。批次故障允许保留未发布draft，下一次完整重跑另建候选，绝不手工补写封版或删除来源行。分批每1000行提交/续租，最终逐字段验证后才封版切当前指针；失败旧成功版持续可读。
+
+## 09实际日期查询索引（20261031_09）
+
+2026-10-31按用户全库性能授权追加两条普通B-tree，专用对象/事务/回退方案与31表覆盖证据见[数据库性能设计](../implementation/database-performance.md)。不改01～08、不增加字段或放宽约束。新空库初始化前进到09；08已用库通过`upgrade-query-indexes-local.py`持项目同步锁执行，先通过独立真实PG验证并保存schema备份，禁止用`db-v2 create`覆盖。回退仅删除两条新增索引。

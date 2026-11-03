@@ -1,0 +1,59 @@
+/* 仅经营八卡及其退款计算弹层；延续原Card布局和金额样式。 */
+.m3-sales-scope .sales-kpi-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 24px;
+}
+.m3-sales-scope .sales-refund-trigger {
+  padding: 0;
+  height: 24px;
+  font-size: 12px;
+}
+.m3-sales-scope .sales-refund-trigger:not(:disabled) > span {
+  color: var(--sales-blue);
+}
+.m3-sales-scope .kpi-card .sales-refund-warning {
+  display: block;
+  margin-top: 6px;
+  color: #805a1e;
+}
+.sales-refund-popover {
+  max-width: calc(100vw - 24px);
+}
+.sales-refund-calculation {
+  width: 400px;
+  max-width: calc(100vw - 56px);
+  max-height: min(360px, 65vh);
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  color: #223552;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.sales-refund-calculation p {
+  margin: 0 0 10px;
+}
+.sales-refund-calculation > :last-child {
+  margin-bottom: 0;
+}
+.sales-refund-calculation .sales-refund-scope {
+  color: #66768d;
+}
+.sales-refund-calculation .sales-refund-formula {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.sales-refund-calculation ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+.sales-refund-calculation li + li {
+  margin-top: 6px;
+}
+.sales-refund-calculation time {
+  display: inline-block;
+  white-space: nowrap;
+}

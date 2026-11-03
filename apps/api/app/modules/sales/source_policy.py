@@ -26,6 +26,8 @@ METRICS = {
 CORE = tuple(list(METRICS)[:4])
 MISSING_MARKERS = ("-", "--", "—")
 APPROVED_START = date(2026, 2, 1)
+PROMOTION_START = date(2025, 2, 1)
+PROMOTION_CODES = ("shop_channel_product_promotion", "shop_channel_star_shop")
 FISCAL_END = date(2027, 1, 31)
 SOURCE_TABLE = "ods_rpa_pdd_traffic_kanban_overview_f"
 POLICY_REVISION = "m3-shop-daily-v2"
@@ -37,16 +39,18 @@ def calendar_through() -> date:
     return min(datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1), FISCAL_END)
 
 
-def approved_window():
-    from .contracts import ReadWindow
+def approved_window(code=None):
+    from .contracts import PromotionReadWindow, ReadWindow
 
+    if code in PROMOTION_CODES:
+        return PromotionReadWindow(PROMOTION_START, calendar_through(), tuple(SHOPS))
     return ReadWindow(APPROVED_START, calendar_through(), tuple(SHOPS))
 
 
-def validate_read_window(window):
+def validate_read_window(window, code=None):
     """所有来源读取均限定当次批准日历；只读核验也不能读取未来日期。"""
     from .contracts import SalesError
 
-    approved = approved_window()
+    approved = approved_window(code)
     if not approved.start <= window.start <= window.end <= approved.end:
         raise SalesError("SOURCE_WINDOW_NOT_APPROVED")

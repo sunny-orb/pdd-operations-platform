@@ -1,4 +1,5 @@
 import { formatFixedDecimal } from "../../shared/format/decimal";
+import type { UpdateSource } from "./updateStatus";
 export type DomainId = "sales" | "products" | "promotion" | "aftersales";
 export type ValueType = "number" | "currency" | "percent" | "ratio";
 export type Field = {
@@ -8,6 +9,9 @@ export type Field = {
   note?: string;
 };
 export type Observation = {
+  /** 只保留负责域返回的规则及版本，中心不重新判断或分级。 */
+  sourceRules?: string[];
+  ruleVersion?: string;
   id: string;
   domain: DomainId;
   level: "observation";
@@ -23,14 +27,22 @@ export type Observation = {
 };
 export type SuggestedAction = {
   id: string;
+  /** 仅商品/推广提供归并身份；售后沿原始项透传。 */
+  domain?: DomainId;
+  objectKey?: string | null;
   issue: string;
   impact: string | null;
   impactKind: string;
   hypothesis: string;
   suggestion: string;
-  assignee: "未分配";
-  due: "未登记";
-  progress: "建议，未登记";
+  assignee: "未分配" | "待分配";
+  due: "未登记" | "待分配";
+  progress: "建议，未登记" | "待核查";
+  reviewDate?: "待分配";
+  context?: Pick<
+    Observation,
+    "scope" | "detail" | "sourcePriority" | "sourceRules" | "ruleVersion"
+  >;
   verification: string;
   link: string;
 };
@@ -42,6 +54,7 @@ export type DomainCard = {
   valueLabel: string;
   pairs: Field[];
   note: string;
+  sourceNote?: string;
   link: string;
   status: string;
 };
@@ -63,14 +76,18 @@ export type DomainMeta<M = unknown> = {
   attemptStatus: string | null;
   status: string;
   notes: string[];
+  updates?: UpdateSource[];
   raw: M;
 };
 export const domains = [
   { id: "sales", label: "店铺 GMV", link: "/sales" },
-  { id: "products", label: "商品经营", link: "/products" },
+  { id: "products", label: "商品数据", link: "/products" },
   { id: "promotion", label: "推广效率", link: "/promotion?mode=product" },
   { id: "aftersales", label: "售后退款", link: "/aftersales" },
 ] as const;
+export function sourceLabel(domain: DomainId | undefined) {
+  return domains.find((item) => item.id === domain)?.label ?? "来源";
+}
 /** 只格式化API十进制原值，不合计金额、比率或增长；原型金额显示到元。 */
 export function formatMetric(
   value: string | null | undefined,
@@ -156,6 +173,109 @@ export function centerCounts(
     actionRows: actions.length,
   };
 }
+
+export type SourcePriority = "P0" | "P1" | "P2";
+export type AlertObject = {
+  id: string;
+  objectKey: string | null;
+  sourcePriority: SourcePriority | null;
+  members: Observation[];
+};
+export type ActionObject = {
+  id: string;
+  objectKey: string | null;
+  members: SuggestedAction[];
+  suggestions: string[];
+};
+const sourcePriorityOrder = ["P0", "P1", "P2"] as const;
+const isListingDomain = (domain: DomainId | undefined) =>
+  domain === "products" || domain === "promotion";
+const priorityRank = (priority: SourcePriority | null) =>
+  priority === null ? 3 : sourcePriorityOrder.indexOf(priority);
+
+/** 中心展示投影：只归并完整商品/推广身份，保留来源证据和金额；售后逐项透传。 */
+export function buildCenterView(
+  observations: readonly Observation[],
+  actions: readonly SuggestedAction[],
+  coverage: readonly ObservationCoverage[],
+) {
+  const alertMap = new Map<string, AlertObject>();
+  observations.forEach((item, index) => {
+    const key =
+      isListingDomain(item.domain) && item.objectLevel === "listing" && item.objectKey
+        ? `object:${item.objectKey}`
+        : `observation:${item.domain}:${item.id}:${index}`;
+    const group = alertMap.get(key) ?? {
+      id: key,
+      objectKey: item.objectKey,
+      sourcePriority: null,
+      members: [],
+    };
+    group.members.push(item);
+    // 原域等级仅用于商品/推广处理顺序，绝不覆盖正式中心等级或售后状态。
+    if (isListingDomain(item.domain)) {
+      group.sourcePriority =
+        sourcePriorityOrder.find((priority) =>
+          group.members.some((member) => member.sourcePriority === priority),
+        ) ?? null;
+    }
+    alertMap.set(key, group);
+  });
+  const alerts = [...alertMap.values()].sort(
+    (a, b) => priorityRank(a.sourcePriority) - priorityRank(b.sourcePriority),
+  );
+  const actionMap = new Map<string, ActionObject>();
+  actions.forEach((item, index) => {
+    if (isListingDomain(item.domain) && !item.suggestion.trim()) return;
+    const key =
+      isListingDomain(item.domain) && item.objectKey
+        ? `object:${item.objectKey}`
+        : `action:${item.id}:${index}`;
+    const group = actionMap.get(key) ?? {
+      id: key,
+      objectKey: item.objectKey ?? null,
+      members: [],
+      suggestions: [],
+    };
+    group.members.push(item);
+    const suggestion = isListingDomain(item.domain) ? item.suggestion.trim() : item.suggestion;
+    if (!group.suggestions.includes(suggestion)) group.suggestions.push(suggestion);
+    actionMap.set(key, group);
+  });
+  const groupedActions = [...actionMap.values()].sort(
+    (a, b) =>
+      priorityRank(alertMap.get(a.id)?.sourcePriority ?? null) -
+      priorityRank(alertMap.get(b.id)?.sourcePriority ?? null),
+  );
+  const sourceAlerts = alerts.filter((group) => isListingDomain(group.members[0].domain));
+  const mapped = sourceAlerts.filter(
+    (group) => group.objectKey && group.members[0].objectLevel === "listing",
+  );
+  const sourceAvailable = coverage.some(
+    (c) => isListingDomain(c.domain) && (c.status === "observed" || c.status === "retained"),
+  );
+  const sourceCounts =
+    mapped.length || (sourceAvailable && !sourceAlerts.length)
+      ? {
+          P0: mapped.filter((x) => x.sourcePriority === "P0").length,
+          P1: mapped.filter((x) => x.sourcePriority === "P1").length,
+          P2: mapped.filter((x) => x.sourcePriority === "P2").length,
+          ungraded: mapped.filter((x) => x.sourcePriority === null).length,
+        }
+      : null;
+  const counts = centerCounts(observations, groupedActions, coverage);
+  return {
+    alerts,
+    actions: groupedActions,
+    counts,
+    sourceCounts,
+    actionCount: groupedActions.length || (counts.availableDomains ? 0 : null),
+    sourceActionRows: actions.length,
+    unmappedActions: groupedActions.filter(
+      (group) => isListingDomain(group.members[0].domain) && !group.objectKey,
+    ).length,
+  };
+}
 const hasIdentity = (value: string | null | undefined): value is string =>
   typeof value === "string" && value.trim().length > 0;
 /** 完整店铺+链接在M1/M2共用身份命名空间，不将同品类或同商品裸ID合并。 */
@@ -183,6 +303,12 @@ export function productLink(date: string, object?: { listing_id: string; shop_id
     q.set("main_shop", object.shop_id);
     q.set("main_listing", object.listing_id);
   }
+  return `/products?${q}#risk`;
+}
+/** 风险定位保留用于排名的来源期间；默认全店不追加店铺过滤，链接ID已含店铺身份。 */
+export function productRiskLink(period: { start: string; end: string }, listingId?: string) {
+  const q = new URLSearchParams({ main_from: period.start, main_to: period.end });
+  if (listingId) q.set("main_listing", listingId);
   return `/products?${q}#risk`;
 }
 export function promotionLink(
@@ -215,14 +341,28 @@ export function actionFromObservation(
 ): SuggestedAction {
   return {
     id: item.id,
+    domain: item.domain,
+    objectKey: item.objectLevel === "listing" ? item.objectKey : null,
     issue: item.title,
     impact: item.impact,
     impactKind: item.impactKind,
     hypothesis,
     suggestion,
-    assignee: "未分配",
-    due: "未登记",
-    progress: "建议，未登记",
+    assignee: item.domain === "aftersales" ? "未分配" : "待分配",
+    due: item.domain === "aftersales" ? "未登记" : "待分配",
+    progress: item.domain === "aftersales" ? "建议，未登记" : "待核查",
+    ...(item.domain === "aftersales"
+      ? {}
+      : {
+          reviewDate: "待分配" as const,
+          context: {
+            scope: item.scope,
+            detail: item.detail,
+            sourcePriority: item.sourcePriority,
+            sourceRules: item.sourceRules,
+            ruleVersion: item.ruleVersion,
+          },
+        }),
     verification,
     link: item.link,
   };

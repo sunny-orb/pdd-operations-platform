@@ -1,0 +1,86 @@
+.m3-sales-scope .rating-trend-panel .rating-shop-dot {
+  display: inline-block;
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.m3-sales-scope .rating-trend-controls .ant-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.m3-sales-scope .rating-chart {
+  position: relative;
+  margin-top: 12px;
+  min-width: 0;
+}
+
+.m3-sales-scope .rating-chart-unit {
+  position: absolute;
+  top: 4px;
+  left: 12px;
+  color: #69778b;
+  font-size: 12px;
+}
+
+.m3-sales-scope .rating-trend-tooltip {
+  padding: 10px 12px;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #243b5d;
+  font-size: 12px;
+  box-shadow: 0 4px 16px #16335414;
+}
+
+.m3-sales-scope .rating-trend-tooltip > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.m3-sales-scope .rating-trend-tooltip strong {
+  margin-left: auto;
+  padding-left: 10px;
+  font-weight: 500;
+}
+
+.m3-sales-scope .rating-trend-panel .rating-values-scroll {
+  max-width: 100%;
+}
+
+/* 列对齐由Table统一控制表头和正文，避免旧样式将标题与分数放在列的两端。 */
+.m3-sales-scope
+  .rating-trend-panel
+  .rating-values
+  .ant-table.ant-table-small
+  .ant-table-thead
+  > tr
+  > th,
+.m3-sales-scope
+  .rating-trend-panel
+  .rating-values
+  .ant-table.ant-table-small
+  .ant-table-tbody
+  > tr
+  > td {
+  padding: 12px 16px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 700px) {
+  .m3-sales-scope .rating-trend-controls > fieldset,
+  .m3-sales-scope .rating-trend-controls > .region-date-filter {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .m3-sales-scope .rating-trend-controls > .region-date-filter {
+    flex-wrap: wrap;
+  }
+}

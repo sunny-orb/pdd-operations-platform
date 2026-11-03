@@ -82,7 +82,7 @@
 | `profile_source_records` | 一份source资料输入中的一条必要原行 | `dataset_version_id → dataset_versions.id`，版本1:N原行；保留源ID及13个必要原格；不保存全量词元。只有源修订换原行版，重解析/映射只换关系版，不复制原格。                                                                                                                                                                                            |
 | `profile_listing_links`  | 一资料原行与一已核链接的解析关系   | `profile_record_id → profile_source_records.id`、`listing_id → listings.id`及关系版本FK，原行↔链接N:M；关系版通过唯一profile_records角色固定source原行版，profile_record_id必须属于该版；日期在本关系用listed_date_applicability_status与证据明确，日期值不重复。版本内原行/链接关系唯一；不解析混串内数字猜ID，未识别/冲突留原证据，不创建假链接。 |
 
-资料共识只作为共享查询/普通视图。固定资料版本按链接集合全部原行，逐字段判唯一非空共识、缺失或冲突；资料投影LEFT JOIN每链接至多一行，不给同一事实乘行。原款号可按来源解析展示；目前没有全局产品主数据维护或已核跨源SKU归属要求，不先建立统一款式/SKU主数据关系。以后真正需要跨源货品管理时再取得U03证据并补表。
+资料共识只作为共享查询/普通视图。固定资料版本按链接集合全部原行，按data-contract 4.1区分唯一值、正常多规格集合、组合品类及需唯一归属字段的冲突；资料投影LEFT JOIN每链接至多一行，不给同一事实乘行。原款号可按来源解析展示；目前没有全局产品主数据维护或已核跨源SKU归属要求，不先建立统一款式/SKU主数据关系。以后真正需要跨源货品管理时再取得U03证据并补表。
 
 上架日期按资料原行—链接的关系分别核验：confirmed且原日期可解析才有日期；not_applicable排除，unknown/conflict或其他未证日期不被一条好日期覆盖。纯解析/映射/适用性修订只生成新的profile_links，固定原source输入和解释/代码，诊断可重放。商品名优先资料共识（含data-contract 4.1限定的完整末尾款式括号基础名）；回退只用本K、实际固定事实及其窗口，日明细为当日唯一原名，期间卡片为最近有非空原名日的唯一值；同日多名仍冲突并返回候选，不按名称拆商品。评分用其product_current版本/窗，不读新当前事实。
 

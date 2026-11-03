@@ -387,7 +387,10 @@ class PostgreSQLBaselineTests(unittest.TestCase):
                     for i in inspector.get_indexes(table.name, schema="public")
                     if not i.get("duplicates_constraint")
                 }
-                self.assertEqual(actual_indexes, {i.name for i in table.indexes})
+                expected_indexes = {i.name for i in table.indexes}
+                if table.name in ("product_promotion_records", "product_region_records"):
+                    expected_indexes.add(f"ix_{table.name}_version_period_start")
+                self.assertEqual(actual_indexes, expected_indexes)
                 self.assertGreater(
                     self.conn.execute(sa.select(sa.func.count()).select_from(table)).scalar_one(), 0
                 )
@@ -444,7 +447,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_08",
+            "20261031_09",
         )
 
     def test_02_all_numeric_columns_reject_nonfinite_values(self):
@@ -711,7 +714,7 @@ class PostgreSQLBaselineTests(unittest.TestCase):
             self.conn.execute(
                 sa.text("SELECT version_num FROM public.alembic_version_v2")
             ).scalar_one(),
-            "20261028_08",
+            "20261031_09",
         )
 
     def test_18_locking_seal_blocks_content_and_rejects_after_commit(self):

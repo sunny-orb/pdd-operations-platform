@@ -117,11 +117,12 @@ def previous_year(day):
         return None
 
 
-def windows(end):
+def windows(end, code=None):
+    """页面/评分仍为60日；仅商品接收前扩60日，供最长60日区间的环比使用。"""
     start = end - timedelta(days=59)
     # Feb29 has no same-calendar comparison: query broad dates, comparison maps exact dates.
     return (
-        (start, end),
+        (end - timedelta(days=119) if code == "product_daily" else start, end),
         (
             previous_year(start) or date(start.year - 1, 3, 1),
             previous_year(end) or date(end.year - 1, 2, 28),
@@ -161,7 +162,7 @@ def normalize(code, records, end):
             if (
                 raw.get("time_granularity") != "day"
                 or dt.time() != time()
-                or not any(a <= day <= b for a, b in windows(end))
+                or not any(a <= day <= b for a, b in windows(end, code))
             ):
                 raise ValueError("SOURCE_DATE_SCOPE_INVALID")
             if code == "product_daily":

@@ -42,7 +42,18 @@ def restore_candidate(folder: Path):
             != Path(source_normalization.__file__).read_text()
         ):
             raise SalesError("ARCHIVE_INTERPRETER_MISMATCH")
-        candidate = normalize_source(manifest["dataset"]["code"], rows, window)
+        if manifest["dataset"]["code"] == "shop_promotion_history":
+            from . import promotion_history
+            from .promotion_history import normalize_history
+
+            if (
+                sources.get("modules/sales/promotion_history.py")
+                != Path(promotion_history.__file__).read_text()
+            ):
+                raise SalesError("ARCHIVE_INTERPRETER_MISMATCH")
+            candidate = normalize_history(rows)
+        else:
+            candidate = normalize_source(manifest["dataset"]["code"], rows, window)
         candidate = replace(candidate, source_metadata=manifest.get("source_metadata"))
     else:
         candidate = normalize_shop_daily(rows, window)

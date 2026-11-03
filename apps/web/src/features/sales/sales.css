@@ -59,6 +59,41 @@
 .m3-sales-scope .sales-filters .ant-select {
   min-width: 142px;
 }
+/* 月份高亮外框；日期两端独立高亮，避免原型输入框重复描边。 */
+.m3-sales-scope .sales-filters .sales-date-range .ant-picker {
+  width: 125px;
+}
+.m3-sales-scope .sales-filters .prototype-select-label:focus-within {
+  border-color: #1768d9;
+}
+.m3-sales-scope .sales-filters :is(.ant-select, .ant-picker) {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+.m3-sales-scope .sales-filters :is(.ant-select-input, .ant-picker-input > input) {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+/* 经营店铺筛选仅高亮外框，保留键盘焦点；箭头沿用组件默认样式。 */
+.m3-sales-scope #performance .shop-filter:focus-within,
+.m3-sales-scope #performance .shop-filter:has(.ant-select-open) {
+  border-color: #1768d9;
+}
+.m3-sales-scope #performance .shop-filter :is(.ant-select, .ant-select-input) {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+.m3-sales-scope
+  .sales-filters
+  .sales-date-range
+  .ant-picker:is(:focus-within, .ant-picker-focused) {
+  outline: 1px solid #1768d9 !important;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
 .m3-sales-scope .ant-select .ant-select-selector {
   border: 0 !important;
   box-shadow: none !important;
@@ -200,6 +235,50 @@
 }
 .m3-sales-scope .source-coverage {
   overflow-wrap: anywhere;
+}
+.m3-sales-scope .sales-coverage-shops {
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+}
+.m3-sales-scope .sales-coverage-shops li + li {
+  margin-top: 8px;
+}
+.m3-sales-scope .sales-coverage-shops li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.m3-sales-scope .sales-coverage-shops b {
+  flex: 0 0 6em;
+}
+.m3-sales-scope .sales-coverage-fields {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 12px;
+  min-width: 0;
+}
+.m3-sales-scope .sales-coverage-fields > span + span::before {
+  content: "·";
+  margin-right: 12px;
+}
+.m3-sales-scope .sales-coverage-date {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+@media (max-width: 700px) {
+  .m3-sales-scope .sales-coverage-shops li {
+    display: block;
+  }
+  .m3-sales-scope .sales-coverage-fields {
+    display: block;
+  }
+  .m3-sales-scope .sales-coverage-fields > span {
+    display: block;
+  }
+  .m3-sales-scope .sales-coverage-fields > span + span::before {
+    content: none;
+  }
 }
 .m3-sales-scope .rating-trend-controls .ant-checkbox-wrapper {
   font-size: 12px;

@@ -1,3 +1,4 @@
+import { supplementSchema } from "../../../shared/promotion/contracts";
 import { z } from "zod";
 
 export const numeric = z
@@ -39,6 +40,14 @@ export const metricsSchema = z.object({
   promotion_spend: numeric,
   promotion_ctr: numeric,
   promotion_roi: numeric,
+  refund_coverage: z
+    .object({
+      state: z.enum(["observed", "not_connected"]),
+      missing_record_dates: z.array(date),
+      null_amount_dates: z.array(date),
+    })
+    .nullable()
+    .optional(),
   refund_match: z
     .object({
       matched_refunds: numeric,
@@ -60,10 +69,12 @@ export const metricsSchema = z.object({
     })
     .nullable()
     .optional(),
+  promotion_supplements: z.array(supplementSchema).optional(),
   promotion_channels: z
     .array(
       z.object({
         code: z.string(),
+        latest_observed_date: date.nullable().optional(),
         business_date_basis: z.literal("payment_date").optional(),
         attribution_state: z.literal("source_reported_payment_date").optional(),
         spend: numeric,
@@ -71,6 +82,16 @@ export const metricsSchema = z.object({
         ctr: numeric,
         roi: numeric,
         missing_shop_days: z.number(),
+        record_issues: z
+          .array(
+            z.object({
+              shop_id: z.string(),
+              date,
+              kind: z.enum(["missing_record", "null_fields"]),
+              fields: z.array(z.enum(["spend", "attributed_revenue", "clicks", "impressions"])),
+            }),
+          )
+          .optional(),
         null_counts: z.record(z.string(), z.number()),
         source: z.object({
           state: z.string(),

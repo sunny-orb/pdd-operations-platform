@@ -2,8 +2,11 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { SalesCoverage } from "./components/SalesCoverage";
+import type { SalesResult } from "./api/contracts";
+import { testMeta, testMetrics } from "./testFixtures";
 import { SalesPage } from "./SalesPage";
-import { syntheticResponse } from "./testFixtures";
+import { syntheticResponse, testShops, syntheticAllShops } from "./testFixtures";
 
 beforeEach(() => {
   window.matchMedia = vi.fn().mockImplementation(() => ({
@@ -31,7 +34,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("接口失败仍保留原型区块、八卡、四折叠及地区与十列表头", async () => {
+it("接口失败仍保留八卡及其他折叠，不创建无依据的推广异常", async () => {
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
   render(
     <MemoryRouter>
@@ -47,22 +50,28 @@ it("接口失败仍保留原型区块、八卡、四折叠及地区与十列表�
     "店铺访客",
     "成交转化率",
     "客单价",
-    "退款率",
+    "退款金额占比",
     "推广花费",
     "点击率",
     "ROI",
   ]) {
     expect(within(screen.getByTestId("sales-kpis")).getByText(title)).toBeTruthy();
   }
-  expect(document.querySelectorAll("details").length).toBe(4);
+  expect(document.querySelectorAll("details").length).toBe(5);
+  expect(screen.getByText("查看统计口径与历史补充").closest("details")!.open).toBe(false);
+  expect(document.querySelector(".refund-coverage-note")).toBeNull();
+  expect(
+    within(screen.getByTestId("sales-kpis")).getByRole("button", { name: "计算明细" }),
+  ).toBeTruthy();
+  expect(screen.queryByLabelText("推广数据提示")).toBeNull();
   expect(
     within(screen.getByRole("table", { name: "店铺完整数据" })).getAllByRole("columnheader"),
   ).toHaveLength(10);
   expect(
-    within(screen.getByRole("table", { name: "店铺后台地区数据" })).getAllByRole("columnheader"),
+    within(document.querySelector<HTMLElement>("#regions")!).getAllByRole("columnheader"),
   ).toHaveLength(6);
   expect(
-    within(screen.getByRole("table", { name: "聚水潭产品地区数据" })).getAllByRole("columnheader"),
+    within(document.querySelector<HTMLElement>("#product-regions")!).getAllByRole("columnheader"),
   ).toHaveLength(7);
   expect(screen.getByText("本月 GMV 目标进度")).toBeTruthy();
   expect(screen.queryByText(/开发样例/)).toBeNull();
@@ -125,7 +134,56 @@ it("连续409后停止自动重试", async () => {
   expect(screen.getByTestId("sales-kpis").textContent).not.toContain("¥31");
 });
 
-it("来源尝试失败后展示失败状态和实际尝试时间", async () => {
+it("贡献区的小额不显示成零，真实零、缺记录与空金额分别表达", async () => {
+  const items = [
+    testShops[0],
+    testShops[1],
+    {
+      ...testShops[0],
+      shop_id: "empty",
+      display_name: "空金额店",
+      shop_revenue: null,
+      sales_share: null,
+      rank: null,
+      field_states: { shop_revenue: "field_null" },
+    },
+    {
+      ...testShops[0],
+      shop_id: "missing",
+      display_name: "无记录店",
+      shop_revenue: null,
+      sales_share: null,
+      rank: null,
+      field_states: { shop_revenue: "no_records" },
+      coverage: { ...testMetrics.coverage, observed_days: 0 },
+    },
+  ];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockImplementation((path: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () =>
+          path.includes("/shops?")
+            ? { meta: testMeta, data: { items, missing_shop_days: 1 } }
+            : syntheticResponse(path),
+      }),
+    ),
+  );
+  render(
+    <MemoryRouter>
+      <SalesPage />
+    </MemoryRouter>,
+  );
+  const contribution = within(document.getElementById("shops")!);
+  await waitFor(() => expect(contribution.getByText("¥30.50")).toBeTruthy());
+  expect(contribution.getByText("¥0.00万")).toBeTruthy();
+  expect(contribution.getByText("暂无销售记录")).toBeTruthy();
+  expect(contribution.getByText("销售金额为空")).toBeTruthy();
+  expect(contribution.queryByText(/目标入口不可用/)).toBeNull();
+});
+
+it("更新失败时用运营文案说明正在展示上次数据", async () => {
   vi.stubGlobal(
     "fetch",
     vi.fn().mockImplementation((path: string) => {
@@ -148,12 +206,11 @@ it("来源尝试失败后展示失败状态和实际尝试时间", async () => {
       <SalesPage />
     </MemoryRouter>,
   );
-  await waitFor(() => expect(screen.getByText(/最近尝试：失败/)).toBeTruthy());
-  expect(screen.getByText(/最近尝试：失败/).textContent).toContain(
-    new Date("2026-10-28T01:02:03Z").toLocaleString("zh-CN", {
-      timeZone: "Asia/Shanghai",
-      hour12: false,
-    }),
+  await waitFor(() =>
+    expect(screen.getByText(/销售数据检查未成功，当前保留上次检查成功的数据/)).toBeTruthy(),
+  );
+  expect(screen.getByLabelText("数据覆盖说明").textContent).not.toMatch(
+    /上游|入仓|最近尝试|时区未确认/,
   );
 });
 
@@ -217,4 +274,242 @@ it("中心链接指定单日和店铺后显示实际范围且不先请求默认�
   expect(facts).toHaveLength(1);
   expect(facts[0]).toContain("date_from=2026-09-15");
   expect(facts[0]).toContain("shop_id=spihw");
+});
+
+it.each([
+  {
+    label: "记录金额为空",
+    days: 1,
+    salesMissing: ["spigf:2026-10-27"],
+    missing: [],
+    empty: ["2026-10-26"],
+    state: "observed",
+    expected: "退款金额为空（有记录）：2026-10-26",
+  },
+  {
+    label: "整行无记录",
+    days: 1,
+    salesMissing: ["spigf:2026-10-27"],
+    missing: ["2026-10-26"],
+    empty: [],
+    state: "observed",
+    expected: "无退款记录：2026-10-26",
+  },
+  {
+    label: "真实零也是已提供金额",
+    days: 2,
+    salesMissing: [],
+    missing: [],
+    empty: [],
+    state: "observed",
+    expected: "退款金额均已提供",
+  },
+  {
+    label: "退款尚不可用",
+    days: 2,
+    salesMissing: [],
+    missing: [],
+    empty: [],
+    state: "not_connected",
+    expected: "退款数据暂不可用",
+  },
+  {
+    label: "无销售也独立展示退款为空",
+    days: 0,
+    salesMissing: ["spigf:2026-10-26", "spigf:2026-10-27"],
+    missing: ["2026-10-27"],
+    empty: ["2026-10-26"],
+    state: "observed",
+    expected: "退款金额为空（有记录）：2026-10-26",
+  },
+] as const)("覆盖提示区区分$label", ({ days, salesMissing, missing, empty, state, expected }) => {
+  const result: SalesResult = {
+    key: "coverage",
+    meta: testMeta,
+    performance: testMetrics,
+    missingShopDays: salesMissing.length,
+    shops: [
+      {
+        ...testShops[0],
+        shop_revenue: days ? "0.00" : null,
+        coverage: {
+          ...testMetrics.coverage,
+          observed_days: days,
+          missing_dates: [...salesMissing],
+        },
+        refund_coverage: {
+          state,
+          missing_record_dates: [...missing],
+          null_amount_dates: [...empty],
+        },
+      },
+    ],
+  };
+  const { container } = render(<SalesCoverage result={result} error={null} />);
+  expect(container.textContent).toContain(expected);
+  expect(container.textContent).not.toMatch(/上游|入仓|完整日|已观察值|时区未确认|暂无法核对/);
+  if (state === "observed" && empty.length === 0 && missing.length === 0)
+    expect(container.textContent).not.toMatch(/无退款记录|退款金额为空/);
+  if (state === "not_connected")
+    expect(container.textContent).not.toMatch(/无退款记录|退款金额均已提供/);
+  if (!days) expect(container.textContent).toContain("缺少 2 天销售记录");
+});
+
+it("外层仅提示概况，展开后六店分清金额为空和无记录，口径与时间在明细内", async () => {
+  const result: SalesResult = {
+    key: "coverage",
+    meta: testMeta,
+    performance: testMetrics,
+    missingShopDays: 0,
+    shops: syntheticAllShops.map((shop) => ({
+      ...shop,
+      coverage: { ...shop.coverage, observed_days: 5, missing_dates: [] },
+      refund_coverage: {
+        state: "observed",
+        missing_record_dates: shop.shop_id === "spixb" ? ["2026-10-23"] : [],
+        null_amount_dates:
+          shop.shop_id === "spixb" ? ["2026-10-24", "2026-10-25", "2026-10-26"] : [],
+      },
+    })),
+  };
+  const { container } = render(<SalesCoverage result={result} error={null} />);
+  const coverage = screen.getByLabelText("数据覆盖说明");
+  const details = coverage.querySelector("details")!;
+  expect(details.open).toBe(false);
+  const overview = coverage.querySelector(":scope > p")!;
+  expect(overview.textContent).toContain("销售记录齐全");
+  expect(overview.textContent).toContain("1 家店有 3 条退款金额为空的记录");
+  expect(overview.textContent).toContain("1 家店缺少 1 条每日退款记录");
+  expect(overview.textContent).not.toMatch(/退款率|最近检查|2026-/);
+  expect(
+    within(coverage)
+      .getByText(/最近检查时间：/)
+      .closest("details"),
+  ).toBe(details);
+  expect(
+    within(coverage)
+      .getByText(/退款率仅统计/)
+      .closest("details"),
+  ).toBe(details);
+  const { default: userEvent } = await import("@testing-library/user-event");
+  await userEvent.click(within(coverage).getByText("查看各店铺销售与退款数据明细"));
+  expect(details.open).toBe(true);
+  const rows = within(coverage).getAllByRole("listitem");
+  expect(rows).toHaveLength(6);
+  for (const [i, row] of rows.entries()) {
+    expect(within(row).getByText(syntheticAllShops[i].display_name)).toBeTruthy();
+    expect(row.textContent).toContain("销售记录齐全，共 5 天");
+    expect(row.closest("details")).toBe(details);
+    if (syntheticAllShops[i].shop_id === "spixb") {
+      expect(row.textContent).toContain(
+        "退款金额为空（有记录）：2026-10-24、2026-10-25、2026-10-26",
+      );
+      expect(row.textContent).toContain("无退款记录：2026-10-23");
+    } else expect(row.textContent).toContain("退款金额均已提供");
+  }
+  expect(container.textContent).not.toMatch(/不代表当天没有退款|不能仅凭该日期判断|5\/5/);
+  expect(container.querySelectorAll(".sales-coverage-date")).toHaveLength(4);
+});
+
+it("日期范围变化后明细与范围内推广日期更新，加载清空旧数字", () => {
+  const first: SalesResult = {
+    key: "first",
+    meta: { ...testMeta, last_success_at: "2026-10-05T00:01:00+08:00" },
+    performance: testMetrics,
+    missingShopDays: 1,
+    shops: [
+      {
+        ...testShops[0],
+        coverage: {
+          ...testMetrics.coverage,
+          observed_days: 3,
+          window_start: "2026-10-01",
+          window_end: "2026-10-04",
+          latest_observed_date: "2026-10-03",
+          missing_dates: ["spigf:2026-10-04"],
+        },
+        refund_coverage: {
+          state: "observed",
+          missing_record_dates: ["2026-10-04"],
+          null_amount_dates: ["2026-10-02", "2026-10-03"],
+        },
+        promotion_channels: [
+          {
+            code: "shop_channel_product_promotion",
+            latest_observed_date: "2026-10-03",
+            spend: null,
+            revenue: null,
+            ctr: null,
+            roi: null,
+            missing_shop_days: 1,
+            null_counts: {},
+            source: {
+              state: "observed",
+              observed_through: "2026-10-27",
+              source_updated_text: null,
+            },
+          },
+        ],
+      },
+    ],
+  };
+  const { rerender, container } = render(<SalesCoverage result={first} error={null} />);
+  expect(container.textContent).toContain("缺少 1 天销售记录：2026-10-04");
+  expect(container.textContent).toContain("1 家店有 2 条退款金额为空的记录");
+  expect(container.textContent).toContain("商品推广 2026-10-03");
+  expect(container.textContent).not.toContain("2026-10-27");
+  const second: SalesResult = {
+    ...first,
+    key: "second",
+    missingShopDays: 0,
+    meta: {
+      ...first.meta,
+      last_attempt_status: "failed",
+      last_attempt_at: "2026-10-06T01:00:00+08:00",
+    },
+    shops: [
+      {
+        ...first.shops[0],
+        coverage: {
+          ...first.shops[0].coverage,
+          observed_days: 1,
+          window_start: "2026-10-01",
+          window_end: "2026-10-01",
+          latest_observed_date: "2026-10-01",
+          missing_dates: [],
+        },
+        refund_coverage: { state: "observed", missing_record_dates: [], null_amount_dates: [] },
+        promotion_channels: [
+          { ...first.shops[0].promotion_channels![0], latest_observed_date: null },
+        ],
+      },
+    ],
+  };
+  rerender(<SalesCoverage result={second} error={null} />);
+  expect(container.textContent).toContain("销售记录齐全，共 1 天");
+  expect(container.textContent).toContain("商品推广 暂无记录");
+  expect(container.textContent).not.toMatch(/2026-10-03|2026-10-04|退款金额为空|无退款记录/);
+  expect(screen.getByText(/最近检查时间：/).textContent).toContain(
+    new Date(second.meta.last_attempt_at!).toLocaleString("zh-CN", {
+      timeZone: "Asia/Shanghai",
+      hour12: false,
+    }),
+  );
+  expect(container.textContent).toContain("销售数据检查未成功");
+  const unavailable: SalesResult = {
+    ...second,
+    shops: second.shops.map((shop) => ({
+      ...shop,
+      promotion_channels: shop.promotion_channels?.map((channel) => ({
+        ...channel,
+        source: { ...channel.source, state: "not_connected" },
+      })),
+    })),
+  };
+  rerender(<SalesCoverage result={unavailable} error={null} />);
+  expect(container.textContent).toContain("商品推广 暂不可用");
+  expect(container.textContent).not.toContain("商品推广 暂无记录");
+  rerender(<SalesCoverage result={null} error={null} />);
+  expect(container.textContent).not.toContain("销售记录齐全");
+  expect(container.textContent).not.toContain("商品推广");
 });

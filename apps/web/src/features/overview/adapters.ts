@@ -1,6 +1,7 @@
+import { defaultProductPeriod } from "../../shared/products/period";
 import { z } from "zod";
 import { ApiError, getJson } from "../../shared/api/client";
-import { meta as productMeta, board } from "../products/contracts";
+import { meta as productMeta, board, riskFeed } from "../products/contracts";
 import {
   metadata as promotionMeta,
   overview as promotionOverview,
@@ -13,6 +14,7 @@ import {
   overview as aftersalesOverview,
 } from "../aftersales/contracts";
 import type { DomainSpec } from "./data";
+import { sourceNames } from "./updateStatus";
 import {
   actionFromObservation,
   aftersalesLink,
@@ -20,7 +22,7 @@ import {
   listingObjectKey,
   formatMetric,
   localTime,
-  productLink,
+  productRiskLink,
   promotionLink,
   salesLink,
   centerCounts,
@@ -78,6 +80,7 @@ export const productsSpec: DomainSpec<z.infer<typeof productMeta>> = {
     return {
       id: "products",
       version: m.data_version,
+      scopeKey: JSON.stringify(defaultProductPeriod(m)),
       date: m.date_to || null,
       completeThrough: m.complete_through,
       success: m.success_at,
@@ -87,42 +90,64 @@ export const productsSpec: DomainSpec<z.infer<typeof productMeta>> = {
       notes: m.sources.map(
         (s) => `${s.dataset}：观察截至 ${s.observed_through ?? "未知"} · ${s.status}`,
       ),
+      updates: m.sources.map((s) => ({
+        id: s.dataset,
+        name: sourceNames[s.dataset] ?? s.dataset,
+        kind: s.dataset === "profile_records" ? "reference" : undefined,
+        date: s.observed_through ?? null,
+        success: null,
+        received: s.received_at,
+        sourceStatus: s.status,
+        locator: s.table,
+      })),
       raw: m,
     };
   },
   async load(m, signal) {
+    const period = defaultProductPeriod(m.raw);
     const base: DomainCard = {
-      title: "商品经营",
+      title: "商品数据",
       heading: "商品数据看板",
       value: null,
       valueType: "currency",
       valueLabel: `${m.date ?? "尚无观察日"} GMV`,
       pairs: [],
       note: dailyNote,
-      link: m.date ? productLink(m.date) : "/products",
-      status: "观察 · 待核验",
+      sourceNote: "来源：数仓商品日报",
+      link: m.date ? productRiskLink(period) : "/products",
+      status: "观察",
     };
     if (!m.date) return empty(base);
-    const { data: d } = await request(
-      `products/overview?${query(m.version, m.date)}`,
-      board.pick({ metrics: true, risks: true, brief: true }),
-      signal,
-      m.version,
-    );
+    const riskQuery = query(m.version, period.end);
+    riskQuery.set("date_from", period.start);
+    const [{ data: d }, { data: riskData }] = await Promise.all([
+      request(
+        `products/overview?${query(m.version, m.date)}`,
+        board.pick({ metrics: true }),
+        signal,
+        m.version,
+      ),
+      request(`products/risks?${riskQuery}`, riskFeed, signal, m.version),
+    ]);
+    const observationState =
+      riskData.status === "insufficient_data" ? "pending_validation" : "observed";
     const metric = d.metrics.revenue;
-    const observations: Observation[] = d.risks.map((r) => ({
+    const observations: Observation[] = riskData.risks.map((r) => ({
       id: `products:${r.listing_id}:${r.alert.label}`,
       domain: "products",
       level: "observation",
       sourcePriority: r.alert.priority,
+      ruleVersion: riskData.rule_version,
+      sourceRules: [r.alert.label],
       objectKey: listingObjectKey(r),
       objectLevel: "listing",
       title: `${r.product_name ?? r.product_id} · ${r.alert.label}`,
-      detail: `${r.alert.reasons.join("；")}。${r.alert.basis}`,
-      scope: `${r.shop_name ?? r.shop_id} · ${d.brief.start} 至 ${d.brief.end}（风险观察窗）`,
+      detail: `观察值 ${formatMetric(r.alert.current, r.alert.type)}；基准 ${formatMetric(r.alert.baseline, r.alert.type, r.alert.type === "number" ? 2 : undefined)}；变化 ${formatMetric(r.alert.change, "percent")}。${r.alert.reasons.join("；")}。${r.alert.basis}`,
+      scope: `${r.shop_name ?? r.shop_id} · 观察 ${riskData.evaluation_date}；对比 ${riskData.baseline_period.start} 至 ${riskData.baseline_period.end}；名单 ${riskData.period.start} 至 ${riskData.period.end}`,
+
       impact: r.alert.expected_loss,
       impactKind: "规则估算影响，非已实现损失",
-      link: productLink(m.date!, r),
+      link: productRiskLink(riskData.period, r.listing_id),
     }));
     return {
       card: {
@@ -131,18 +156,18 @@ export const productsSpec: DomainSpec<z.infer<typeof productMeta>> = {
         pairs: [
           { label: "日环比", value: metric?.mom ?? null, type: "percent" },
           { label: "同比", value: metric?.yoy ?? null, type: "percent" },
-          observedCount("products", observations),
+          observedCount("products", observations, observationState),
           { label: "最近更新", value: m.date, type: "text" },
         ],
-        note: `来源：商品经营日报。${metric?.reason ?? dailyNote} 风险沿负责域 ${d.brief.start} 至 ${d.brief.end} 观察窗。`,
+        note: `来源：数仓商品日报。${metric?.reason ?? dailyNote} 风险名单 ${riskData.period.start} 至 ${riskData.period.end}；观察日 ${riskData.evaluation_date}；比较期 ${riskData.baseline_period.start} 至 ${riskData.baseline_period.end}。规则 ${riskData.rule_version}；选中 ${riskData.counts.selected}，可评 ${riskData.counts.evaluated}，未评估 ${riskData.counts.unevaluated}，不适用 ${riskData.counts.excluded}。影响金额为规则估算，不是已实现损失。`,
       },
       observations,
-      observationState: "observed",
+      observationState,
       actions: observations.map((o, i) =>
         actionFromObservation(
           o,
-          d.risks[i].alert.action,
-          d.risks[i].alert.reasons.join("；") || "待核查原因",
+          riskData.risks[i].alert.action,
+          riskData.risks[i].alert.reasons.join("；") || "待核查原因",
           "在对应商品风险窗复核交易额、流量与转化；完整性确认后验证变化",
         ),
       ),
@@ -190,11 +215,12 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
       heading: "推广数据看板",
       value: null,
       valueType: "ratio",
-      valueLabel: `${m.date ?? "尚无观察日"} ROI`,
+      valueLabel: `${m.date ?? "尚无观察日"} 推广日报`,
       pairs: [],
       note: dailyNote,
+      sourceNote: "来源：数仓商品推广日报",
       link: m.date ? promotionLink(m.date) : "/promotion?mode=product",
-      status: "观察 · 待核验",
+      status: "观察",
     };
     if (!m.date) return empty(base);
     const p = query(m.version, m.date);
@@ -207,11 +233,12 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
         m.version,
       ),
       request(
-        `promotion/diagnosis?${p}`,
+        `promotion/diagnosis?${p}&detail=alerts`,
         diagnosis.pick({
           current_window: true,
           previous_window: true,
           flagged_products: true,
+          rule_version: true,
           status: true,
         }),
         signal,
@@ -224,6 +251,8 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
       domain: "promotion",
       level: "observation",
       sourcePriority: r.priority || null,
+      sourceRules: r.findings.map((finding) => finding.rule),
+      ruleVersion: di.rule_version,
       objectKey: listingObjectKey(r),
       objectLevel: "listing",
       title: `${r.label} · 推广观察`,
@@ -250,7 +279,7 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
           },
           { label: "最近更新", value: m.date, type: "text" },
         ],
-        note: `来源：商品推广 · 最新观察单日。诊断另按 ${window}，不等于当日结果；来源完整性及正式评级待核验。`,
+        note: `来源：数仓商品推广 · 最新观察单日。诊断另按 ${window}，不等于当日结果；来源完整性及正式评级待核验。`,
       },
       observations,
       observationState:
@@ -294,7 +323,30 @@ export const salesSpec: DomainSpec<SalesRaw> = {
       status: m.completeness_state,
       notes: [
         `店铺日销售：观察截至 ${m.observed_through ?? "未知"}；月目标按 ${r.data.default_month} 经营月。`,
-        `基础目标最近尝试：${r.data.sources?.sales_targets?.last_attempt_status ?? "未知"}；最近成功：${r.data.sources?.sales_targets?.last_success_at ?? "未知"}。`,
+        `GMV目标最近尝试：${r.data.sources?.sales_targets?.last_attempt_status ?? "未知"}；最近成功：${r.data.sources?.sales_targets?.last_success_at ?? "未知"}。`,
+      ],
+      updates: [
+        {
+          id: "shop_daily",
+          name: sourceNames.shop_daily,
+          date: m.observed_through,
+          success: m.last_success_at,
+          attempt: m.last_attempt_at,
+          attemptStatus: m.last_attempt_status,
+          sourceStatus: "observed",
+          sourceUpdated: m.source_updated_text,
+        },
+        ...Object.entries(r.data.sources ?? {}).map(([id, s]) => ({
+          id,
+          name: sourceNames[id] ?? id,
+          kind: id === "sales_targets" ? ("target" as const) : undefined,
+          date: s.observed_through,
+          success: s.last_success_at ?? null,
+          attempt: s.last_attempt_at,
+          attemptStatus: s.last_attempt_status,
+          sourceStatus: s.state,
+          sourceUpdated: s.source_updated_text,
+        })),
       ],
       raw: r,
     };
@@ -303,12 +355,13 @@ export const salesSpec: DomainSpec<SalesRaw> = {
     const month = m.raw.data.default_month;
     const base: DomainCard = {
       title: "店铺销售 GMV",
-      heading: `${month} 累计 GMV`,
+      heading: `${Number(month.slice(5))} 月累计 GMV`,
       value: null,
       valueType: "currency",
-      valueLabel: `${month} 累计 GMV`,
+      valueLabel: `${Number(month.slice(5))} 月累计 GMV`,
       pairs: [],
       note: "来源：数仓店铺销售。月累计和最新单日分别显示，目标缺失依原来源状态。",
+      sourceNote: "来源：数仓销售＋飞书目标",
       link: salesLink(month, m.date),
       status: "目标跟踪",
     };
@@ -339,6 +392,7 @@ export const salesSpec: DomainSpec<SalesRaw> = {
       {
         ...base,
         value: t.data.month_actual,
+        sourceNote: `${base.sourceNote}；本月缺 ${t.data.month_missing_days ?? "未知"} 个店铺日，${shopsText}。`,
         pairs: [
           { label: "最新入仓日 GMV", value: daily, type: "currency" },
           { label: "月度目标", value: t.data.month_target, type: "currency" },
@@ -374,6 +428,16 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
         (s) =>
           `${s.label}：${s.status} · 观察截至 ${s.observed_to ?? "未知"}；${s.error_code ? `错误：${s.error_code}；` : ""}${s.note}`,
       ),
+      updates: m.sources.map((s) => ({
+        id: s.code,
+        name: s.label,
+        date: s.observed_to,
+        success: s.last_success_at,
+        attempt: s.last_attempt_at,
+        attemptStatus: s.error_code ? "failed" : null,
+        sourceStatus: s.status,
+        locator: s.locator,
+      })),
       raw: m,
     };
   },
@@ -386,9 +450,10 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
       valueType: "percent",
       valueLabel: "总退款率",
       pairs: [],
-      note: "来源：售后真实报告；金额和比率按源域核验门禁。",
+      note: "来源：聚水潭经数仓同步生成的固定期间报告；金额和比率按源域核验门禁。",
+      sourceNote: "来源：聚水潭（经数仓同步）",
       link: report ? aftersalesLink(report) : "/aftersales",
-      status: "观察 · 待核验",
+      status: "观察",
     };
     if (!report) return empty(base);
     const { data: d } = await request(
@@ -446,7 +511,9 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
       card: {
         ...base,
         value: metric("total_rate")?.value ?? null,
-        valueLabel: `总退款率（${scope}）`,
+        valueLabel: d.report
+          ? `总退款率（${d.report.period_start.slice(5)}–${d.report.period_end.slice(5)}）`
+          : "总退款率（报告期间未知）",
         pairs: [
           { label: "退款总额", value: amount?.value ?? null, type: "currency" },
           { label: "售后退款", value: metric("inbound_amount")?.value ?? null, type: "currency" },

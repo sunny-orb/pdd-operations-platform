@@ -4,6 +4,7 @@ import hashlib
 import json
 from contextlib import contextmanager
 from datetime import timedelta
+from functools import cached_property
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -11,16 +12,34 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.modules.product_board.repository import BoardError, source_sync_status
 from app.modules.product_board.repository import Repository as ProductRepository
+from app.modules.sales.datasets import HISTORY_SPEC
+from app.modules.sales.promotion_history import effective_rows, history_rows, supplement_audit
+
+from . import metrics as promotion_metrics
 
 PRODUCT_CODES = ("product_daily", "product_promotion", "profile_records", "profile_links")
 STORE_CODES = ("shop_channel_product_promotion", "shop_channel_star_shop")
 
 
 def definition_revision():
+    """绑定本域及实际使用的共享查询规则，避免来源未变时复用旧目录版本。"""
+    shared = Path(__file__).parents[1]
     return (
         "m2-v1:"
         + hashlib.sha256(
-            b"".join(
+            promotion_metrics.definition_revision().encode()
+            + b"".join(
+                shared.joinpath(name).read_bytes()
+                for name in (
+                    "sales/promotion_history.py",
+                    "sales/source_policy.py",
+                    "product_board/profile_rules.py",
+                    "product_board/filter_projection.py",
+                    "product_board/metrics.py",
+                    "product_board/repository.py",
+                )
+            )
+            + b"".join(
                 Path(__file__).with_name(name).read_bytes()
                 for name in ("repository.py", "query.py", "diagnosis.py")
             )
@@ -33,7 +52,7 @@ def snapshot(engine, mode, token=None):
     """同快照读版本、事实与资料；token过期409，缺失来源503，无写入。"""
     if engine is None:
         raise BoardError("DATABASE_UNAVAILABLE", 503)
-    codes = PRODUCT_CODES if mode == "product" else STORE_CODES
+    codes = PRODUCT_CODES if mode == "product" else (*STORE_CODES, HISTORY_SPEC.code)
     try:
         with engine.connect().execution_options(isolation_level="REPEATABLE READ") as c, c.begin():
             c.execute(sa.text("SET TRANSACTION READ ONLY"))
@@ -90,36 +109,150 @@ def snapshot(engine, mode, token=None):
 class Repository:
     def __init__(self, connection, mode, versions, token):
         self.c, self.mode, self.versions, self.token = connection, mode, versions, token
-        table = "product_promotion_records" if mode == "product" else "shop_channel_promotion_daily"
-        ids = [
-            v["id"]
-            for k, v in versions.items()
-            if k in (("product_promotion",) if mode == "product" else STORE_CODES)
-        ]
-        self.rows = [
-            dict(r)
-            for r in connection.execute(
+        # 仅属于本次RR只读事务；资料/覆盖上下文不跨请求或发布版本复用。
+        self.label_cache = {}
+        self.coverage_member_cache = {}
+
+    def rows_for_windows(self, windows, listing_ids=None):
+        """读取必要日期窗的原行；商品可限定已按当前窗选定的身份，店铺沿用整行择源。"""
+        if self.mode == "store":
+            return [
+                row
+                for row in self.rows
+                if windows is None or any(start <= row["date"] <= end for start, end in windows)
+            ]
+        if windows == [] or listing_ids is not None and not listing_ids:
+            return []
+        where = ["dataset_version_id=:v", "period_start IS NOT NULL"]
+        params = dict(v=self.versions["product_promotion"]["id"])
+        if windows is not None:
+            clauses = []
+            for index, (start, end) in enumerate(windows):
+                clauses.append(f"period_start BETWEEN :start{index} AND :end{index}")
+                params.update({f"start{index}": start, f"end{index}": end})
+            where.append("(" + " OR ".join(clauses) + ")")
+        if listing_ids is not None:
+            where.append("listing_id=ANY(:listing_ids)")
+            params["listing_ids"] = list(listing_ids)
+        return [
+            dict(row)
+            for row in self.c.execute(
                 sa.text(
-                    f"SELECT * FROM public.{table} WHERE dataset_version_id=ANY(:ids) "
+                    "SELECT id,dataset_version_id,source_row_key,period_start,period_start AS date,"
+                    "listing_id,source_shop_id,source_shop_name,source_product_id,"
+                    "source_product_name,spend,attributed_revenue,net_attributed_revenue,"
+                    "attributed_deals,impressions,clicks FROM public.product_promotion_records "
+                    "WHERE " + " AND ".join(where) + " ORDER BY source_row_key,id"
+                ),
+                params,
+            ).mappings()
+        ]
+
+    @cached_property
+    def rows(self):
+        """仅经营查询加载事实；元信息、商品目录不经过整批事实反序列化。"""
+        if self.mode == "product":
+            return self.rows_for_windows(None)
+        ids = [v["id"] for k, v in self.versions.items() if k in STORE_CODES]
+        rows = [
+            dict(r)
+            for r in self.c.execute(
+                sa.text(
+                    "SELECT * FROM public.shop_channel_promotion_daily "
+                    "WHERE dataset_version_id=ANY(:ids) "
                     "ORDER BY source_row_key,id"
                 ),
                 dict(ids=ids),
             ).mappings()
         ]
+        self.supplements = supplement_audit(rows, self.history)
+        rows = effective_rows(rows, self.history)
+        for row in rows:
+            row["date"] = row["business_date"]
+        return [r for r in rows if r["date"] is not None]
+
+    @cached_property
+    def history(self):
+        return history_rows(self.c, self.versions) if self.mode == "store" else []
+
+    @cached_property
+    def date_counts(self):
+        """每个实际日期的记录数；不补缺日，不用资料日期推定推广日期。"""
+        if self.mode == "product":
+            return dict(
+                self.c.execute(
+                    sa.text(
+                        "SELECT period_start,count(*) FROM public.product_promotion_records "
+                        "WHERE dataset_version_id=:v AND period_start IS NOT NULL "
+                        "GROUP BY period_start"
+                    ),
+                    dict(v=self.versions["product_promotion"]["id"]),
+                ).all()
+            )
+        counts = {}
         for row in self.rows:
-            row["date"] = row["period_start"] if mode == "product" else row["business_date"]
-        self.rows = [r for r in self.rows if r["date"] is not None]
-        observed = [r["date"] for r in self.rows]
-        self.end = max(observed) if observed else None
-        primary = versions.get("product_promotion") if mode == "product" else None
-        self.start = primary["period_start"] if primary else min(observed, default=None)
-        self.profiles = (
-            ProductRepository(connection, versions, token).profiles() if mode == "product" else {}
+            counts[row["date"]] = counts.get(row["date"], 0) + 1
+        return counts
+
+    @cached_property
+    def start(self):
+        primary = self.versions.get("product_promotion") if self.mode == "product" else None
+        return primary["period_start"] if primary else min(self.date_counts, default=None)
+
+    @cached_property
+    def end(self):
+        return max(self.date_counts, default=None)
+
+    @cached_property
+    def profiles(self):
+        return (
+            ProductRepository(self.c, self.versions, self.token).profiles()
+            if self.mode == "product"
+            else {}
         )
+
+    @cached_property
+    def listing_ids(self):
+        """已发布推广中实际存在的身份，包含比较期，校验时无需读取经营金额。"""
+        return set(
+            self.c.execute(
+                sa.text(
+                    "SELECT DISTINCT listing_id FROM public.product_promotion_records "
+                    "WHERE dataset_version_id=:v AND period_start IS NOT NULL"
+                ),
+                dict(v=self.versions["product_promotion"]["id"]),
+            ).scalars()
+        )
+
+    def identity_rows(self, start=None, end=None, *, ordered=False, listing_ids=None):
+        """仅投影身份与来源名称；已选ID可跨已发布日期回显，不改变日期目录范围。"""
+        if listing_ids is not None and not listing_ids:
+            return []
+        distinct = "" if ordered else "DISTINCT "
+        order = " ORDER BY source_row_key,id" if ordered else ""
+        where = ["dataset_version_id=:v", "period_start IS NOT NULL"]
+        params = dict(v=self.versions["product_promotion"]["id"])
+        if start is not None and end is not None:
+            where.append("period_start BETWEEN :start AND :end")
+            params.update(start=start, end=end)
+        if listing_ids is not None:
+            where.append("listing_id=ANY(:listing_ids)")
+            params["listing_ids"] = list(listing_ids)
+        return [
+            dict(r)
+            for r in self.c.execute(
+                sa.text(
+                    f"SELECT {distinct}period_start AS date,listing_id,source_shop_id,"
+                    "source_shop_name,source_product_id,source_product_name "
+                    "FROM public.product_promotion_records WHERE " + " AND ".join(where) + order
+                ),
+                params,
+            ).mappings()
+        ]
 
     def metadata(self):
         """实际观察范围与推荐窗口分开；没有上游完成标记时完整日始终未知。"""
-        dates = sorted({r["date"] for r in self.rows if self.start and r["date"] >= self.start})
+        dates = sorted(day for day in self.date_counts if self.start and day >= self.start)
         default_start = (
             (
                 dates[max(0, len(dates) - 30)]
@@ -131,7 +264,7 @@ class Repository:
         )
         sources = []
         product_sync = source_sync_status(self.c, self.versions) if self.mode == "product" else None
-        for code in PRODUCT_CODES if self.mode == "product" else STORE_CODES:
+        for code in PRODUCT_CODES if self.mode == "product" else (*STORE_CODES, HISTORY_SPEC.code):
             version = self.versions.get(code)
             attempt = (
                 product_sync[0]
@@ -169,11 +302,15 @@ class Repository:
                     ),
                 ).scalar_one_or_none()
             )
-            source_rows = [
-                r for r in self.rows if version and r["dataset_version_id"] == version["id"]
-            ]
-            first = min((r["date"] for r in source_rows), default=None)
-            last = max((r["date"] for r in source_rows), default=None)
+            if self.mode == "product":
+                first = min(self.date_counts, default=None) if code == "product_promotion" else None
+                last = self.end if code == "product_promotion" else None
+            else:
+                source_rows = [
+                    r for r in self.rows if version and r["dataset_version_id"] == version["id"]
+                ]
+                first = min((r["date"] for r in source_rows), default=None)
+                last = max((r["date"] for r in source_rows), default=None)
             if code == "product_daily" and version:
                 first, last = self.c.execute(
                     sa.text(
@@ -193,10 +330,10 @@ class Repository:
                     if code in ("profile_records", "profile_links")
                     else "business_date",
                     business_date_basis="payment_date"
-                    if code in (*STORE_CODES, "product_promotion")
+                    if code in (*STORE_CODES, HISTORY_SPEC.code, "product_promotion")
                     else None,
                     attribution_state="source_reported_payment_date"
-                    if code in (*STORE_CODES, "product_promotion")
+                    if code in (*STORE_CODES, HISTORY_SPEC.code, "product_promotion")
                     else None,
                     last_success_at=success.isoformat() if success else None,
                     latest_attempt={
@@ -208,6 +345,7 @@ class Repository:
                 )
             )
         return dict(
+            historical_supplements=self.supplements if self.mode == "store" else [],
             mode=self.mode,
             business_date_basis="payment_date",
             attribution_state="source_reported_payment_date",
@@ -218,7 +356,7 @@ class Repository:
             date_to=self.end,
             recommended_from=default_start,
             recommended_to=self.end,
-            observed_rows=str(len(self.rows)),
+            observed_rows=str(sum(self.date_counts.values())),
             complete_through=None,
             completeness="unknown",
             sources=sources,

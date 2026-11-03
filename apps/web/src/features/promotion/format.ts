@@ -1,5 +1,5 @@
 import { formatFixedDecimal } from "../../shared/format/decimal";
-import type { Metric } from "./contracts";
+import type { Metric, Overview } from "./contracts";
 import type { MetricKey } from "./state";
 export const specs: { key: MetricKey; label: string; type: string; color: string }[] = [
   { key: "spend", label: "总花费", type: "currency", color: "#ff9b3d" },
@@ -29,6 +29,24 @@ export function formatValue(value: string | null | undefined, type = "number", m
 }
 export const formatMetric = (metric: Metric | undefined, moneyDigits = 2) =>
   formatValue(metric?.value, metric?.type, moneyDigits);
+
+/** 名称沿线上；缺项审计状态保留在接口，主界面正常显示可计算值。 */
+export function productMetricLabel(key: MetricKey) {
+  return specs.find((spec) => spec.key === key)!.label;
+}
+
+/** 仅在没有可计算ROI时解释原因，不给正常汇总重复加缺项提示。 */
+export function roiExclusionNote(data: Overview | undefined) {
+  if (!data || data.metrics.roi?.value != null) return "";
+  if (data.metrics.roi?.status === "zero_denominator") return "花费为0，暂不计算投产比。";
+  if (data.metrics.spend?.value == null && data.roi_exclusions?.missing_spend_rows)
+    return "当前范围未提供花费，暂不计算投产比。";
+  if (data.metrics.revenue?.value == null && data.roi_exclusions?.missing_revenue_rows)
+    return "当前范围未提供交易额，暂不计算投产比。";
+  return "";
+}
+
+export { formatProductLevel } from "../../shared/products/levels";
 export const changeValue = (value: string | null | undefined) =>
   value == null
     ? "不可比"
@@ -53,4 +71,17 @@ export function formatClue(clue: {
   return type
     ? `${formatValue(clue.previous, type)} → ${formatValue(clue.current, type)}（${changeValue(clue.change)}）`
     : clue.evidence;
+}
+
+/** 三张累计卡直接使用后端环比；缺值/零基数不伪装成0%的变化。 */
+export function periodChangeNote(metric: Metric | undefined) {
+  if (metric?.change != null) return `较前期 ${changeValue(metric.change)}`;
+  const reasons: Record<string, string> = {
+    no_current: "本期暂无可比数值",
+    no_previous: "前期暂无可比数值",
+    zero_base: "前期为0",
+    invalid_base: "前期数值异常",
+    history_short: "前期数据不足",
+  };
+  return reasons[metric?.comparison_status ?? ""] ?? "较前期 不可比";
 }

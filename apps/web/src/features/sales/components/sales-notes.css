@@ -1,0 +1,31 @@
+/* 历史补充表保留业务样式；外层说明共用SalesExplanation。 */
+.m3-sales-scope .sales-notes-table {
+  margin-top: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.m3-sales-scope .sales-notes-table:focus-visible {
+  outline: 2px solid var(--sales-blue);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.m3-sales-scope .sales-notes table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  color: var(--sales-navy);
+  font-size: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.m3-sales-scope .sales-notes :is(th, td) {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--sales-line);
+  white-space: nowrap;
+}
+.m3-sales-scope .sales-notes :is(th, td):is(:nth-child(3), :nth-child(4)) {
+  text-align: right;
+}
+.m3-sales-scope .sales-notes tbody th {
+  font-weight: 500;
+}

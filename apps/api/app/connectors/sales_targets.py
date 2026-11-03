@@ -1,4 +1,4 @@
-"""新正式拼多多渠道GMV目标只读CLI投影；逐页/双读校验，不读取退款字段。"""
+"""原版拼多多渠道GMV目标只读CLI投影；逐页/双读校验，不读取退款字段。"""
 
 import json
 import subprocess
@@ -52,17 +52,6 @@ class FeishuTargetReader:
         for fid in TARGET_FIELDS:
             args += ["--field-id", fid]
         args += [
-            "--filter-json",
-            json.dumps(
-                {
-                    "logic": "and",
-                    "conditions": [
-                        ["渠道", "==", "拼多多"],
-                        ["年份", "intersects", ["2026年", "2027年"]],
-                    ],
-                },
-                ensure_ascii=False,
-            ),
             "--offset",
             str(offset),
             "--limit",
@@ -134,13 +123,13 @@ class FeishuTargetReader:
                 raise SalesError("FEISHU_TARGET_PAGINATION_INCOMPLETE")
             offset = following
 
-    def read_stable(self, *, basis="base"):
+    def read_stable(self, *, basis="original_gmv"):
         for _ in range(MAX_ATTEMPTS):
             before_rows, before_meta = self._scan()
             before = normalize_targets(before_rows, basis=basis, source_metadata=before_meta)
             after_rows, after_meta = self._scan()
             after = normalize_targets(after_rows, basis=basis, source_metadata=after_meta)
-            # 连冲刺原投影也需双读一致，业务幂等摘要仍只含已选基础定义。
+            # 全表四字段投影双读一致；财年之外仅归档，不进入目标合计。
             if before.raw_rows == after.raw_rows and before_meta == after_meta:
                 return replace(after, source_metadata=after_meta)
         raise SalesError("FEISHU_TARGET_CHANGED_DURING_READ", 503)

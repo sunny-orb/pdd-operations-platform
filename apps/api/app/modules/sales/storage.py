@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from .contracts import PublishResult, SalesError
-from .datasets import EXTENDED_REVISION, INSERT_BATCH_SIZE, SPECS
+from .datasets import EXTENDED_REVISION, INSERT_BATCH_SIZE, READ_SPECS
 from .normalization import canonical, fingerprint
 from .source_policy import (
     HEARTBEAT_SECONDS,
@@ -45,7 +45,7 @@ class ShopDailyStore:
     def __init__(
         self, engine, *, archive_root: Path, approved=None, spec=None, reconcile_full_scope=False
     ):
-        if spec is not None and SPECS.get(spec.code) != spec:
+        if spec is not None and READ_SPECS.get(spec.code) != spec:
             raise SalesError("UNKNOWN_SALES_DATASET")
         self.spec = spec
         self.reconcile_full_scope = reconcile_full_scope
@@ -54,7 +54,7 @@ class ShopDailyStore:
         self.date_column = spec.date_column if spec else "business_date"
         self.revision = EXTENDED_REVISION if spec else POLICY_REVISION
         self.engine, self.archive_root = engine, Path(archive_root)
-        self.approved = approved or approved_window()
+        self.approved = approved or approved_window(self.code)
         self.tables = reflect_tables(engine, self.fact_table)
 
     def _lease(self, connection, run_id):
@@ -416,6 +416,7 @@ def producer_sources():
     root = Path(__file__).resolve().parents[2]
     names = [
         "modules/sales/contracts.py",
+        "modules/sales/promotion_history.py",
         "modules/sales/datasets.py",
         "modules/sales/source_normalization.py",
         "connectors/sales_sources.py",

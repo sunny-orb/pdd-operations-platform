@@ -18,12 +18,26 @@ class ReadWindow:
     shop_ids: tuple[str, ...]
 
     def __post_init__(self):
-        from .source_policy import APPROVED_START, FISCAL_END, SHOPS
+        from .source_policy import APPROVED_START
 
-        if not APPROVED_START <= self.start <= self.end <= FISCAL_END:
+        self._validate(APPROVED_START)
+
+    def _validate(self, earliest):
+        from .source_policy import FISCAL_END, SHOPS
+
+        if not earliest <= self.start <= self.end <= FISCAL_END:
             raise SalesError("INVALID_WINDOW")
         if self.shop_ids != tuple(SHOPS):
             raise SalesError("INVALID_SHOP_SCOPE")
+
+
+class PromotionReadWindow(ReadWindow):
+    """仅两张店铺推广源获准读取上一财年；读取入口另核验来源身份。"""
+
+    def __post_init__(self):
+        from .source_policy import PROMOTION_START
+
+        self._validate(PROMOTION_START)
 
 
 @dataclass(frozen=True)

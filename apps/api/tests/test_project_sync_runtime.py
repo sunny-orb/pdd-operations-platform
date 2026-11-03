@@ -281,7 +281,7 @@ def test_sales_targets_use_explicit_feishu_runtime_without_warehouse_password(
             self.heartbeat = heartbeat
 
         def read_stable(self, *, basis):
-            assert basis == "base"
+            assert basis == "original_gmv"
             self.heartbeat()
             return expected
 

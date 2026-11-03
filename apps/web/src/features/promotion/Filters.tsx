@@ -1,18 +1,31 @@
-import { DatePicker, Select } from "antd";
+import { Button, DatePicker, Select } from "antd";
+import { useMemo } from "react";
 import dayjs from "dayjs";
+import "dayjs/locale/zh-cn";
 import type { PromotionState } from "./data";
 import type { Scope } from "./state";
+import { FilterField } from "./FilterField";
+import { formatProductLevel } from "./format";
 
 export function Filters({ state }: { state: PromotionState }) {
   const { scope, mode, change } = state;
   const data = state.options.data?.data;
   const product = mode === "product";
+  const unavailable = !data;
+  const emptyText = state.options.error
+    ? "筛选选项加载失败"
+    : state.options.isFetching
+      ? "正在加载选项…"
+      : "当前条件无可选项";
   const select = (key: keyof Scope, label: string, choices: { value: string; label: string }[]) => (
-    <label>
-      {label}
+    <FilterField label={label}>
       <Select
         aria-label={label}
         value={scope[key] || ""}
+        placeholder={emptyText}
+        disabled={unavailable}
+        loading={state.options.isFetching}
+        notFoundContent={emptyText}
         options={[
           {
             value: "",
@@ -20,23 +33,42 @@ export function Filters({ state }: { state: PromotionState }) {
           },
           ...choices,
         ]}
-        onChange={(value) => change({ [key]: value, products: [] })}
+        onChange={(value) => change({ [key]: value })}
         showSearch
         optionFilterProp="label"
       />
-    </label>
+    </FilterField>
   );
-  const products = [...(data?.selected_products ?? []), ...(data?.products ?? [])].filter(
-    (item, index, list) => list.findIndex((p) => p.value === item.value) === index,
+  const products = useMemo(
+    () => [
+      ...new Map(
+        [
+          ...(state.selectedProducts ?? []),
+          ...(data?.selected_products ?? []),
+          ...(data?.products ?? []),
+        ].map((item) => [item.value, item]),
+      ).values(),
+    ],
+    [state.selectedProducts, data?.selected_products, data?.products],
   );
+  const filtered =
+    product &&
+    Boolean(
+      scope.shop ||
+      scope.category ||
+      scope.level ||
+      scope.operator ||
+      scope.keyword ||
+      scope.products.length ||
+      state.needle,
+    );
   return (
     <section
       className="filters"
       id="promotion-filters"
       aria-label={product ? "商品推广筛选条件" : "店铺推广筛选条件"}
     >
-      <label>
-        开始日期
+      <FilterField label="开始日期">
         <DatePicker
           aria-label="开始日期"
           value={scope.from && !Number.isNaN(Date.parse(scope.from)) ? dayjs(scope.from) : null}
@@ -48,9 +80,8 @@ export function Filters({ state }: { state: PromotionState }) {
           allowClear={false}
           onChange={(_, value) => change({ from: String(value) })}
         />
-      </label>
-      <label>
-        结束日期
+      </FilterField>
+      <FilterField label="结束日期">
         <DatePicker
           aria-label="结束日期"
           value={scope.to && !Number.isNaN(Date.parse(scope.to)) ? dayjs(scope.to) : null}
@@ -62,8 +93,8 @@ export function Filters({ state }: { state: PromotionState }) {
           allowClear={false}
           onChange={(_, value) => change({ to: String(value) })}
         />
-      </label>
-      {select("shop", product ? "店铺筛选" : "店铺", data?.shops ?? [])}
+      </FilterField>
+      {select("shop", product ? "店铺筛选" : "店铺", data?.shops ?? state.shopOptions ?? [])}
       {product ? (
         <>
           <label>
@@ -80,20 +111,34 @@ export function Filters({ state }: { state: PromotionState }) {
               value={scope.products}
               searchValue={state.needle}
               onSearch={state.setNeedle}
+              onOpenChange={(open) => {
+                if (!open) state.setNeedle("");
+              }}
               onChange={(value) => {
                 change({ products: value });
                 state.setNeedle("");
               }}
               options={products}
-              loading={state.options.isFetching}
-              notFoundContent={state.options.isFetching ? "正在查找商品…" : "当前条件无候选商品"}
+              optionRender={(option) =>
+                option.data.level === "多等级" ? (
+                  <div>
+                    {option.label}
+                    <small className="m2-option-level">
+                      {formatProductLevel(option.data.level, option.data.level_details)}
+                    </small>
+                  </div>
+                ) : (
+                  option.label
+                )
+              }
+              loading={state.options.isFetching || state.selectedOptions?.isFetching}
+              disabled={unavailable}
+              notFoundContent={emptyText}
               popupRender={(menu) => (
                 <>
                   {menu}
-                  {data && data.total > data.products.length && (
-                    <small className="m2-options-hint">
-                      共 {data.total} 个候选，请输入更完整的商品ID或名称缩小范围
-                    </small>
+                  {data && data.total > 0 && (
+                    <small className="m2-options-hint">可选 {data.total} 个商品</small>
                   )}
                 </>
               )}
@@ -114,10 +159,42 @@ export function Filters({ state }: { state: PromotionState }) {
             "运营筛选",
             (data?.operators ?? []).map((value) => ({ value, label: value })),
           )}
+          {filtered && (
+            <div className="m2-filter-actions">
+              {scope.keyword && (
+                <span className="m2-keyword-filter">
+                  商品搜索：{scope.keyword}
+                  <Button
+                    type="text"
+                    size="small"
+                    aria-label="清除商品搜索"
+                    onClick={() => change({ keyword: "" })}
+                  >
+                    ×
+                  </Button>
+                </span>
+              )}
+              <Button
+                type="link"
+                size="small"
+                onClick={() =>
+                  change({
+                    shop: "",
+                    category: "",
+                    level: "",
+                    operator: "",
+                    keyword: "",
+                    products: [],
+                  })
+                }
+              >
+                清空筛选
+              </Button>
+            </div>
+          )}
         </>
       ) : (
-        <label>
-          推广渠道
+        <FilterField label="推广渠道">
           <Select
             aria-label="推广渠道"
             value={scope.channel}
@@ -130,7 +207,23 @@ export function Filters({ state }: { state: PromotionState }) {
             ]}
             onChange={(value) => change({ channel: value })}
           />
-        </label>
+        </FilterField>
+      )}
+      {state.options.error && (
+        <div className="m2-filter-options-error" role="alert">
+          筛选选项暂时无法加载。
+          <Button size="small" onClick={() => void state.options.refetch()}>
+            重试
+          </Button>
+        </div>
+      )}
+      {product && state.selectedOptions?.error && (
+        <div className="m2-filter-options-error" role="alert">
+          已选商品名称暂时无法加载。
+          <Button size="small" onClick={() => void state.selectedOptions.refetch()}>
+            重试商品名称
+          </Button>
+        </div>
       )}
     </section>
   );

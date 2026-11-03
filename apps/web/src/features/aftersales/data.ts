@@ -60,10 +60,18 @@ function useResource<T>(
   version: string | null,
   enabled: boolean,
 ) {
+  // 分析标签/分页不影响总览，目录只依赖报告；按实际API输入隔离查询键及请求条件。
+  const summaryScope: Scope = { ...scope, view: "category", page: 1, size: 25 };
+  const requestScope =
+    path === "analysis"
+      ? scope
+      : path === "options"
+        ? { ...summaryScope, category: "", keyword: "", focus: "all" as const }
+        : summaryScope;
   return useQuery({
-    queryKey: ["m5", path, version, scope],
+    queryKey: ["m5", path, version, requestScope],
     enabled,
-    queryFn: ({ signal }) => get(path, schema, params(scope, version), signal),
+    queryFn: ({ signal }) => get(path, schema, params(requestScope, version), signal),
     retry: false,
     refetchOnWindowFocus: false,
   });

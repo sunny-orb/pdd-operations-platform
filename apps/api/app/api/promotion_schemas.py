@@ -19,6 +19,18 @@ class Metric(Record):
     type: str
     previous: str | None = None
     change: str | None = None
+    comparison_status: (
+        Literal[
+            "available",
+            "reference",
+            "no_current",
+            "no_previous",
+            "zero_base",
+            "invalid_base",
+            "history_short",
+        ]
+        | None
+    ) = None
     business_date_basis: Literal["payment_date"] | None = None
     attribution_state: Literal["source_reported_payment_date"] | None = None
 
@@ -49,12 +61,32 @@ class OptionsData(Record):
     total: int
 
 
+class SelectedOptionsData(Record):
+    products: list[Record]
+
+
+class RoiExclusions(Record):
+    missing_spend_rows: int
+    missing_revenue_rows: int
+    revenue_without_spend: str
+
+
+class TopDate(Record):
+    date: str
+    roi: str
+    spend: str
+    revenue: str
+    roi_status: str
+    roi_exclusions: RoiExclusions
+
+
 class OverviewData(Record):
+    roi_exclusions: RoiExclusions | None = None
     metrics: dict[str, Metric]
     net: dict[str, Metric]
     series: list[Record]
     funnel: list[Record]
-    top5: list[Record]
+    top5: list[TopDate]
     coverage: Record
     current_record_count: str
     dataset_record_count: str
@@ -87,6 +119,15 @@ class DiagnosisData(Record):
     status: str
 
 
+class DiagnosisObjectsData(Record):
+    items: list[Record]
+    total: int
+    group_total: int
+    page: int
+    size: int
+    total_pages: int
+
+
 class PromotionPublicationMeta(BaseModel):
     data_version: str
     request_id: str
@@ -102,7 +143,9 @@ __all__ = [
     "Envelope",
     "MetaData",
     "OptionsData",
+    "SelectedOptionsData",
     "OverviewData",
     "DaysData",
     "DiagnosisData",
+    "DiagnosisObjectsData",
 ]

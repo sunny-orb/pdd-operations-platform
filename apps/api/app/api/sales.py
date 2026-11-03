@@ -67,7 +67,7 @@ def targets(
     request: Request,
     month: str,
     data_version: str = Query(min_length=1, max_length=100),
-    target_basis: str = Query(default="base", pattern="^(base|stretch)$"),
+    target_basis: str = Query(default="original_gmv", pattern="^original_gmv$"),
 ):
     from app.modules.sales.detail_queries import SalesDetails
 

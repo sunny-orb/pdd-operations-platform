@@ -171,3 +171,70 @@ it("显式历史报告的来源日期与轮询绑定所选报告", async () => {
   await waitFor(() => expect(result.current.meta.data?.data.observed_to).toBe("2026-09-30"));
   expect(fetch.mock.calls.some(([url]) => url.includes("/meta?report_id=old"))).toBe(true);
 });
+
+it("分析标签和翻页只读取分析，品类筛选重查指标但复用同报告目录", async () => {
+  const fetch = vi.fn(async (url: string) => {
+    const query = new URL(url, "http://localhost").searchParams;
+    const data = url.includes("/meta?")
+      ? meta()
+      : url.includes("/options?")
+        ? { reports: [], categories: [], note: "" }
+        : url.includes("/overview?")
+          ? {
+              report: null,
+              metrics: [],
+              risk_metrics: [],
+              decision: {
+                title: "",
+                status: "",
+                rate: null,
+                amount: null,
+                amount_share: null,
+                change_pp: null,
+                note: "",
+              },
+              priorities: [],
+              actions: [],
+              stages: [],
+              size_breakdown: [],
+              reasons: [],
+              trend: [],
+              scope_note: "",
+              quality_note: "",
+              core_insights: [],
+              category_risks: [],
+              style_risks: [],
+              category_actions: [],
+              style_actions: [],
+            }
+          : {
+              status: "partial",
+              scope_note: query.get("view"),
+              columns: [],
+              rows: [],
+              total: 100,
+              page: Number(query.get("page")),
+              size: Number(query.get("size")),
+            };
+    return response(data);
+  });
+  vi.stubGlobal("fetch", fetch);
+  const { result } = renderHook(() => useAftersales(), { wrapper: wrapper() });
+  await waitFor(() =>
+    expect(
+      result.current.overview.isSuccess &&
+        result.current.options.isSuccess &&
+        result.current.analysis.isSuccess,
+    ).toBe(true),
+  );
+  fetch.mockClear();
+  act(() => result.current.change({ view: "style", page: 2, size: 50 }));
+  await waitFor(() => expect(result.current.analysis.data?.data.page).toBe(2));
+  expect(fetch.mock.calls.map(([url]) => new URL(url, "http://localhost").pathname)).toEqual([
+    "/api/v1/aftersales/analysis",
+  ]);
+  fetch.mockClear();
+  act(() => result.current.change({ category: "帽子" }));
+  await waitFor(() => expect(fetch.mock.calls).toHaveLength(2));
+  expect(fetch.mock.calls.every(([url]) => url.includes("category=%E5%B8%BD%E5%AD%90"))).toBe(true);
+});

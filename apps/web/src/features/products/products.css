@@ -31,9 +31,50 @@
   min-width: 0;
 }
 .m1-products-scope .filters {
-  grid-template-columns:
-    repeat(2, minmax(150px, 1.15fr)) repeat(5, minmax(115px, 1fr)) minmax(170px, 1.2fr)
-    auto;
+  grid-template-columns: minmax(250px, 1.45fr) repeat(5, minmax(0, 1fr)) minmax(120px, 1.15fr);
+  position: relative;
+}
+.m1-products-scope .m1-date-fields {
+  display: contents;
+}
+.m1-products-scope .m1-date-fields .ant-picker {
+  height: 34px;
+}
+.m1-products-scope .m1-date-range {
+  display: flex;
+  align-items: center;
+  height: 34px;
+  min-width: 0;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: white;
+}
+.m1-products-scope .m1-date-range:focus-within {
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(5, 145, 255, 0.1);
+}
+.m1-products-scope .m1-date-range .ant-picker {
+  flex: 1;
+  padding-inline: 6px;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.m1-products-scope .m1-date-separator {
+  color: var(--muted);
+  font-size: 12px;
+}
+.m1-products-scope .m1-main-reset {
+  flex: 0 0 24px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.m1-products-scope .m1-main-reset:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
 }
 .m1-products-scope .new-potential-filters {
   display: grid;
@@ -46,15 +87,11 @@
     repeat(2, minmax(130px, 1fr)) repeat(4, minmax(110px, 1fr)) minmax(170px, 1.3fr)
     minmax(170px, 1.3fr) auto;
 }
-.m1-products-scope .ant-input-affix-wrapper input {
-  height: auto;
-  padding: 0;
-  border: 0;
-}
-.m1-products-scope .ant-picker input {
-  height: auto;
-  padding: 0;
-  border: 0;
+/* 商品页三处筛选共用 34px 外框；焦点、内层输入与多选标签交给组件处理。 */
+.m1-products-scope
+  :is(.filters, .detail-filters, .new-potential-filters)
+  > :is(.ant-select, .ant-picker, .ant-input-affix-wrapper, .ant-input, .ant-btn) {
+  height: 34px;
 }
 .m1-products-scope .ant-table {
   font-family: inherit;
@@ -192,16 +229,6 @@
   border-radius: 4px;
   color: #806632;
 }
-.m1-products-scope .potential-meta {
-  white-space: nowrap;
-  font-size: 12px;
-  color: #6b7d94;
-}
-.m1-products-scope .potential-meta small {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-}
 .m1-products-scope .potential-guide {
   font-size: 12px;
   margin: 12px 0;
@@ -221,56 +248,7 @@
 }
 .m1-products-scope .new-potential-section > .ant-pagination {
   margin-top: 15px;
-}
-.m1-products-scope .m1-score-dialog .ant-modal-title {
-  font-size: 15px;
-}
-.m1-products-scope .potential-modal-heading h2 {
-  font-size: 20px;
-  margin: 5px 0;
-}
-.m1-products-scope .potential-modal-heading p {
-  color: #6b7d94;
-  font-size: 12px;
-}
-.m1-products-scope .tier-score-modal-summary {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
-  margin: 16px 0;
-}
-.m1-products-scope .tier-score-modal-summary > div {
-  border: 1px solid #dce5f0;
-  border-radius: 7px;
-  padding: 12px;
-  background: #f8fafc;
-}
-.m1-products-scope .tier-score-modal-summary span,
-.m1-products-scope .tier-score-modal-summary b,
-.m1-products-scope .tier-score-modal-summary small {
-  display: block;
-}
-.m1-products-scope .tier-score-modal-summary span,
-.m1-products-scope .tier-score-modal-summary small {
-  font-size: 11px;
-  color: #6b7d94;
-}
-.m1-products-scope .tier-score-modal-summary b {
-  font-size: 24px;
-  margin: 7px 0;
-}
-.m1-products-scope .potential-detail-note {
-  padding: 12px;
-  background: #fff9ec;
-  border: 1px solid #eddfc2;
-  border-radius: 6px;
-  font-size: 12px;
-  margin-bottom: 12px;
-}
-.m1-products-scope .m1-score-notes {
-  color: #64778d;
-  font-size: 12px;
-  line-height: 1.7;
+  justify-content: flex-end;
 }
 .m1-products-scope .m1-detail-count {
   font-size: 12px;
@@ -290,13 +268,20 @@
   color: #7b889c;
 }
 @media (max-width: 1500px) {
-  .m1-products-scope .filters,
   .m1-products-scope .detail-filters {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .m1-products-scope .filters > .ant-btn,
   .m1-products-scope .detail-filters > .ant-btn {
     justify-self: start;
+  }
+}
+@media (max-width: 1200px) {
+  .m1-products-scope .filters {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .m1-products-scope .m1-date-range {
+    grid-column: span 2;
   }
 }
 @media (max-width: 1000px) {
@@ -309,9 +294,6 @@
   .m1-products-scope .detail-filters,
   .m1-products-scope .new-potential-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .m1-products-scope .tier-score-modal-summary {
-    grid-template-columns: repeat(2, 1fr);
   }
   .m1-products-scope .product-bar {
     gap: 12px;
@@ -340,6 +322,7 @@ body:has(.m1-products-scope) {
   }
   .m1-products-scope .new-potential-section > .ant-pagination .ant-pagination-total-text {
     flex-basis: 100%;
+    text-align: right;
   }
   .m1-products-scope .period-stat {
     min-width: 0;
@@ -363,4 +346,144 @@ body:has(.m1-products-scope) {
 .m1-products-scope button.conclusion-row:focus-visible {
   outline: 2px solid #1768d9;
   outline-offset: 2px;
+}
+
+/* 提示使用筛选框下方已有间距，不新增整行或推挤指标。 */
+.m1-products-scope .m1-filter-status {
+  position: absolute;
+  top: 100%;
+  right: 14px;
+  min-height: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #6b7d94;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.m1-products-scope .conclusion-row:disabled {
+  cursor: progress;
+}
+@media (max-width: 600px) {
+  .m1-products-scope .m1-filter-status {
+    position: static;
+    grid-column: 1 / -1;
+    min-height: 32px;
+  }
+}
+.m1-products-scope .metric .m1-metric-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.m1-products-scope .metric .m1-comparison-empty {
+  color: #637b99;
+}
+.m1-metric-comparisons {
+  margin: -8px 0 20px;
+  color: #637b99;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.m1-metric-comparisons p {
+  margin: 8px 0;
+}
+.m1-metric-comparisons summary {
+  cursor: pointer;
+}
+.m1-products-scope .m1-comparison-periods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 32px;
+  margin: 12px 0;
+}
+.m1-comparison-periods dt {
+  font-weight: 600;
+  color: var(--ink);
+}
+.m1-comparison-periods dd {
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.m1-products-scope .product-periods .period-band {
+  margin-bottom: 8px;
+}
+.m1-products-scope .product-period-details {
+  margin-bottom: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.m1-products-scope .product-period-details summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 4px 0;
+}
+.m1-products-scope .product-period-table {
+  overflow-x: auto;
+}
+.m1-products-scope .product-period-table table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+.m1-products-scope .product-period-table th,
+.m1-products-scope .product-period-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.m1-products-scope .product-period-details p {
+  margin: 8px 0 0;
+}
+
+.m1-products-scope .product-funnel .funnel-card {
+  margin-bottom: 8px;
+}
+.m1-products-scope .product-funnel-details {
+  margin-bottom: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.m1-products-scope .product-funnel-details summary {
+  width: fit-content;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.m1-products-scope .product-funnel-details p {
+  margin: 8px 0 0;
+}
+.m1-products-scope .funnel-step .product-funnel-partial {
+  color: #a4610b;
+}
+.m1-products-scope .product-diagnosis-period {
+  display: block;
+  color: #c4d7ef;
+  font-size: 11px;
+}
+.m1-products-scope .product-trend-basis {
+  margin-top: 12px;
+  color: #657b99;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.m1-products-scope .product-trend-basis summary {
+  cursor: pointer;
+}
+.m1-products-scope #product-diagnosis .legend {
+  display: flex;
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .m1-products-scope #product-diagnosis .panel-title {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+}
+.m1-products-scope .m1-chart-tooltip i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
 }

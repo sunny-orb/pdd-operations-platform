@@ -1,0 +1,52 @@
+/* 仅目标三卡：沿线上比例与内容间距，长说明独立折叠，不拉高同排卡片。 */
+.m3-sales-scope .sales-targets .target-grid {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.2fr) minmax(0, 0.8fr);
+}
+.m3-sales-scope .sales-targets .target-card {
+  min-width: 0;
+  min-height: 208px;
+}
+.m3-sales-scope .sales-targets .target-metric {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
+.m3-sales-scope .sales-targets .target-progress {
+  display: block;
+  height: 9px;
+  margin: 0;
+  line-height: 1;
+}
+.m3-sales-scope .sales-targets .target-progress-empty {
+  background: #e9eef5;
+  border-radius: 100px;
+}
+.m3-sales-scope .sales-targets .target-details {
+  margin-top: 10px;
+  color: var(--sales-muted);
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.m3-sales-scope .sales-targets .target-details summary {
+  width: fit-content;
+  max-width: 100%;
+  color: var(--sales-blue);
+  cursor: pointer;
+}
+.m3-sales-scope .sales-targets .target-details p {
+  margin: 8px 0;
+}
+.m3-sales-scope .sales-targets .target-details a {
+  color: var(--sales-blue);
+  text-decoration: none;
+}
+@media (max-width: 1000px) {
+  .m3-sales-scope .sales-targets .target-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 700px) {
+  .m3-sales-scope .sales-targets .target-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -32,7 +32,6 @@ jobs:
       - name: Compose语法验证
         run: |
           cp deploy/.env.runtime.example deploy/.env.runtime
-          touch deploy/.htpasswd
           docker compose --env-file deploy/.env.example -f deploy/compose.production.yaml config --quiet
       - if: always()
         run: docker compose --env-file var/local-db/docker.env -f compose.yaml down -v

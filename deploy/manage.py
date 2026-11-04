@@ -165,8 +165,9 @@ class Project:
 
     def docker_environment(self, manifest):
         self.check_files()
-        for name in (".env.runtime", ".htpasswd"):
-            self.check_file(name, required=True, private=True)
+        self.check_file(".env.runtime", required=True, private=True)
+        # 旧口令文件仅为历史版本回退保留；存在时继续检查其权限和链接。
+        self.check_file(".htpasswd", private=True)
         config_dir = ROOT / ".docker"
         info = config_dir.lstat()
         require(

@@ -35,7 +35,6 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    secrets: [web_htpasswd]
     networks: [app, traefik]
     healthcheck:
       test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/healthz"]
@@ -68,6 +67,3 @@ networks:
   traefik:
     external: true
     name: traefik-network
-secrets:
-  web_htpasswd:
-    file: ${WEB_HTPASSWD_FILE:-./.htpasswd}

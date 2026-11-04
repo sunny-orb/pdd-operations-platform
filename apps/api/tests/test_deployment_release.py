@@ -74,6 +74,18 @@ def test_release_refuses_unapproved_directory_before_any_docker_call(tmp_path):
     assert not (tmp_path / ".release.lock").exists()
 
 
+def test_public_release_does_not_require_legacy_website_password(project):
+    """无Basic认证的新发布不依赖旧口令文件；数据库配置仍必需。"""
+    module, path = project
+    (path / ".htpasswd").unlink()
+    with module.Project() as controller:
+        environment = controller.docker_environment(manifest())
+        assert environment["RUNTIME_ENV_FILE"] == str(path / ".env.runtime")
+        (path / ".env.runtime").unlink()
+        with pytest.raises(module.BoundaryError, match="MISSING_FILE: .env.runtime"):
+            controller.docker_environment(manifest())
+
+
 def test_account_cannot_be_overridden_by_environment(project, monkeypatch, docker_calls):
     module, path = project
     monkeypatch.setenv("SSH_USER", "songbing")

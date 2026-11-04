@@ -12,7 +12,7 @@
     "dev": "concurrently --kill-others -n web,api \"npm run dev:web\" \"npm run dev:api\"",
     "dev:web": "npm run dev --workspace @pdd/web",
     "dev:api": "node scripts/api.mjs dev",
-    "check": "npm run check:web && npm run check:api",
+    "check": "npm run check:db-schema && npm run check:web && npm run check:api",
     "check:web": "npm run check --workspace @pdd/web",
     "check:api": "node scripts/api.mjs check",
     "test": "npm run test:web && npm run test:api",
@@ -24,7 +24,9 @@
     "db:status": "node scripts/api.mjs db:status",
     "sync:m1": "node scripts/api.mjs sync:m1",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "check:db-schema": "node scripts/api.mjs schema:check",
+    "db:schema": "node scripts/api.mjs schema:render"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

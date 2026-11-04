@@ -17,6 +17,10 @@
 7. **先保留设计文件，再建表。** 设计方案保存为专用文档；任何结构变更必须先修改migration并说明原因，重新生成派生schema.sql并完成审查，再按用户确认范围操作数据库。已执行revision不改写，后续追加revision。
 8. **先写实施计划，再动手。** 实施计划包含业务对象、对象关系、主数据库、缓存架构、核心表、业务职责、字段规范、数据约束、表间关联、删除策略、范式校验、更新策略和验收标准。
 
+来源更新监测追加对象“一个物理来源最近检查和接收标记”，按本流程的专用设计见[同步监测](implementation/project-sync-implementation.md#source-update-monitor)，字段与范式见[检查状态字典](database-schema/source-checkpoints.md)。经营事实、版本、报告关系不变。
+
+当前物理范围为原30张经营表＋天气发布＋来源检查共32张领域表，另有Alembic版本表；现行字段数量和扩展见[字段字典](database-schema/README.md)。`schema.sql`从base到当前head整体生成，空库直接按[初始化流程](database-schema/migration-plan.md#current-schema-delivery)执行一次。天气内容修订及解析文案变化不是表结构迁移；只有实际DDL变化才新增revision并重生成SQL。
+
 ## 设计目标
 
 设计清楚、查询快，保证数据一致性和完整性；可拓展、减少冗余、避免更新异常，考虑并发安全和锁冲突；便于维护、排障、迁移和对接，控制存储成本，提供应用层容错并降低业务代码复杂度。

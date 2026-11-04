@@ -14,6 +14,8 @@ const python = existsSync(localPython) ? localPython : process.env.PYTHON || "py
 const commands = {
   dev: ["uvicorn", "app.main:app", "--reload", "--host", "127.0.0.1", "--port", "8000"],
   check: ["ruff", "check", "."],
+  "schema:check": [path.join(root, "scripts/render-db-schema.py"), "--check"],
+  "schema:render": [path.join(root, "scripts/render-db-schema.py")],
   test: ["pytest", "-q"],
   "db:up": [],
   "db:test": [],
@@ -30,7 +32,11 @@ const localDatabaseActions = {
 const localAction = localDatabaseActions[process.argv[2]];
 const args = localAction
   ? [path.join(root, "scripts/db-local.py"), localAction, ...process.argv.slice(3)]
-  : ["-m", ...command, ...process.argv.slice(3)];
+  : [
+      ...(process.argv[2].startsWith("schema:") ? [] : ["-m"]),
+      ...command,
+      ...process.argv.slice(3),
+    ];
 const child = spawn(python, args, { cwd: api, stdio: "inherit" });
 child.on("error", () => {
   console.error("无法启动 Python，请按 README 配置 Python 3.12+ 和后端依赖。");

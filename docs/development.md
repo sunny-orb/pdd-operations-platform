@@ -27,15 +27,17 @@ npm run db:up      # 启动/初始化本地容器和角色，不迁移、不接�
 
 ### 迁移与升级
 
-现行设计入口是[数据库字典](database-schema/README.md)和[迁移方案](database-schema/migration-plan.md)。已执行 revision 不改写，派生 SQL 只供审阅，不直接执行。
+现行设计入口是[数据库字典](database-schema/README.md)和[迁移方案](database-schema/migration-plan.md)。已执行 revision 不改写。`schema.sql`统一包含当前完整迁移，**未部署的新空库按[首次初始化](database-schema/migration-plan.md#current-schema-delivery)一次执行**；分段SQL仅供审阅，不重复拼接。`npm run db:schema`离线生成，`npm run check`自动核对是否与迁移一致。
 
 ```bash
-apps/api/.venv/bin/python scripts/db-v2.py verify
+npm run check:db-schema
+# 仅在已配置本机PG17的开发环境执行；创建并清理随机隔离测试库
+(cd apps/api && .venv/bin/python -m pytest -q tests/test_schema_delivery.py)
 ```
 
-`verify` 新建、验证并清理一次性隔离 PG 库，项目库只读检查。`db-v2.py create` 仅用于已验证的初始空库，当前已有业务库不可重复创建。后续升级按对应专用设计使用 `upgrade-*-local.py`，先核对当前 revision、验证及备份条件，不批量运行全部升级脚本。
+历史入口`db-v2.py`仍固定09，不用于当前12首次部署。`verify` 新建、验证并清理一次性隔离 PG 库，项目库只读检查。`db-v2.py create` 仅用于已验证的初始空库，当前已有业务库不可重复创建。后续升级按对应专用设计使用 `upgrade-*-local.py`，先核对当前 revision、验证及备份条件，不批量运行全部升级脚本。
 
-本版本的来源更新状态与监测需先升级到revision `20261104_12`，依次包含10的状态表、11的时间字段和12的来源调度字段；具体操作见[专用升级／回退说明](database-schema/source-checkpoints.md)。新增表只存检查和版本日期摘要，保留现有业务表。旧升级脚本的目标revision不可直接替代本次迁移，已有数据的状态表不允许自动降级删除。
+本版本的来源更新状态与监测要求数据库结构为revision `20261104_12`，包含10的状态表、11的时间字段和12的来源调度字段；已到此版本无须重复迁移，新空库执行完整初始化SQL，只有旧库需要增量升级；具体操作见[专用升级／回退说明](database-schema/source-checkpoints.md)。新增表只存检查和版本日期摘要，保留现有业务表。旧升级脚本的目标revision不可直接替代本次迁移，已有数据的状态表不允许自动降级删除。
 
 旧 M1 应用、专属测试及默认 Alembic 配置已移除；`apps/api/migrations/versions/` 仅保留旧 revision 历史，不是可运行迁移链。旧 `db:upgrade`、`profiles:m1`、`scores:m1` 已撤除。v2 迁移在线路径只接受显式受控连接，不读取通用 `DATABASE_URL`，服务启动不建表。公司环境的迁移入口和权限需另行验收。
 

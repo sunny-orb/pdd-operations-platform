@@ -162,7 +162,7 @@ class OfflineBaselineTests(unittest.TestCase):
             patch("sqlalchemy.create_engine", side_effect=AssertionError("禁止数据库连接")),
             patch("socket.create_connection", side_effect=AssertionError("禁止网络连接")),
         ):
-            sql = module.render_sql()
+            sql = module.render_sql("20261028_01")
         self.assertEqual(len(re.findall(r"CREATE TABLE public\.(?!alembic_)", sql)), 30)
         self.assertIn("ON DELETE RESTRICT ON UPDATE NO ACTION", sql)
         self.assertIn("NULLS NOT DISTINCT", sql)
@@ -189,7 +189,7 @@ class OfflineBaselineTests(unittest.TestCase):
 
     def test_json_constants_are_not_parsed_as_text_bind_parameters(self):
         renderer = load_script(ROOT / "scripts/render-db-schema.py", "json_constants_renderer")
-        sql = renderer.render_sql()
+        sql = renderer.render_sql("20261028_01")
         self.assertIn('"baseline_days":7', sql)
         self.assertIn('"require_source_completeness":true', sql)
         self.assertIn('"count_policy_code":null', sql)

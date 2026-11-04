@@ -7,7 +7,7 @@
 | 应用         | `api.mjs`                                                    | npm 调用的跨平台 Python 适配器                         |
 | 本地环境     | `db-local.py`                                                | 启动/查看容器、执行现行测试；不执行旧迁移              |
 | v2 基线      | `db-v2.py`                                                   | 隔离验证及初始空库创建；已有库不覆盖                   |
-| 字典审阅     | `render-db-schema.py`                                        | 从冻结基线生成或核对派生 SQL                           |
+| 字典审阅     | `render-db-schema.py`                                        | 从base到当前head生成完整空库SQL；npm run db:schema生成、check自动核对                           |
 | 项目同步     | `sync-project.py`、`install-sync-schedule.py`                | 同一执行链的状态、补跑、钟点及 launchd 安装            |
 | 数仓网页登录 | `configure-warehouse-login.py [--check]` | 现有账号登录及8表元数据只读验证，成功才保存0600私密配置，不启用调度 |
 | 历史推广补齐 | `import-promotion-history.py --input <私有JSON> [--publish]` | 默认只校验11条授权范围，显式发布走本机受控身份及全局锁 |
@@ -18,7 +18,7 @@
 
 脚本只做环境、参数和运行适配；业务编排在 `apps/api/app/jobs`，规则在 `app/modules`。项目调度调用 `app.jobs.project_runtime.execute_project`，新增平台适配不复制业务同步逻辑。旧 M1 的 `db:upgrade`、`profiles:m1`、`scores:m1` 已移除。
 
-`sync-project.py --check-updates`检查到期的实际来源，发现变化后复用原接收流程；`--scheduled`同时处理每日全量时点和已启用的15分钟检查，二者共用PG互斥锁。`--status`包含监测开关／间隔；部分失败非零退出。本版本使用前要求升级至`20261104_12`，详见[开发说明](../docs/development.md#同步与评分)和[来源监测设计](../docs/implementation/project-sync-implementation.md#source-update-monitor)。
+`sync-project.py --check-updates`检查到期的实际来源，发现变化后复用原接收流程；`--scheduled`同时处理每日全量时点和已启用的15分钟检查，二者共用PG互斥锁。`--status`包含监测开关／间隔；部分失败非零退出。本版本要求数据库结构达到`20261104_12`，详见[开发说明](../docs/development.md#同步与评分)和[来源监测设计](../docs/implementation/project-sync-implementation.md#source-update-monitor)。
 
 2026-11-02授权店铺推广同期补齐后，两推广来源的完整接收从2025-02-01开始，其他销售来源仍从2026-02-01开始。优先用`sync-project.py --run-now --only shop_channel_product_promotion shop_channel_star_shop`完成两来源受控更新。独立CLI指定推广来源发布时使用2025-02-01起点；`--dataset all --publish`保留原财年参数，各来源内部使用各自获准完整范围。验证模式仍只读明确请求窗口，不隐式扩展。
 

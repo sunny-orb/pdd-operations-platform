@@ -10,6 +10,30 @@
 
 **Spec:** [完整字段字典](README.md)、[对象及关系](../database-design.md)、[业务契约](../data-contract.md)。
 
+<a id="current-schema-delivery"></a>
+
+## 当前空库初始化交付（2026-11-04）
+
+用户要求未部署阶段保持`schema.sql`及数据库设计同步，减少首次部署步骤。执行方案：离线从现行v2迁移链base→唯一head生成完整SQL，包含Alembic版本表及现有最小运行权限；不合并或改写已执行revision。空库只运行这一份SQL，不再拼接分段审阅文件。已有库继续按当前版本增量迁移，禁止重放初始化文件。
+
+本轮不新增表、字段、关联、索引或数据库服务；原30表、天气发布（1:1数据版本）、来源检查（每来源一行）的职责和范式保持。生成器增加空库/PG17/角色前置检查；所有非系统schema中的表、函数或自定义类型均会阻止初始化，整体事务失败回滚；不含凭据或业务数据，不创建集群角色。准备好的pdd_app/pdd_ingest沿现有权限，API只读，任务写权限沿02—12迁移。只在随机隔离PG库测试完整SQL与Alembic逐项升级所得目录一致、版本到head、权限、重复执行拒绝及已有用户对象拒绝后数据和权限保留；不改本机业务库，不部署生产。未来结构变化由`--check`校验派生文件，并在常规check中执行。
+
+### 首次部署使用
+
+1. 准备PostgreSQL17空库及数据库所有者连接，按环境配置`pdd_app`／`pdd_ingest`独立最小权限角色与口令。凭据不写进SQL或Git。此文件不安装服务、不创建集群角色、不接收业务数据。
+2. 开发侧修改迁移和字段设计后运行`npm run db:schema`；`npm run check`自动执行`check:db-schema`，漏生成或迁移变化会失败。
+3. 在已配置好的数据库所有者连接下执行一次（示例使用PG服务配置名，不含凭据）：
+
+   ```bash
+   PGSERVICE=pdd_deploy psql -X -v ON_ERROR_STOP=1 -f docs/database-schema/schema.sql
+   PGSERVICE=pdd_deploy psql -X -v ON_ERROR_STOP=1 -c 'SELECT version_num FROM public.alembic_version_v2;'
+   ```
+
+   预期版本`20261104_12`；32张领域表＋1张版本表。所有DDL/权限/版本标记在同一事务中，失败整体回滚。不得再执行weather-publications.sql、target-ranges.sql、source-*.sql等分段审阅稿，也不必逐个运行本机upgrade脚本。
+4. 已有库按实际`alembic_version_v2`生成该版本到目标head的增量SQL，备份并演练后执行；不重放完整schema.sql、不手动stamp跳过迁移。例如开发侧`apps/api/.venv/bin/alembic -c apps/api/alembic-v2.ini upgrade 20261104_12:head --sql`。已部署过的revision保持不可变。存在业务数据时沿各迁移的保留/修复回退限制，不能删除重建业务库。
+
+本机旧`db-v2.py`仍固定09，作为历史受控演练入口保留，不用于当前12首次部署；当前交付由`tests/test_schema_delivery.py`真实PG验证。此初始化只完成结构与运行权限，来源接入、服务器配置及正式上线验收沿已有流程。
+
 ## Global Constraints
 
 - 30表494字段、50处正式FK，ID/FK为TEXT；M3-01=A，无独立完成额表，无Redis。
@@ -92,7 +116,7 @@ apps/api/.venv/bin/python scripts/render-db-schema.py --check
 apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 ```
 
-初次生成或修改尚未执行的基线后，先运行`apps/api/.venv/bin/python scripts/render-db-schema.py`离线更新审阅SQL，再做上述核对。Alembic配置`apps/api/alembic-v2.ini`使用独立`alembic_version_v2`技术版本表（不计30业务表），在线无显式受控连接即拒绝，不自动读取连接环境；不得运行旧db:upgrade，不直接执行schema.sql。
+初次生成或修改尚未执行的基线后，先运行`apps/api/.venv/bin/python scripts/render-db-schema.py`离线更新审阅SQL，再做上述核对。Alembic配置`apps/api/alembic-v2.ini`使用独立`alembic_version_v2`技术版本表（不计30业务表），在线无显式受控连接即拒绝，不自动读取连接环境；不得运行旧db:upgrade；当前完整schema.sql仅按上方空库流程执行。
 
 建表实施阶段未导入来源/业务数据，未启动自动任务或部署，当时未提交/推送。隔离合成验证及本地空结构创建按本节授权执行；后续GitHub保存按用户新增授权处理。
 
@@ -115,7 +139,7 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 
 ## 入口与后续结构变更
 
-本轮入口`apps/api/.venv/bin/python scripts/db-v2.py verify`仅写本次随机隔离库，项目仅作只读快照；`create`用于通过相同文件指纹验证的全新空项目库，当前非空`pdd_operations`仍拒绝执行。入口限定本机55432、PG17、pdd_admin、固定Docker Unix socket与同一集群，旧M1链/配置不参与。当前初始化目标明确为`20261031_09`，不能静默跟随未来head；旧01基线、冻结字典及schema.sql保持历史原样。
+本轮入口`apps/api/.venv/bin/python scripts/db-v2.py verify`仅写本次随机隔离库，项目仅作只读快照；`create`用于通过相同文件指纹验证的全新空项目库，当前非空`pdd_operations`仍拒绝执行。入口限定本机55432、PG17、pdd_admin、固定Docker Unix socket与同一集群，旧M1链/配置不参与。当前初始化目标明确为`20261031_09`，不能静默跟随未来head；旧01基线及冻结字典保持历史原样；schema.sql已按上方2026-11-04方案升级为完整交付。
 
 ### 当前head新空环境初始化设计与实施（COMMON-ISS-04）
 
@@ -132,7 +156,7 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 
 失败恢复：提交前错误由事务整体回滚，保留迁移前schema-only备份/目标身份快照，不清表或自动降级；确认空状态及指纹未变后可重跑。提交后独立验收失败时保留现场和证据，先只读诊断，不自动回退、删库或恢复覆盖。有数据环境的修复另按获准逐版方案执行。
 
-初始基线已应用本地项目库；冻结的versions/20261028_01和baseline_20261028不再为新结构变更改写。之后先新增revision、说明原因与前后兼容/回退，更新字典及相应SQL审阅生成流程，再在获准隔离环境验证、按授权执行。schema.sql目前是初始基线审阅稿，不能被当成未来所有revision的最终schema或直接重复执行。
+初始基线已应用本地项目库；冻结的versions/20261028_01和baseline_20261028不再为新结构变更改写。之后先新增revision、说明原因与前后兼容/回退，更新字典及相应SQL审阅生成流程，再在获准隔离环境验证、按授权执行。schema.sql现从base到唯一head完整派生，始终同步当前迁移；只用于空库，不得重复执行。
 
 空结构具有30 PK、50 FK、23普通UQ、435 CHECK、4条件唯一索引、22补充普通索引（含PK/UQ自动索引共79个业务索引）、9函数和58保护触发器；这不是容量/查询时延承诺。完整发布器、同步/来源数据和业务口径验收不在本轮空结构实施范围。
 

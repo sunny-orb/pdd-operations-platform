@@ -53,12 +53,13 @@ export function Analysis({ state }: { state: AftersalesState }) {
         </div>
         <p className="m5-scope-note">{data?.scope_note ?? "等待报告查询"}</p>
         <Table
+          className="m5-analysis-table"
           rowKey="id"
           columns={columns}
           dataSource={data?.rows ?? []}
           loading={state.analysis.isFetching}
           size="small"
-          scroll={{ x: Math.max(650, columns.length * 155) }}
+          scroll={{ x: Math.max(650, columns.length * 155), y: 480 }}
           locale={{
             emptyText: (
               <Empty

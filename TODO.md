@@ -4,6 +4,9 @@
 
 ## 当前任务与范围
 
+- [x] main已发布8f4fb71，构建41764958544成功（前端340、后端772）；服务器API/Web镜像摘要及amd64架构已核对，GitHub生产环境与运行配置已复核。网段确认前其余准备见[部署顺序](docs/implementation/deployment.md#网段确认前已完成的准备与恢复执行顺序)。
+- [ ] 用户已确认10.254.240.0/28；项目IPAM配置已补充，初始化及部署待执行。需提交配置并重新构建，不能用旧构建覆盖新网段。HTTPS当前自签名，部署后须验收可信证书及登录；同步另行准备。
+
 - [x] GitHub/服务器配置准备及用户补填复核完成：production仅main，3个SSH Secrets存在；网站账号songbing，bcrypt cost12/文件600；项目Docker目录700/配置600，GHCR Token认证有效且仅read:packages。发布文件摘要及边界检查通过。套餐不支持必需审批人；镜像版本仍待单独构建，Secret解锁与真实站点待运行验证。未推送、触发Actions、初始化或部署，见[配置证据](docs/validation/2026-11-04.md#configuration-preparation-20261104)。
 
 - [x] 本地发布保护完成：固定songbing及项目目录，目录/文件链接检查、Docker凭据隔离、白名单上传；build/deploy分别手动入口，SHA/digest绑定；发布及回退失败恢复快照已补齐。专项53、前端340/后端772、check/build/格式及工作流语法通过；独立审查P1修复复核关闭，COMMON-ISS-06旧文档测试仍1失败。7文件预览已更新，未改GitHub/服务器、推送、触发Actions或部署，见[验证](docs/validation/2026-11-04.md#release-boundary-20261104)。

@@ -113,3 +113,5 @@
 - [2026-11-04：本地发布边界与构建/部署分离](validation/2026-11-04.md#release-boundary-20261104)
 
 - [2026-11-04：GitHub与服务器配置准备](validation/2026-11-04.md#configuration-preparation-20261104)
+
+- [2026-11-04：网段确认前其余上线准备](validation/2026-11-04.md#network-pending-preparation-20261104)

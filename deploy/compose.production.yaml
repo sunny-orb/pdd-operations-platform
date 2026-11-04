@@ -61,7 +61,10 @@ services:
     command: [python, scripts/init-deployment-db.py]
     restart: "no"
 networks:
-  app: {}
+  app:
+    ipam:
+      config:
+        - subnet: 10.254.240.0/28
   traefik:
     external: true
     name: traefik-network

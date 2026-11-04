@@ -1,6 +1,6 @@
 # 公司服务器部署准备
 
-**目标与授权：** 用户已进一步授权准备GitHub及服务器配置。当前仅创建production环境/Secrets及/home/songbing/pdd-operations-platform内的文件；不修改其他服务器目录、共享设施或数据库，不提交、推送、触发Actions、初始化或部署。
+**目标与授权：** main已发布提交8f4fb71，独立构建41764958544成功。用户已确认10.254.240.0/28可用于本项目并授权继续；现按验证、重新构建、初始化、部署及验收的顺序执行。服务器操作范围仍仅本项目资源，不删除其他网络、不修改Docker全局配置或共享Traefik。
 
 ## 固定资源边界
 
@@ -28,7 +28,7 @@ Docker自身仍负责系统镜像/容器存储；发布程序不直接写这些�
 
 ## 构建与部署是两个独立入口
 
-1. **仅构建发布镜像：`.github/workflows/build.yml`。** 只允许workflow_dispatch，先调用CI，再构建linux/amd64的API/Web/Worker并推送GHCR，上传`release-manifest` artifact，保存30天。清单含提交SHA及三个镜像digest。没有SSH、服务器访问或部署job。“仅构建”仍包含发布镜像到GHCR，并非纯本机编译；本轮没有触发。
+1. **仅构建发布镜像：`.github/workflows/build.yml`。** 只允许workflow_dispatch，先调用CI，再构建linux/amd64的API/Web/Worker并推送GHCR，上传`release-manifest` artifact，保存30天。清单含提交SHA及三个镜像digest。没有SSH、服务器访问或部署job。“仅构建”仍包含发布镜像到GHCR，并非纯本机编译；2026-11-04运行41764958544已成功。
 2. **部署已构建版本：`.github/workflows/deploy.yml`。** 只允许workflow_dispatch，必须输入上述成功构建的run_id。整个job引用production环境。通过只读GitHub API确认构建属于本仓库、build.yml、workflow_dispatch且已成功结束；下载该运行的清单，checkout该构建提交，再确认清单SHA与checkout一致，才允许SSH。不会重新构建镜像，也不自动初始化数据库。
 3. 不存在workflow_run串联、推送标签自动部署或构建成功自动部署。若artifact过期或不存在，部署停止；需重新构建并审阅新的清单，不靠猜tag恢复。
 
@@ -40,13 +40,13 @@ Docker自身仍负责系统镜像/容器存储；发布程序不直接写这些�
 
 | 配置                                                       | 后续需要                                                             | 当前实际状态                                                |
 | ---------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
-| build.yml、deploy.yml与更新的CI/发布代码                   | 审查、获准后进入GitHub                                               | 仅本地，未推送                                              |
+| build.yml、deploy.yml与更新的CI/发布代码                   | 审查、获准后进入GitHub                                               | 已进入main，8f4fb71；构建成功，部署未触发                   |
 | production Environment                                     | 配置允许发布的分支/标签；套餐允许时配置审批                          | 已创建，仅允许main；GitHub返回422，当前套餐不支持必需审批人 |
 | SSH_PRIVATE_KEY                                            | 可登录songbing的私钥，建议production环境Secret                       | 已配置：现有加密私钥                                        |
 | SSH_KNOWN_HOSTS                                            | 已核实的[121.40.167.37]:10022条目                                    | 已配置，使用已核实主机条目                                  |
 | SSH_KEY_PASSPHRASE                                         | 当前加密私钥需要；未加密专用密钥不需要                               | 已配置，2026-11-04只读列表核实                              |
 | SSH_HOST/SSH_PORT/SSH_USER/DEPLOY_DIR/APP_DOMAIN Variables | 不再需要；目标已固定在代码中，设置这些值也不会改变目标               | 目前0个Variables                                            |
-| GITHUB_TOKEN                                               | GitHub自动提供；build job显式packages:write，deploy job actions:read | 不需手动配置，实际运行尚未验证                              |
+| GITHUB_TOKEN                                               | GitHub自动提供；build job显式packages:write，deploy job actions:read | 构建认证已验证；部署job尚未运行                             |
 | GHCR服务器拉取身份                                         | 仅可读所需镜像的classic PAT，read:packages                           | 已登录；只读验证Token有效且仅read:packages                  |
 
 页面入口：[Secrets](https://github.com/sunny-orb/pdd-operations-platform/settings/secrets/actions)、[Environments](https://github.com/sunny-orb/pdd-operations-platform/settings/environments)、[Actions权限](https://github.com/sunny-orb/pdd-operations-platform/settings/actions)。[GHCR认证说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)区分Actions的GITHUB_TOKEN和服务器拉取身份；不为拉取额外授予删除包权限。
@@ -70,7 +70,7 @@ GitHub production仅允许main；SSH_PRIVATE_KEY及SSH_KNOWN_HOSTS已设置，�
 
 仍需用户完成本机configure-private-values.sh向导：SSH_KEY_PASSPHRASE存入production；网站账号/口令生成bcrypt cost12的.htpasswd存入项目目录；classic PAT的read:packages用于项目专用Docker登录。秘密值不进聊天、命令参数、本机文件或日志。向导仅做配置，不推送、触发Actions、初始化或部署。随后用户完成向导，.htpasswd及GHCR配置已只读复核通过；.env镜像仍为占位，不能直接发布。
 
-## 首次操作顺序（配置已部分完成，发布仍待授权）
+## 首次操作顺序（网段确认后执行）
 
 1. 本地审查与测试通过，获准后提交/推送配置；先让build.yml和deploy.yml可从默认分支访问，不触发部署。普通分支推送只走CI。
 2. 获准后仅在项目目录准备上述文件、私密配置及目录权限。专用Docker登录显式使用`docker --config /home/songbing/pdd-operations-platform/.docker --host unix:///var/run/docker.sock login ghcr.io`，采用交互/标准输入提供Token，不放命令正文。不使用默认docker login位置。控制器会拒绝继承其他配置的凭据助手或context。
@@ -91,8 +91,29 @@ GitHub production仅允许main；SSH_PRIVATE_KEY及SSH_KNOWN_HOSTS已设置，�
 
 Worker仍为独立可选sync profile，不能通过本次发布自动启用。须另行准备UID10001可写runtime/lark-home、飞书和数仓专用登录、WAREHOUSE_PASSWORD及同次构建worker digest；不复制Mac钥匙串/个人会话。production同步必须显式SYNC_DATABASE_URL，不回退本机库。
 
-数据库模板sslmode=require只加密、不校验服务器身份；公司CA和证书域名确认后再适配verify-full。公司证书签发、实际AMD64 Actions构建、真实Docker凭据拉取及公司首次初始化/外网访问仍未执行。本机Linux测试以隔离容器验证账号/文件/环境边界，Docker调用使用替身，不冒充生产端到端验证。
+数据库模板sslmode=require只加密、不校验服务器身份；公司CA和证书域名确认后再适配verify-full。AMD64 Actions构建、服务器API/Web镜像拉取已验证。HTTPS入口当前返回自签名证书，尚未通过可信证书校验；公司首次初始化和实际站点访问仍未执行。本机Linux测试以隔离容器验证账号/文件/环境边界，Docker调用使用替身，不冒充生产端到端验证。
 
 同步镜像本机约2.34GB，正式部署前需复核服务器容量及镜像保留策略，不运行全局清理。基础镜像固定多架构digest，应用按构建digest发布；API/Worker暂沿requirements-dev.lock保证版本一致，仍含测试工具。仓库COMMON-ISS-06历史文档计数失败单列，不因本次保护测试通过而关闭。
 
 配置向导最终复核：production共3个SSH Secrets，部署分支仍仅main；网站账号songbing，bcrypt cost12，.htpasswd为600。项目.docker目录700、config.json为600；服务器内仅向GitHub官方API作只读认证，确认Token属于sunny-orb且权限只有read:packages，无额外权限。4个发布文件摘要仍与本地一致，运行配置600，边界检查通过。未读取GitHub Secret值，SSH解锁口令匹配及真实站点登录仍待后续实际运行验证；.env镜像仍占位，无.release.json，未部署。此前口令长度校验中止及补填过程保留在验证记录。
+
+## 网段确认前已完成的准备与恢复执行顺序
+
+2026-11-04：构建41764958544对应提交8f4fb718064e2dbc39b0f20ac3ea107037b2e072，云端前端340、后端772项测试通过。发布清单有效至2026-12-04T03:20:28Z。服务器API/Web均为linux/amd64，RepoDigests匹配清单；未拉取可选Worker镜像，未启动同步。复核时剩余空间约14GiB，项目容器和网络均为空。运行配置中两个数据库URL均固定songbing/pdd_operations，sslmode=require，连接池3、溢出0、连接超时5秒，CORS为正式HTTPS域名。
+
+DNS A为121.40.167.37，本次AAAA查询无结果；HTTP返回308跳转HTTPS。服务器本机443入口按正式域名SNI执行可信TLS校验，返回self-signed certificate，故HTTPS尚未验收。暂不更改共享代理或证书配置；应用路由发布后检查证书是否成功签发，仍失败则记录原因并交由共享代理管理员处理。不能关闭证书校验作为验收通过。
+
+阻塞原因：创建pdd-operations-production_app时Docker默认地址池耗尽。只读检查36个网络及路由，候选10.254.240.0/28无当前可见重叠，内存中Compose语法验证通过；公司VPC/VPN/预留网段尚待管理员确认。未修改实际Compose文件或创建候选网络。空网络也可能属于别人，不删除、不复用。
+
+确认后按以下顺序恢复：
+
+1. 记录获准网段，重新只读检查是否与最新Docker分配、宿主路由冲突；只给本项目app网络配置IPAM，保持服务及外部traefik网络定义不变。先做Compose语法、边界回归和差异核对。
+2. 提交并推送获准的项目配置，重新运行独立构建，取得新run_id。**不能直接使用旧构建41764958544部署新网段**：deploy工作流会checkout构建提交并上传其中的Compose，旧构建会把新配置覆盖回无IPAM版本。保留同提交发布代码与镜像清单的完整关系。
+3. 对比将上传的4个文件及服务器权限，维护步骤使用新构建的Compose和API digest。在固定项目目录、项目凭据、项目名及发布锁下先运行数据库只读预检。状态不是empty或already_initialized时停止；仍为空才执行已审查的首次初始化，所有DDL在同一事务中，随后检查版本、32张业务表、524列、所有者，以及预装扩展和monitor保留。
+4. 手动运行deploy.yml，输入新构建run_id；只启动api/web，等待就绪，核对.release.json提交及digest。不启动worker、不导入或同步业务数据。
+5. 验收外网可信TLS、HTTP跳转、首页和/api未认证401、错误口令401、正确口令访问首页与API、SPA子路径及容器健康。用户登录口令不进入聊天、命令参数或日志。私密口令缺失时由用户在本机隐藏输入或手动验收，不重设口令。
+6. 核对空库展示不冒充真实经营数据，数据库连接池与运行日志正常。数据同步需要专用来源身份、数据范围、备份恢复及频率验收，按单独任务准备；本次只上线站点不等于业务数据已齐备。
+
+首次发布没有上一份成功快照，不能调用rollback假定有历史版本。失败先保留证据，只处理本项目api/web；不删除数据库、不执行全局prune、不移除共享网络。后续已存在成功快照时才按受保护rollback入口恢复。
+
+仍无法提前完成的验证：GitHub runner真实SSH解锁和连通、候选网络创建、镜像内数据库连通/初始化、实际可信证书、正确口令端到端登录与业务接口响应。已有本机及云端单元/集成验证不能替代这些运行验收。

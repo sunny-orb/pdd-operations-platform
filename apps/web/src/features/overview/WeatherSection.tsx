@@ -38,9 +38,20 @@ function WeatherBlock({ title, value }: { title: string; value: WeatherDocument[
     <article className="m6-weather-metric">
       <span>
         {title}
-        {value.status !== "parsed" && <Tag color="gold">{blockStatus(value.status)}</Tag>}
+        {!["parsed", "not_mentioned"].includes(value.status) && (
+          <Tag color="gold">{blockStatus(value.status)}</Tag>
+        )}
       </span>
-      <strong>涉及地区：{value.regions.length ? value.regions.join("、") : "未识别"}</strong>
+      <strong>
+        涉及地区：
+        {value.regions.length
+          ? value.regions.join("、")
+          : value.status === "not_mentioned"
+            ? "无当日气温描述"
+            : value.status === "parsed"
+              ? "未提及重点关注地区"
+              : "暂无法确定"}
+      </strong>
       <WeatherText title={title} detail={value.detail} />
     </article>
   );
@@ -61,7 +72,10 @@ function WeatherRecords({ state }: { state: WeatherState }) {
           {localTime(state.meta?.last_attempt_at)}（{state.meta?.last_attempt_status ?? "尚无记录"}
           ）。
         </p>
-        <p>未识别文本不能解释为无天气风险；历史发布中的当前官方预报链接不代表历史原图。</p>
+        <p>
+          解析状态：{state.meta?.status ?? "尚无数据"}
+          。未提及或未识别不代表无天气风险；历史发布中的当前官方预报链接不代表历史原图。
+        </p>
         {d?.note && <p>{d.note}</p>}
         {d?.sources.map((source, i) => (
           <section key={`${source.url}:${i}`}>
@@ -97,7 +111,6 @@ export function WeatherSection() {
           <h2>全国关键天气</h2>
         </div>
         <div className="m6-weather-control">
-          {state.meta?.status === "partial" && <Tag color="gold">天气部分字段待核</Tag>}
           <label htmlFor="weather-publication">查询日期</label>
           <Select
             id="weather-publication"

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from app.api.aftersales import router as aftersales_router
+from app.api.data_status import router as data_status_router
 from app.api.product_board import router as products_router
 from app.api.promotion import router as promotion_router
 from app.api.sales import router as sales_router
@@ -105,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(sales_router)
     application.include_router(aftersales_router)
     application.include_router(weather_router)
+    application.include_router(data_status_router)
     return application
 
 

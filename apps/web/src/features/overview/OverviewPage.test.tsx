@@ -122,10 +122,10 @@ it("首页仅展示六项关注及对应建议，查看全部才显示真实总�
   const summary = screen.getByLabelText("经营总览关键数据");
   const alerts = document.getElementById("alerts")!;
   const actions = document.getElementById("actions")!;
-  expect(summary.textContent).toContain("首页关注6 项");
-  expect(summary.textContent).toContain("首页建议5 项");
+  expect(summary.textContent).toContain("异常数量6 项");
+  expect(summary.textContent).toContain("待办动作5 项");
   expect(summary.textContent).not.toMatch(/110|109/);
-  expect(document.getElementById("overview")!.textContent).toContain("首页建议 5 项");
+  expect(document.getElementById("overview")!.textContent).toContain("待办动作 5 项");
   expect(within(alerts).getAllByRole("listitem")).toHaveLength(6);
   expect(
     within(actions).getByRole("table").querySelectorAll("tbody tr[data-row-key]"),
@@ -139,7 +139,9 @@ it("首页仅展示六项关注及对应建议，查看全部才显示真实总�
   );
   fireEvent.click(within(alerts).getByTitle("2"));
   expect(within(alerts).getByText("首页提示7", { exact: true })).toBeTruthy();
-  fireEvent.click(within(alerts).getByRole("button", { name: "返回首页关注" }));
+  const attentionLink = within(summary).getByRole("link", { name: "异常数量6 项" });
+  expect(attentionLink.getAttribute("href")).toBe("#alerts");
+  fireEvent.click(attentionLink);
   expect(within(alerts).getByText("首页提示1", { exact: true })).toBeTruthy();
   expect(within(alerts).queryByText("首页提示7", { exact: true })).toBeNull();
   fireEvent.click(within(actions).getByRole("button", { name: "查看全部建议" }));
@@ -148,13 +150,19 @@ it("首页仅展示六项关注及对应建议，查看全部才显示真实总�
   );
   fireEvent.click(within(actions).getByTitle("2"));
   expect(within(actions).getByRole("link", { name: "首页提示8" })).toBeTruthy();
-  fireEvent.click(within(actions).getByRole("button", { name: "返回首页建议" }));
+  const actionLink = within(summary).getByRole("link", { name: "待办动作5 项" });
+  expect(actionLink.getAttribute("href")).toBe("#actions");
+  fireEvent.click(actionLink);
+  const heroAction = within(document.getElementById("overview")!).getByRole("link", {
+    name: /待办动作 5 项/,
+  });
+  expect(heroAction.getAttribute("href")).toBe("#actions");
   expect(within(actions).queryByRole("link", { name: "首页提示8" })).toBeNull();
   data[1].data!.observations = items.slice(7, 9);
   data[1].data!.actions = data[1].data!.actions.slice(6, 8);
   rerender(view());
-  expect(summary.textContent).toContain("首页关注2 项");
-  expect(summary.textContent).toContain("首页建议2 项");
+  expect(summary.textContent).toContain("异常数量2 项");
+  expect(summary.textContent).toContain("待办动作2 项");
   expect(within(alerts).getByText("首页提示8", { exact: true })).toBeTruthy();
   expect(within(actions).getByRole("link", { name: "首页提示8" })).toBeTruthy();
   expect(data[1].refresh).not.toHaveBeenCalled();
@@ -194,7 +202,7 @@ it("同对象跨域只展示一行，双来源入口保留，筛选及动态更�
   expect(within(table).getAllByRole("row")).toHaveLength(2);
   expect(table.textContent).toContain("复核源域事实；调整预算");
   expect(within(document.getElementById("overview")!).getByText("1 项")).toBeTruthy();
-  expect(document.querySelector(".m6-risk-callout")?.textContent).toContain("— 项 P0 风险");
+  expect(document.querySelector(".m6-risk-callout")?.textContent).toContain("1 项 P0 风险");
   expect(document.querySelector(".m6-risk-callout")?.textContent).toContain("39.94%");
   fireEvent.click(within(alerts).getByRole("button", { name: "查看全部预警" }));
   fireEvent.click(within(alerts).getByRole("button", { name: "P1" }));
@@ -247,8 +255,8 @@ it("全部来源失败时建议统计不补零，有待核域真实观察时范�
   const { rerender } = render(view());
   const definitions = document.getElementById("definitions")!;
   expect(definitions.textContent).toContain("— 条来源建议 · — 条归并建议");
-  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("首页关注— 项");
-  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("首页建议— 项");
+  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("异常数量— 项");
+  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("待办动作— 项");
   fireEvent.click(
     within(document.getElementById("actions")!).getByRole("button", { name: "查看全部建议" }),
   );
@@ -260,7 +268,7 @@ it("全部来源失败时建议统计不补零，有待核域真实观察时范�
     { ...obs, id: "pending", domain: "promotion", objectKey: '["listing","s2","l2"]' },
   ];
   rerender(view());
-  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("首页关注2 项");
+  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("异常数量2 项");
 });
 it("保留原型顺序和八列动作，正式数未知、建议不冒充已派单", () => {
   vi.mocked(useOverview).mockReturnValue(states());
@@ -274,7 +282,7 @@ it("保留原型顺序和八列动作，正式数未知、建议不冒充已派�
   ].map((e) => e.id);
   expect(ids).toEqual(["overview", "alerts", "actions", "weather", "definitions"]);
   expect(screen.getByText("本日负责人")).toBeTruthy();
-  expect(screen.getByText("首页关注")).toBeTruthy();
+  expect(screen.getByText("异常数量")).toBeTruthy();
   expect(screen.queryByText(/来源优先级 · P0/)).toBeNull();
   const table = screen.getByRole("table");
   expect(
@@ -687,7 +695,7 @@ it("天气200部分解析与失败保旧具有明确状态和原因", () => {
       <OverviewPage />
     </MemoryRouter>,
   );
-  expect(screen.getByText("天气部分字段待核")).toBeTruthy();
+  expect(screen.queryByText("天气部分字段待核")).toBeNull();
   expect(screen.getByText(/SOURCE_TIMEOUT/)).toBeTruthy();
 });
 
@@ -721,4 +729,67 @@ it("动作详情只展示来源规则与证据，未指派负责人和日期不�
   expect(within(detail).getByRole("link", { name: "查看来源证据 →" }).getAttribute("href")).toBe(
     obs.link,
   );
+});
+
+it("P0摘要使用全量来源去重计数而非六项预览，更新后保留真实零及不可用区别", () => {
+  const data = states();
+  data[1].data!.observations = Array.from({ length: 8 }, (_, i) => ({
+    ...obs,
+    id: `p0-${i}`,
+    objectKey: JSON.stringify(["listing", "shop", String(i)]),
+  }));
+  data[2].data!.observations = [
+    { ...data[1].data!.observations[0], id: "promo", domain: "promotion" },
+  ];
+  // 售后本轮不参与来源P0汇总，退款率照原值。
+  data[3].data!.observations = [{ ...obs, id: "after", domain: "aftersales", objectKey: "report" }];
+  data[3].data!.card.value = "0.3994";
+  vi.mocked(useOverview).mockReturnValue(data);
+  const page = () => (
+    <MemoryRouter>
+      <OverviewPage />
+    </MemoryRouter>
+  );
+  const { rerender } = render(page());
+  const callout = document.querySelector(".m6-risk-callout")!;
+  expect(callout.textContent).toContain("8 项 P0 风险");
+  expect(callout.textContent).toContain("商品 / 推广已接范围 · 来源等级");
+  expect(callout.textContent).toContain("39.94%");
+  data[1].data!.observations = [];
+  data[2].data!.observations = [];
+  rerender(page());
+  expect(callout.textContent).toContain("0 项 P0 风险");
+  for (const state of data.slice(1, 3)) state.data!.observationState = "pending_validation";
+  rerender(page());
+  expect(callout.textContent).toContain("— 项 P0 风险");
+  expect(callout.textContent).toContain("39.94%");
+});
+
+it("经营卡显示来源最高等级，更新时切换P0/P1/P2；空名单及售后不伪造等级", () => {
+  const data = states();
+  data[3].data!.observations = [{ ...obs, domain: "aftersales" }];
+  vi.mocked(useOverview).mockReturnValue(data);
+  const view = () => (
+    <MemoryRouter>
+      <OverviewPage />
+    </MemoryRouter>
+  );
+  const { rerender } = render(view());
+  const badge = () => document.querySelector("#domain-products .m6-card-head .ant-tag")!;
+  expect(badge().textContent).toBe("P0 风险");
+  expect(document.querySelector("#domain-aftersales .m6-card-head .ant-tag")!.textContent).toBe(
+    "观察",
+  );
+  for (const level of ["P1", "P2"] as const) {
+    data[1].data!.observations = [{ ...obs, sourcePriority: level }];
+    data[2].data!.observations = [{ ...obs, domain: "promotion", sourcePriority: level }];
+    rerender(view());
+    expect(badge().textContent).toBe(`${level} 风险`);
+    expect(document.querySelector("#domain-promotion .m6-card-head .ant-tag")!.textContent).toBe(
+      `${level} 风险`,
+    );
+  }
+  data[1].data!.observations = [];
+  rerender(view());
+  expect(badge().textContent).toBe("观察");
 });

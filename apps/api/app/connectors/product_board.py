@@ -39,9 +39,13 @@ class ProductBoardReader:
     def close(self):
         self.connection.close()
 
-    def latest(self):
+    def latest(self, selected=None):
+        selected = ("product_daily", "product_promotion") if selected is None else selected
+        yesterday = datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1)
         latest = []
-        for code in ("product_daily", "product_promotion"):
+        for code in selected:
+            if code == "profile_records":
+                continue
             self.heartbeat()
             with self.connection.cursor() as c:
                 execute_read(
@@ -57,7 +61,7 @@ class ProductBoardReader:
                     raise ValueError("SOURCE_NO_DATES")
                 latest.append(value.date())
         # 接收覆盖两源最新观察；页面分别按事实MAX日期展示，不以较慢源截断。
-        return min(max(latest), datetime.now(ZoneInfo("Asia/Shanghai")).date() - timedelta(days=1))
+        return min(max(latest), yesterday) if latest else yesterday
 
     def projection(self, code, end):
         numbers = set(PRODUCT_NUM.values()) if code == "product_daily" else set(AD_NUM.values())
@@ -102,11 +106,15 @@ class ProductBoardReader:
                 offset += 1000
         return normalize(code, result, end)
 
-    def read_stable(self):
-        end = self.latest()
+    def read_stable(self, selected=None):
+        """两次读取选中来源；MAX日期只用于批准窗口，不作为上游更新标记。"""
+        selected = tuple(TABLES) if selected is None else tuple(selected)
+        if not selected or not set(selected) <= TABLES.keys():
+            raise ValueError("INVALID_SOURCE_SELECTION")
+        end = self.latest(selected)
         for _ in range(2):
-            first = {code: self.projection(code, end) for code in TABLES}
-            second = {code: self.projection(code, end) for code in TABLES}
+            first = {code: self.projection(code, end) for code in selected}
+            second = {code: self.projection(code, end) for code in selected}
             if fingerprint(first) == fingerprint(second):
                 return end, second
         raise ValueError("SOURCE_CHANGED_DURING_READ")

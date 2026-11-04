@@ -35,6 +35,13 @@ function fieldDisplay(field: Field) {
 /** 四域共用的经营卡；只格式化负责域字段，不取数、不推定风险级别。 */
 export function DomainCard({ state }: { state: DomainState }) {
   const card = state.data?.card;
+  // 展示来源名单的最高优先级，不重新评级；售后仍保留原展示。
+  const priority =
+    state.id === "products" || state.id === "promotion"
+      ? (["P0", "P1", "P2"] as const).find((level) =>
+          state.data?.observations.some((item) => item.sourcePriority === level),
+        )
+      : undefined;
   const domain = domains.find((d) => d.id === state.id)!;
   const pairs: Field[] = card?.pairs.length
     ? card.pairs
@@ -43,7 +50,14 @@ export function DomainCard({ state }: { state: DomainState }) {
     <Card id={`domain-${state.id}`} className={`m6-domain-card m6-${state.id}`}>
       <div className="m6-card-head">
         <span>{card?.title ?? domain.label}</span>
-        <Tag>{card?.status ?? (state.loading ? "读取中" : "暂无数据")}</Tag>
+        <Tag
+          className={priority ? `m6-risk-tag-${priority.toLowerCase()}` : undefined}
+          title={priority ? "当前来源风险名单的最高优先级" : undefined}
+        >
+          {priority
+            ? `${priority} 风险`
+            : (card?.status ?? (state.loading ? "读取中" : "暂无数据"))}
+        </Tag>
       </div>
       <h3>{card?.heading ?? `${domain.label}看板`}</h3>
       <div className="m6-metric-line">

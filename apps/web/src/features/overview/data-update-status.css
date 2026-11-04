@@ -6,6 +6,7 @@
   flex-wrap: wrap;
 }
 .m6-update-modal {
+  --m6-update-body-height: min(560px, 50vh);
   max-width: calc(100vw - 32px);
   top: 24px;
   padding-bottom: 32px;
@@ -34,6 +35,20 @@
   color: #19355d;
   font-size: 16px;
 }
+.m6-update-toolbar .ant-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.m6-update-dataset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 20px;
+  margin-bottom: 10px;
+}
+.m6-update-dataset strong {
+  width: 100%;
+}
 .m6-update-toolbar h3 span {
   color: #64748b;
   font-size: 13px;
@@ -55,16 +70,77 @@
 .m6-update-name {
   color: #243b5e;
   font-weight: 500;
+  min-width: 0;
+  line-height: 1.65;
+}
+.m6-update-source-link {
+  color: #243b5e;
+  font-weight: 600;
+  display: inline-flex;
+  gap: 7px;
+  align-items: baseline;
+}
+.m6-update-source-link .anticon {
+  color: #687c98;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.m6-update-table-name {
+  display: block;
+  max-width: 270px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #526781;
+  font-size: 12px;
+  font-weight: 400;
+  margin: 3px 0;
+}
+.m6-update-table-name.is-physical,
+.m6-update-locator code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.m6-update-table-name:focus-visible {
+  outline: 2px solid #2463df;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.m6-update-cell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+.m6-update-cell-stack .ant-tag {
+  margin-inline-end: 0;
+}
+.m6-update-time {
+  white-space: nowrap;
 }
 .m6-update-name small,
 .m6-update-subtext {
   display: block;
-  color: #758397;
+  color: #63758e;
   font-size: 12px;
   font-weight: 400;
 }
 .m6-update-muted {
   color: #7c899c;
+}
+/* 两个页签参与同一网格定高；隐藏页签仍不可见、不可交互。 */
+.m6-update-tabs .ant-tabs-body {
+  display: grid;
+}
+.m6-update-tabs .ant-tabs-body > .ant-tabs-content {
+  grid-area: 1 / 1;
+}
+.m6-update-tabs .ant-tabs-body > .ant-tabs-content-hidden {
+  display: block;
+  visibility: hidden;
+  pointer-events: none;
+}
+.m6-update-table .ant-table-body {
+  height: var(--m6-update-body-height);
 }
 .m6-update-table .ant-table-thead > tr > th {
   background: #f2f6fc;
@@ -72,12 +148,19 @@
 }
 .m6-update-table .ant-table-cell {
   font-variant-numeric: tabular-nums;
+  line-height: 1.65;
+}
+.m6-update-table .ant-table-tbody > tr > td {
+  padding-top: 18px;
+  padding-bottom: 18px;
 }
 .m6-update-detail {
-  display: flex;
-  gap: 20px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 32px;
   align-items: flex-start;
-  justify-content: space-between;
+  padding: 8px 12px;
+  font-size: 12px;
 }
 .m6-update-detail dl {
   margin: 0;
@@ -89,12 +172,39 @@
   margin: 6px 0;
 }
 .m6-update-detail dt {
-  width: 160px;
+  width: 90px;
   flex-shrink: 0;
   color: #64748b;
 }
 .m6-update-detail dd {
   margin: 0;
+  overflow-wrap: anywhere;
+}
+.m6-update-platform-details {
+  padding-left: 24px;
+  border-left: 1px solid #dce4ef;
+}
+.m6-update-platform-details h4 {
+  color: #243b5e;
+  font-size: 13px;
+  margin: 4px 0 14px;
+}
+.m6-update-platform-details .m6-update-dataset {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3px;
+  margin-bottom: 16px;
+}
+.m6-update-locator code {
+  font-size: 12px;
+  user-select: text;
+}
+.m6-update-locator [role="status"] {
+  display: inline-block;
+  color: #526781;
+}
+.m6-update-revision {
+  display: block;
   overflow-wrap: anywhere;
 }
 .m6-update-warning {
@@ -110,10 +220,8 @@
   color: #64748b;
 }
 @media (max-width: 640px) {
-  .m6-update-modal .ant-table-body {
-    max-height: 32dvh !important;
-  }
   .m6-update-modal {
+    --m6-update-body-height: 32dvh;
     top: 12px;
     max-width: calc(100vw - 16px);
   }
@@ -128,6 +236,16 @@
   }
   .m6-update-analysis {
     padding: 28px 0;
+  }
+  .m6-update-detail {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    width: min(1100px, calc(100vw - 100px));
+  }
+  .m6-update-platform-details {
+    border-left: 0;
+    border-top: 1px solid #dce4ef;
+    padding: 12px 0 0;
   }
   .m6-overview-scope .m6-scope-actions {
     gap: 10px;

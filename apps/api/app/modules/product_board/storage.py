@@ -98,7 +98,49 @@ class ProductBoardStore:
 
         return self.run(receive, _source_versions=source_versions)
 
-    def run(self, receive, *, _source_versions=None):
+    def run_selected(self, selected, receive):
+        """仅接收选中物理来源，其他来源固定当前不可变版本；缺输入时不扩大下载。"""
+        selected = set(selected)
+        if not selected or not selected <= TABLES.keys():
+            raise ValueError("INVALID_SOURCE_SELECTION")
+        reused = {}
+
+        def merge(heartbeat):
+            rows = {}
+            with (
+                self.engine.connect().execution_options(isolation_level="REPEATABLE READ") as c,
+                c.begin(),
+            ):
+                c.execute(sa.text("SET TRANSACTION READ ONLY"))
+                for code in TABLES.keys() - selected:
+                    vid = c.scalar(
+                        sa.text("SELECT version_id FROM current_datasets WHERE dataset_code=:code"),
+                        {"code": code},
+                    )
+                    if vid is None:
+                        raise ValueError("SOURCE_INPUT_MISSING")
+                    reused[code] = vid
+                    table = self.tables[FACT_TABLES[code]]
+                    columns = [
+                        col for col in table.c if col.name not in ("id", "dataset_version_id")
+                    ]
+                    rows[code] = [
+                        dict(r)
+                        for r in c.execute(
+                            sa.select(*columns)
+                            .where(table.c.dataset_version_id == vid)
+                            .order_by(table.c.source_row_key)
+                        ).mappings()
+                    ]
+            heartbeat()
+            end, received = receive(heartbeat)
+            if set(received) != selected:
+                raise ValueError("SOURCE_SELECTION_MISMATCH")
+            return end, {**rows, **received}
+
+        return self.run(merge, _source_versions=reused, _partial=True)
+
+    def run(self, receive, *, _source_versions=None, _partial=False):
         """receive(heartbeat)->(截至日,三来源必要投影)。锁和租约覆盖整个接收，失败保留旧头。"""
         if producer_hash() != LOADED_PRODUCER_HASH:
             raise ValueError("PRODUCER_CODE_CHANGED")
@@ -135,10 +177,14 @@ class ProductBoardStore:
                         task.insert().values(
                             id=run,
                             job_code="rebuild_product_profiles"
-                            if _source_versions is not None
+                            if _source_versions is not None and not _partial
                             else "sync_product_board",
                             request_ref=REVISION
-                            + (":profile_rebuild" if _source_versions is not None else ""),
+                            + (
+                                ":profile_rebuild"
+                                if _source_versions is not None and not _partial
+                                else ""
+                            ),
                             lock_key="m1-product-board",
                             status="running",
                             started_at=now,
@@ -166,7 +212,11 @@ class ProductBoardStore:
                             raise ValueError("TASK_LEASE_LOST")
 
                 end, rows = receive(heartbeat)
-                if _source_versions is not None and set(reuse_sources) != set(TABLES):
+                if (
+                    _source_versions is not None
+                    and not _partial
+                    and set(reuse_sources) != set(TABLES)
+                ):
                     raise ValueError("SOURCE_INPUT_MISSING")
                 if producer_hash() != code_hash:
                     raise ValueError("PRODUCER_CODE_CHANGED")

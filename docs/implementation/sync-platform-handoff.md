@@ -34,7 +34,7 @@ result = execute_project(
 - 每个来源仍拥有自己的双读/范围/字段/键/Decimal校验及不可变发布。失败保留原有效入口；失败依赖对应的报告/评分跳过，独立来源可继续。整链不是把所有来源合成一个长数据库事务。
 - 返回原结构化运行结果：整体status与各dataset状态、结果版本或安全错误；`failed`需由平台标记失败。`already_succeeded`、`already_running`、`retry_budget_exhausted`是去重/运行/预算结果，不能写成又完成了一次拉取。重试是否允许由同一运行记录决定。
 - 仓库口令仅在实际接仓步骤取用；只执行评分、目标或天气等步骤不读取仓库口令。飞书仍使用已配置CLI身份及权限，本次没有新增或迁移身份授权。
-- 当前本机CLI只负责配置、10/14/18时槽、资源构造、JSON和退出码；普通页面GET继续只查本地已发布版本，不触发平台或数仓任务。
+- 当前本机CLI只负责配置指定的时槽、资源构造、JSON和退出码；普通页面GET继续只查本地已发布版本，不触发平台或数仓任务。
 
 ## 整功能迁移清单
 
@@ -42,8 +42,17 @@ result = execute_project(
 2. 使用已完成相同Alembic版本和最小权限的PG；任务进程与API分别使用既有写入/只读职责。迁移数据库、版本/任务历史、原始输入、运行与评分归档及配置，不能只复制定时表达式或拉数脚本。
 3. 现有数据库中的retained_input_ref/evidence_ref含绝对路径。已有归档必须保持原引用可访问，例如按原路径挂载；仅修改ProjectPaths只控制后续输出，不会重写历史引用。若要改引用规则，另做受控迁移和回放验收，不自动改封版记录。
 4. 在隔离真实PG及批准的取数范围演练完整链：同批重跑、锁冲突、来源失败保旧、依赖跳过、目标及报告绑定、归档重放、API同版读取和新数据状态。平台触发器复用execute_project，不能重写金额、组合分类或发布规则。
-5. 接管前停用旧触发器，保留应用、数据库和归档；确认没有执行中任务，再启平台触发器。同一运行环境只保留一个负责的计划触发，PG互斥继续兜底。平台时区、钟点和漏点策略应明确配置，不能假定调用接口就自动执行本机10/14/18规则。
+5. 接管前停用旧触发器，保留应用、数据库和归档；确认没有执行中任务，再启平台触发器。同一运行环境只保留一个负责的计划触发，PG互斥继续兜底。平台时区、钟点和漏点策略应明确配置，不能假定调用接口就自动执行本机配置的时槽规则。
 
 ## 回退
 
 先停平台触发并确认无运行中任务，再恢复旧触发器，继续使用同一有效数据与归档；不清库、不删除版本、不重跑旧迁移。若同时更换业务代码或映射，回退前验证其能读取已发布revision，不能只回退调度器后用旧解析覆盖新输入。重放或修订通过新版本发布，保留旧报告和来源证据。
+
+
+### 固定来源调度入口（2026-11-04）
+
+新入口 `app.jobs.source_monitor_runtime.execute_source_schedule(engine, *, paths, warehouse_password, warehouse_headers, warehouse_session=None, now=None, warehouse_times=None, feishu_times=None, source_ids=None, force=False, process_products=True)`。外部平台注入稳定带时区运行时刻与服务身份provider；`warehouse_headers`仅在元数据请求时读取，不保存浏览器会话；也可注入`WarehouseAccountSession(credentials_provider)`，使用现有账号独立登录，会话只留本轮内存。核心策略 `modules/data_status/schedule_policy.py`不访问数据库，`jobs/source_schedule.py`编排，`checkpoint_store.py`负责PG状态和锁，连接器负责只读协议。产品接收通过`execute_project(product_sources=...)`复用未改来源的不可变版本。
+
+启用 `source_schedule_enabled`时CLI将8数仓和2飞书从旧完整任务和15分钟监控同时排除；聚水潭4来源、天气2来源及售后派生沿旧路径。新固定路径只重试商品评分，不能改变聚水潭报告触发时间。未来平台接管先停对应本机触发器，再调用同一入口；保留数据库状态/共享归档，不复制调度逻辑或启动API内定时器。认证验证失败时不得启用替换开关，不能依靠浏览器可访问推定服务身份可用。
+
+source_ids只可缩小到已注册迁移范围；force=True用于明确手动补跑，复用锁/状态但不消费固定槽；process_products=False保留手动只接收不重算的选择。不要通过伪造now提前触发或伪造实际接收时刻。

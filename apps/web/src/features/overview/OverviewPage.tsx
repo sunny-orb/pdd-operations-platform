@@ -52,7 +52,7 @@ export function OverviewPage() {
       : sourceUpdateFailed
         ? "最近更新失败"
         : states.every((s) => s.data)
-          ? "本地数据可用"
+          ? "平台数据可用"
           : "正在等待数据";
   return (
     <DashboardLayout
@@ -76,7 +76,7 @@ export function OverviewPage() {
           </span>
           <div className="m6-scope-actions">
             <a href="#definitions">查看统一指标口径 →</a>
-            <DataUpdateStatus states={states} />
+            <DataUpdateStatus />
           </div>
         </section>
         <section className="m6-hero" id="overview">
@@ -96,10 +96,10 @@ export function OverviewPage() {
                 <i className="green" />
                 目标达成 <b>{formatMetric(target, "percent", 1)}</b>
               </span>
-              <span>
+              <a href="#actions" onClick={() => setAllActions(false)}>
                 <i className="amber" />
-                首页建议 <b>{actionCount} 项</b>
-              </span>
+                待办动作 <b>{actionCount} 项</b>
+              </a>
             </div>
             <div className="m6-quick-links">
               {domains.map((d, i) => (
@@ -121,7 +121,8 @@ export function OverviewPage() {
           </div>
           <aside className="m6-risk-callout">
             <span>需优先处理</span>
-            <strong>{counts.p0 ?? "—"} 项 P0 风险</strong>
+            <strong>{view.sourceCounts?.P0 ?? "—"} 项 P0 风险</strong>
+            <small className="m6-risk-scope">商品 / 推广已接范围 · 来源等级</small>
             <p>
               售后退款率 <b>{formatMetric(aftersales?.value, "percent")}</b>
               {aftersales?.value != null
@@ -145,13 +146,15 @@ export function OverviewPage() {
             }
           />
           <SummaryCard
-            label="首页关注"
+            label="异常数量"
             value={attentionCount}
             unit="项"
             tone="amber"
+            href="#alerts"
+            onNavigate={() => setAllAlerts(false)}
             description={
               <>
-                <span>按来源顺序预览，非异常总数</span>
+                <span>首页展示，非全部异常</span>
                 <br />
                 <a href="#alerts" onClick={() => setAllAlerts(true)}>
                   查看全部预警 →
@@ -160,13 +163,15 @@ export function OverviewPage() {
             }
           />
           <SummaryCard
-            label="首页建议"
+            label="待办动作"
             value={actionCount}
             unit="项"
             tone="blue"
+            href="#actions"
+            onNavigate={() => setAllActions(false)}
             description={
               <>
-                <span>对应首页关注，核查后安排</span>
+                <span>首页建议 · 待核查，尚未派单</span>
                 <br />
                 <a href="#actions" onClick={() => setAllActions(true)}>
                   查看全部建议 →

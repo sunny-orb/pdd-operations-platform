@@ -5,6 +5,7 @@ import os
 import re
 import time
 import tomllib
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -13,6 +14,8 @@ from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 
+from app.modules.data_status.schedule_policy import FEISHU_TIMES, WAREHOUSE_TIMES
+
 
 @dataclass(frozen=True)
 class Schedule:
@@ -20,6 +23,11 @@ class Schedule:
     timezone: str = "Asia/Shanghai"
     enabled: bool = True
     max_attempts_per_slot: int = 2
+    monitor_enabled: bool = False
+    monitor_interval_seconds: int = 900
+    source_schedule_enabled: bool = False
+    warehouse_times: tuple[str, ...] = WAREHOUSE_TIMES
+    feishu_times: tuple[str, ...] = FEISHU_TIMES
 
     def __post_init__(self):
         if (
@@ -28,13 +36,25 @@ class Schedule:
             or len(set(self.times)) != len(self.times)
             or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in self.times)
             or not 1 <= self.max_attempts_per_slot <= 3
+            or not 300 <= self.monitor_interval_seconds <= 3600
         ):
             raise ValueError("INVALID_SYNC_SCHEDULE")
+        for times in (self.warehouse_times, self.feishu_times):
+            if (
+                not times
+                or len(set(times)) != len(times)
+                or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in times)
+            ):
+                raise ValueError("INVALID_SOURCE_SCHEDULE")
+        if "16:10" not in self.warehouse_times:
+            raise ValueError("RECONCILIATION_SLOT_REQUIRED")
 
 
 def read_schedule(path):
     raw = tomllib.loads(Path(path).read_text())
-    raw["times"] = tuple(raw["times"])
+    for key in ("times", "warehouse_times", "feishu_times"):
+        if key in raw:
+            raw[key] = tuple(raw[key])
     return Schedule(**raw)
 
 
@@ -49,13 +69,15 @@ def due_slot(config, now):
     return f"{local.date()}T{max(due)}+08:00" if due else None
 
 
-def run_project(engine, slot, steps, archive_root, *, max_attempts=2, depends_on=None):
+def run_project(
+    engine, slot, steps, archive_root, *, max_attempts=2, depends_on=None, lock_connection=None
+):
     """每个step串行返回来源结果；失败不抹去其它来源成功，日志不含异常原文。"""
     m = sa.MetaData()
     tasks = sa.Table("task_runs", m, schema="public", autoload_with=engine, resolve_fks=False)
     run = str(uuid4())
     evidence = Path(archive_root) / f"{run}.json"
-    with engine.connect() as c:
+    with nullcontext(lock_connection) if lock_connection is not None else engine.connect() as c:
         locked = c.execute(
             sa.text("SELECT pg_try_advisory_lock(hashtext('project-source-sync'))")
         ).scalar_one()

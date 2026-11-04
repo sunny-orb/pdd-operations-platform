@@ -33,7 +33,13 @@ class ProjectPaths:
             object.__setattr__(self, name, value)
 
 
-def build_steps(engine: Engine, paths: ProjectPaths, warehouse_password: Callable[[], str]):
+def build_steps(
+    engine: Engine,
+    paths: ProjectPaths,
+    warehouse_password: Callable[[], str],
+    *,
+    product_sources=None,
+):
     """装配既有接收、校验、发布及报告；仓库口令只在对应步骤真正执行时获取。"""
     from app.connectors.product_board import ProductBoardReader
     from app.connectors.sales_feishu import FeishuRefundReader
@@ -44,18 +50,26 @@ def build_steps(engine: Engine, paths: ProjectPaths, warehouse_password: Callabl
     from app.modules.sales.source_policy import approved_window
     from app.modules.sales.storage import ShopDailyStore
 
-    def products():
+    def products(selected=None):
+        selection = selected if selected is not None else product_sources
         reader = None
         try:
 
             def receive(hb):
                 nonlocal reader
                 reader = ProductBoardReader(password=warehouse_password(), heartbeat=hb)
-                return reader.read_stable()
+                return (
+                    reader.read_stable(selection) if selection is not None else reader.read_stable()
+                )
 
-            return ProductBoardStore(
+            store = ProductBoardStore(
                 engine, paths.ingestion_root / "product_board", reconcile_full_scope=True
-            ).run(receive)
+            )
+            return (
+                store.run_selected(selection, receive)
+                if selection is not None
+                else store.run(receive)
+            )
         finally:
             if reader is not None:
                 reader.close()
@@ -152,6 +166,7 @@ def build_steps(engine: Engine, paths: ProjectPaths, warehouse_password: Callabl
 
     return {
         "products": products,
+        **{code: lambda code=code: products((code,)) for code in (product_sources or ())},
         "product_scores": scores,
         **{code: lambda code=code: sales(code) for code in ("shop_daily", *SPECS)},
         "sales_targets": sales_targets,
@@ -173,6 +188,8 @@ def execute_project(
     warehouse_password: Callable[[], str],
     only: Sequence[str] | None = None,
     max_attempts: int = 2,
+    lock_connection=None,
+    product_sources=None,
 ):
     """同一批次标识重用PG幂等/互斥；串行跑完整业务链，返回脱敏运行报告。
 
@@ -181,7 +198,12 @@ def execute_project(
     """
     if not 1 <= max_attempts <= 3:
         raise ValueError("INVALID_SYNC_ATTEMPTS")
-    steps = build_steps(engine, paths, warehouse_password)
+    steps = build_steps(
+        engine,
+        paths,
+        warehouse_password,
+        **({"product_sources": product_sources} if product_sources is not None else {}),
+    )
     if only is not None:
         if not only or not set(only) <= steps.keys():
             raise ValueError("INVALID_SYNC_DATASETS")
@@ -192,8 +214,13 @@ def execute_project(
         steps,
         paths.run_archive_root,
         max_attempts=max_attempts,
+        lock_connection=lock_connection,
         depends_on={
-            "product_scores": tuple(key for key in ("products",) if key in steps),
+            "product_scores": tuple(
+                key
+                for key in ("products", "product_daily", "product_promotion", "profile_records")
+                if key in steps
+            ),
             "aftersales_report": tuple(
                 key
                 for key in (

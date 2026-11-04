@@ -4,6 +4,8 @@
 
 数据库确定为PostgreSQL，前期无Redis。输入以[数据契约3.5中文展示字段](../data-contract.md#page-display-contracts)和指定新版`sites-current`五页原型为准；旧M1前后端/迁移不作为设计依据。来源仍是数仓、聚水潭、飞书表；天气按既定范围单独设计。业务答复、剩余参数和真实来源技术待验继续遵守契约，不因字段设计完成而变成已实现或验收。
 
+来源监测另由Alembic10追加一张运行状态表（不改变经营30表），Alembic11追加成功观测、网页更新时间及核对时刻，Alembic12追加固定槽与来源接收状态。本版本需升级至`20261104_12`：[source_checkpoints字段/权限/回退](source-checkpoints.md)，[建表审阅SQL](source-checkpoints.sql)，[时间字段审阅SQL](source-update-times.sql)，[调度字段审阅SQL](source-schedule.sql)。
+
 ## 完整字典入口与唯一表清单
 
 | 字典                                           | 张数 | 字段数 | 本版全部表                                                                                                                                                                                                                                   |

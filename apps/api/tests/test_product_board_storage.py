@@ -254,3 +254,39 @@ def test_reconciled_full_scope_can_remove_source_rows_without_deleting_history(s
             ).scalar_one()
             > 0
         )
+
+
+def test_selected_source_preserves_other_versions_and_receipt_times(sales_pg, tmp_path):
+    store = ProductBoardStore(sales_pg, tmp_path, reconcile_full_scope=True)
+    first = store.run(lambda hb: candidate())
+    end, rows = candidate(amount="41.23")
+    result = store.run_selected(
+        ("product_daily",), lambda hb: (end, {"product_daily": rows["product_daily"]})
+    )
+    assert result["versions"]["product_daily"] != first["versions"]["product_daily"]
+    assert result["versions"]["product_promotion"] == first["versions"]["product_promotion"]
+    assert result["versions"]["profile_records"] == first["versions"]["profile_records"]
+    with sales_pg.connect() as c:
+        assert (
+            c.scalar(
+                sa.text(
+                    "SELECT count(*) FROM dataset_versions WHERE dataset_code='profile_records'"
+                )
+            )
+            == 1
+        )
+        assert c.scalar(
+            sa.text(
+                "SELECT sum(product_revenue) FROM product_daily_facts WHERE dataset_version_id=:id"
+            ),
+            {"id": result["versions"]["product_daily"]},
+        ) == Decimal("41.23")
+
+
+def test_selected_source_without_other_inputs_does_not_expand_download(sales_pg, tmp_path):
+    calls = []
+    with pytest.raises(ValueError, match="SOURCE_INPUT_MISSING"):
+        ProductBoardStore(sales_pg, tmp_path).run_selected(
+            ("product_daily",), lambda hb: calls.append(True)
+        )
+    assert not calls

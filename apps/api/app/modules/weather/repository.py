@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.modules.product_board.repository import BoardError
-from app.modules.weather.contracts import WeatherDocument
+from app.modules.weather.parser import presentation_document
 
 
 def definition_revision():
@@ -95,7 +95,7 @@ class Repository:
                 sa.text("SELECT document FROM public.weather_publications WHERE id=:id"),
                 {"id": selected["id"]},
             )
-            document = WeatherDocument.model_validate(raw).model_dump()
+            document = presentation_document(raw)
             self.data = dict(
                 id=selected["id"],
                 issue_date=str(selected["issue_date"]),
@@ -109,8 +109,10 @@ class Repository:
                 sa.text("SELECT document FROM public.weather_publications WHERE id=:id"),
                 {"id": default["id"]},
             )
+            current_document = presentation_document(raw)
             partial = partial or any(
-                raw[name]["status"] != "parsed" for name in ("today_rain", "today_temperature")
+                current_document[name]["status"] not in ("parsed", "not_mentioned")
+                for name in ("today_rain", "today_temperature")
             )
         self.meta = dict(
             data_version=token,

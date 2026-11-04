@@ -12,7 +12,7 @@ class Closed(BaseModel):
 class WeatherBlock(Closed):
     regions: list[str]
     detail: str = Field(min_length=1)
-    status: Literal["parsed", "unidentified", "boundary"]
+    status: Literal["parsed", "unidentified", "boundary", "not_mentioned"]
 
 
 class WeatherProcess(WeatherBlock):

@@ -216,6 +216,11 @@ def test_cli_status_works_from_other_cwd_without_engine_or_credentials(
         "timezone": "Asia/Shanghai",
         "enabled": True,
         "max_attempts_per_slot": 2,
+        "monitor_enabled": False,
+        "monitor_interval_seconds": 900,
+        "source_schedule_enabled": False,
+        "warehouse_times": ["08:20", "09:10", "10:10", "10:50", "13:10", "15:10", "16:10"],
+        "feishu_times": ["08:20", "10:10"],
     }
 
 
@@ -330,3 +335,71 @@ def test_scoring_archive_path_is_required_and_absolute(tmp_path):
             feishu_root=tmp_path / "feishu",
             scoring_archive_root=Path("relative/scoring"),
         )
+
+
+def test_scheduled_cli_excludes_migrated_sources_from_both_legacy_paths(
+    sales_pg, tmp_path, monkeypatch
+):
+    """真实PG引擎装配CLI；在外部执行边界捕获所选范围，禁止混入迁移来源。"""
+    from app.jobs import source_monitor_runtime
+    from app.modules.data_status.schedule_policy import LEGACY_SOURCES, LEGACY_STEPS
+
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/sync.toml").write_text(
+        'times=["00:00"]\nmonitor_enabled=true\nsource_schedule_enabled=true\n'
+    )
+    main = cli_main(monkeypatch, tmp_path, ["--scheduled"])
+    monkeypatch.setitem(main.__globals__, "runtime_engine", lambda: sales_pg)
+    selections = []
+
+    def execute(engine, slot, **kwargs):
+        selections.append(("full", tuple(kwargs["only"])))
+        return {"status": "succeeded"}
+
+    def monitor(engine, **kwargs):
+        selections.append(("monitor", tuple(kwargs["source_ids"])))
+        return {"status": "checked", "checked": 0}
+
+    def schedule(engine, **kwargs):
+        selections.append(("schedule", tuple(kwargs["warehouse_times"])))
+        assert callable(kwargs["warehouse_headers"])
+        return {"status": "checked", "checked": 0}
+
+    monkeypatch.setitem(main.__globals__, "execute_project", execute)
+    monkeypatch.setattr(source_monitor_runtime, "execute_monitor", monitor)
+    monkeypatch.setattr(source_monitor_runtime, "execute_source_schedule", schedule)
+    assert main() == 0
+    assert selections[0] == ("full", LEGACY_STEPS)
+    assert selections[1] == ("monitor", LEGACY_SOURCES)
+    assert selections[2][1][-1] == "16:10"
+
+
+def test_new_schedule_runs_before_legacy_first_slot_when_old_monitor_disabled(
+    sales_pg, tmp_path, monkeypatch
+):
+    from datetime import datetime
+
+    from app.jobs import source_monitor_runtime
+
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config/sync.toml").write_text(
+        'times=["10:00"]\nmonitor_enabled=false\nsource_schedule_enabled=true\n'
+    )
+    main = cli_main(monkeypatch, tmp_path, ["--scheduled"])
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 4, 8, 20, tzinfo=tz)
+
+    monkeypatch.setitem(main.__globals__, "datetime", Clock)
+    monkeypatch.setitem(main.__globals__, "runtime_engine", lambda: sales_pg)
+    calls = []
+
+    def schedule(*args, **kwargs):
+        calls.append(True)
+        return {"status": "checked", "checked": 0}
+
+    monkeypatch.setattr(source_monitor_runtime, "execute_source_schedule", schedule)
+    assert main() == 0
+    assert calls == [True]

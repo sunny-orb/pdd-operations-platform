@@ -106,9 +106,9 @@ it("天气首屏展示中文时间和缺项状态，完整预报与来源默认�
   vi.mocked(useWeather).mockReturnValue(value);
   render(<WeatherSection />);
   expect(screen.getByRole("heading", { name: "2026年11月02日08时 发布" })).toBeTruthy();
-  expect(screen.getByText("天气部分字段待核")).toBeTruthy();
+  expect(screen.queryByText("天气部分字段待核")).toBeNull();
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.getByText("涉及地区：未识别")).toBeTruthy();
+  expect(screen.getByText("涉及地区：暂无法确定")).toBeTruthy();
   expect(screen.queryByText("涉及地区：无")).toBeNull();
   const outlook = screen.getByRole("group", { name: "未来7天天气" }) as HTMLDetailsElement;
   expect(outlook.open).toBe(false);
@@ -189,3 +189,24 @@ it.each(["来源尚未提供明确时刻", "2026-02-30T08:00:00+08:00", "2026-11
     expect(screen.getByText("未取得可靠裁剪的过程文本，不能据此判定无风险。")).toBeTruthy();
   },
 );
+
+it("当期未提及气温时明确展示，正常气温更新后恢复原文和地区", () => {
+  const data = state();
+  data.publication!.document.today_temperature = {
+    regions: [],
+    detail: "本期预报未提及今日气温变化。",
+    status: "not_mentioned",
+  };
+  vi.mocked(useWeather).mockReturnValue(data);
+  const { rerender } = render(<WeatherSection />);
+  expect(screen.getByText("本期预报未提及今日气温变化。")).toBeTruthy();
+  expect(screen.getByText("涉及地区：无当日气温描述")).toBeTruthy();
+  data.publication!.document.today_temperature = {
+    regions: ["河北"],
+    detail: "今日河北降温6℃。",
+    status: "parsed",
+  };
+  rerender(<WeatherSection />);
+  expect(screen.getByText("今日河北降温6℃。")).toBeTruthy();
+  expect(screen.queryByText("涉及地区：无当日气温描述")).toBeNull();
+});

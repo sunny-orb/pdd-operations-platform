@@ -11,7 +11,7 @@ from app.modules.weather.contracts import (
     WeatherSource,
 )
 
-PARSER_REVISION = "nmc-national-v1"
+PARSER_REVISION = "nmc-national-v2"
 FOCUS_REGIONS = ["广东", "江苏", "山东", "浙江", "河南", "河北", "北京", "四川", "辽宁"]
 REFERENCE_URL = "https://kocotree.feishu.cn/sheets/USG4sA8qjhYqDotULUQcH5uznJd?sheet=jvTHJw"
 RAIN = re.compile(r"雨|雪|降水")
@@ -77,6 +77,65 @@ def _block(text, pattern, label):
     )
 
 
+def today_temperature(sources, issue):
+    """从归档国内重点/逐日及中期过程取覆盖发布日的气温原句；不把未来或实况当今日。"""
+    by_url = {s.url: s for s in sources}
+    bulletin = by_url[BULLETIN_URL]
+    daily = re.split(r"三[、.．]\s*国内未来三天具体预报", bulletin.text, maxsplit=1)
+    domestic = re.split(r"二[、.．]\s*全球天气情况", bulletin.text, maxsplit=1)[0]
+    key = re.split(r"2[.．、]\s*重点天气预报", domestic, maxsplit=1)
+    if len(daily) != 2 or len(key) != 2:
+        return WeatherBlock(
+            regions=[], detail="本期气温预报暂无法读取，请查看原文。", status="unidentified"
+        )
+    lines = [(line, issue) for line in (key[1] + "\n" + daily[1]).splitlines()]
+    medium = by_url[MID_RANGE_URL]
+    part = re.split(r"主要天气过程[：:]", medium.text, maxsplit=1)
+    if len(part) == 2:
+        body = re.split(r"三[、.．]\s*未来", part[1], maxsplit=1)[0]
+        lines += [(line, _stamp(medium.issue_time).date()) for line in body.splitlines()]
+    found, unresolved = [], False
+    for line, anchor in lines:
+        if not TEMPERATURE.search(line) or re.match(r"^\s*[（(]?\d+[）)]|^\s*图", line):
+            continue
+        # 后续明确时段开启独立片段；未重写时段的后句沿用本段时段。
+        starts = [match.start() for match in PERIOD.finditer(line)]
+        boundaries = [0, *starts[1:], len(line)]
+        for left, right in zip(boundaries, boundaries[1:], strict=False):
+            section = line[left:right]
+            if not TEMPERATURE.search(section):
+                continue
+            span = _period(section, anchor)
+            if span is None:
+                # 标题不作气温事实；包含数值但缺时段的正文不能宣称未提及。
+                unresolved = unresolved or bool(re.search(r"\d|℃|今天|今日", section))
+                continue
+            start, end, label = span
+            ends_at_morning = bool(re.search(r"日0?8时$", label))
+            if start <= issue <= end and not (end == issue and ends_at_morning):
+                sentence = _sentences(section, TEMPERATURE)
+                if sentence not in found:
+                    found.append(sentence)
+    if found:
+        detail = "".join(found)
+        return WeatherBlock(regions=_regions(detail), detail=detail, status="parsed")
+    if unresolved:
+        return WeatherBlock(
+            regions=[], detail="本期气温描述未明确当日时段，请查看原文。", status="unidentified"
+        )
+    return WeatherBlock(regions=[], detail="本期预报未提及今日气温变化。", status="not_mentioned")
+
+
+def presentation_document(raw):
+    """按当前定义解释已归档原文，不改写发布记录、不访问上游；版本含定义哈希。"""
+    doc = WeatherDocument.model_validate(raw)
+    doc.today_temperature = today_temperature(doc.sources, _stamp(doc.issue_time).date())
+    doc.note = doc.note.replace(
+        "今日气温缺明确证据则待核。", "今日气温按国内当日预报识别；未提及不代表无天气风险。"
+    )
+    return doc.model_dump()
+
+
 def build_document(sources: list[SourceDocument]) -> tuple[date, WeatherDocument]:
     """两份固定身份、真实时间/非空正文输入，返回公报发布日与不可变展示产物。"""
     if len(sources) != 2 or {s.url for s in sources} != set(SOURCES):
@@ -95,7 +154,7 @@ def build_document(sources: list[SourceDocument]) -> tuple[date, WeatherDocument
     daily = part[1].splitlines() if len(part) == 2 else []
     current = next((line for line in daily if (p := _period(line, issue)) and p[0] == issue), "")
     rain = _block(current, RAIN, "今日降水")
-    temperature = _block(current, TEMPERATURE, "今日气温预报")
+    temperature = today_temperature(sources, issue)
     processes = []
     medium_part = re.split(r"主要天气过程[：:]", medium.text, maxsplit=1)
     medium_lines = (
@@ -147,6 +206,6 @@ def build_document(sources: list[SourceDocument]) -> tuple[date, WeatherDocument
         reference_url=REFERENCE_URL,
         group_card_link=None,
         note="唯一生效来源为NMC两份互补官文，各自发布时间独立。未来7日为发布日起至+6日；"
-        "过程原句跨窗口时保留边界标记，不等于逐日预报。今日气温缺明确证据则待核。"
+        "过程原句跨窗口时保留边界标记，不等于逐日预报。今日气温按国内当日预报识别；未提及不代表无天气风险。"
         "当前官方预报链接随官网更新，飞书仅供参考；无文本命中不表示无天气风险。",
     )

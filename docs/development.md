@@ -35,23 +35,41 @@ apps/api/.venv/bin/python scripts/db-v2.py verify
 
 `verify` 新建、验证并清理一次性隔离 PG 库，项目库只读检查。`db-v2.py create` 仅用于已验证的初始空库，当前已有业务库不可重复创建。后续升级按对应专用设计使用 `upgrade-*-local.py`，先核对当前 revision、验证及备份条件，不批量运行全部升级脚本。
 
+本版本的来源更新状态与监测需先升级到revision `20261104_12`，依次包含10的状态表、11的时间字段和12的来源调度字段；具体操作见[专用升级／回退说明](database-schema/source-checkpoints.md)。新增表只存检查和版本日期摘要，保留现有业务表。旧升级脚本的目标revision不可直接替代本次迁移，已有数据的状态表不允许自动降级删除。
+
 旧 M1 应用、专属测试及默认 Alembic 配置已移除；`apps/api/migrations/versions/` 仅保留旧 revision 历史，不是可运行迁移链。旧 `db:upgrade`、`profiles:m1`、`scores:m1` 已撤除。v2 迁移在线路径只接受显式受控连接，不读取通用 `DATABASE_URL`，服务启动不建表。公司环境的迁移入口和权限需另行验收。
 
 ## 同步与评分
 
-配置唯一入口为 [config/sync.toml](../config/sync.toml)，时区为 Asia/Shanghai。独立 launchd 每分钟检查，每日 10:00、10:30、11:00 串行接收已接入来源；这是全项目共用时点，替换原 14:00、18:00 轮次。API 和页面刷新只查本地发布结果。
+配置唯一入口为[config/sync.toml](../config/sync.toml)，时区Asia/Shanghai，独立launchd每分钟重新读取。source_schedule_enabled=true时，warehouse_times指定8个迁移数仓来源的7个时点，feishu_times指定两张飞书表的2个时点；同槽按源持久去重。原times和monitor_interval_seconds仅继续用于聚水潭4来源、天气2来源；API和页面刷新不访问上游。开关未启用时维持原全项目行为，实际启用进度见TODO。
+
+当前按用户最新选择直接核对已登录网页；以下认证连接器仅为未启用的备选实现，不要求为本次网页核对配置账号。固定计划未切换，实际状态见TODO。
+
+切换前迁移到revision12、核查来源映射并验证后台认证。现有网页登录可用账号密码协议时，运行以下命令交互输入已有账号（密码不回显），成功登录并只读核对8表后才写入`var/local-db/warehouse-web-account.json`（0600，Git忽略）：
+
+```bash
+apps/api/.venv/bin/python scripts/configure-warehouse-login.py
+apps/api/.venv/bin/python scripts/configure-warehouse-login.py --check
+```
+
+账号文件包含username/password，只用于固定HTTPS数仓主机，不是SQL的ro账号。会话Cookie仅留在本轮进程内存，八表复用一次登录，过期最多续登一次；认证失败本轮不重复撞密码。验证码、短信或强制改密需要人工处理，不能关闭来源安全校验来迁就调度。验证脚本不拉经营事实、不改上游、不启用计划；无需把密码贴在聊天或命令参数中。
+
+若没有账号文件，保留原显式认证头方式：`var/local-db/warehouse-web-headers.json`（0600）由用户提供批准的请求头对象，不提取浏览器会话。两种方式只选一种，账号认证失败不自动回退。未来平台可注入warehouse_session或warehouse_headers，凭据读取由调用方提供。真实认证未通过时不要打开替换开关，避免中断接收。--set-times只改变旧时点，保留新配置。新策略启用后，--run-now/--only将迁移来源交给同一状态机，更新接收标记而不消费固定槽；聚水潭和天气仍走原项目入口。
 
 ```bash
 apps/api/.venv/bin/python scripts/sync-project.py --status
 apps/api/.venv/bin/python scripts/sync-project.py --run-now
+apps/api/.venv/bin/python scripts/sync-project.py --check-updates
 apps/api/.venv/bin/python scripts/sync-project.py --set-times 10:00 10:30 11:00
 apps/api/.venv/bin/python scripts/install-sync-schedule.py
 apps/api/.venv/bin/python scripts/install-sync-schedule.py --remove
 ```
 
-前两条分别查看状态和按现有范围补跑，后三条调整钟点、安装/重载、移除本机定时器。只选择部分步骤时用 `--run-now --only`，合法值以脚本 `--help` 和项目步骤配置为准。不要同时开多套编排。
+以上依次查看状态、按现有范围补跑、检查到期来源并按需接收、调整钟点、安装/重载、移除本机定时器。`--check-updates`仍尊重检查间隔和项目锁，不是强制全量刷新；检查／接收／重算失败会非零退出。只选择部分步骤时用 `--run-now --only`，合法值以脚本 `--help` 和项目步骤配置为准。不要同时开多套编排。
 
 修改钟点后下次分钟检查即生效，无需重启 API 或重新安装定时器；当日已过的多个时点只合并补跑最近一轮，不追补全部漏点。机器睡眠/关机不能按时运行，跨日自动补跑未启用。来源失败保留旧成功版并显示原因；调整时点不证明已修复来源读取错误。窗口外回补、来源完整性及公司调度不因本机运行而视为完成。页面每 45 秒及聚焦时检查本地元信息，默认日期推进、自选范围保留。
+
+来源监测开关／间隔同样热读取。数据更新状态弹窗单独通过`GET /api/v1/data-status`每15秒读取平台摘要，仅打开且页面可见时运行；关闭停止。它不执行上游查询或同步命令。部署服务器需运行同一独立调度入口，不能仅启动API；运行约束见[监测设计](implementation/project-sync-implementation.md#source-update-monitor)。
 
 商品独立入口：
 

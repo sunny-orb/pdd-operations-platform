@@ -43,7 +43,7 @@ def test_domestic_forecast_excludes_wind_observation_and_global_weather():
     assert doc.today_rain.regions == ["江苏", "浙江"]
     assert "大风" not in doc.today_rain.detail
     assert "河北" not in doc.today_rain.regions
-    assert doc.today_temperature.status == "unidentified"
+    assert doc.today_temperature.status == "not_mentioned"
     assert all("11月10日" not in item.detail for item in doc.next_7_days)
     assert any(item.regions == ["河南"] for item in doc.next_7_days)
     assert doc.group_card_link is None
@@ -102,3 +102,82 @@ def test_medium_relative_dates_use_its_own_publication_month():
     )
     _, doc = build_document(values)
     assert all("广东有大雨" not in item.detail for item in doc.next_7_days)
+
+
+def test_temperature_checks_domestic_key_forecast_and_distinguishes_not_mentioned():
+    from dataclasses import replace
+
+    from app.modules.weather.parser import build_document
+
+    values = sources()
+    _, doc = build_document(values)
+    assert doc.today_temperature.status == "not_mentioned"
+    assert "未提及今日气温变化" in doc.today_temperature.detail
+    values[0] = replace(
+        values[0],
+        text=values[0].text.replace(
+            "预计，28日08时至29日08时，河北有5级大风。", "28日至29日，河北气温下降6℃。"
+        ),
+    )
+    _, doc = build_document(values)
+    assert doc.today_temperature.status == "parsed"
+    assert doc.today_temperature.regions == ["河北"]
+    assert "6℃" in doc.today_temperature.detail
+    assert "8℃" not in doc.today_temperature.detail
+
+
+def test_temperature_missing_section_or_undated_sentence_remains_unidentified():
+    from dataclasses import replace
+
+    from app.modules.weather.parser import build_document
+
+    for text in [
+        "原文结构异常",
+        sources()[0].text.replace(
+            "预计，28日08时至29日08时，河北有5级大风。", "河北气温将下降6℃。"
+        ),
+    ]:
+        values = sources()
+        values[0] = replace(values[0], text=text)
+        _, doc = build_document(values)
+        assert doc.today_temperature.status == "unidentified"
+
+
+@pytest.mark.parametrize(
+    ("forecast", "status", "expected"),
+    [
+        (
+            "28日至29日，河北有5级大风。30日至31日，河北气温下降8℃。",
+            "not_mentioned",
+            None,
+        ),
+        (
+            "28日至29日，河北气温下降6℃。30日至31日，河北气温下降8℃。",
+            "parsed",
+            "6℃",
+        ),
+        (
+            "30日至31日，河北气温下降8℃。28日至29日，河北气温下降6℃。",
+            "parsed",
+            "6℃",
+        ),
+        ("28日至29日，河北有5级大风。河北气温下降6℃。", "parsed", "6℃"),
+    ],
+)
+def test_temperature_keeps_each_explicit_period_with_its_own_sentences(
+    forecast, status, expected
+):
+    from dataclasses import replace
+
+    from app.modules.weather.parser import build_document
+
+    values = sources()
+    values[0] = replace(
+        values[0],
+        text=values[0].text.replace("预计，28日08时至29日08时，河北有5级大风。", forecast),
+    )
+    _, doc = build_document(values)
+    assert doc.today_temperature.status == status
+    assert "8℃" not in doc.today_temperature.detail
+    if expected:
+        assert expected in doc.today_temperature.detail

@@ -152,7 +152,8 @@
   gap: 10px 18px;
   margin: 18px 0 0;
 }
-.m6-focus-row > span {
+.m6-focus-row > span,
+.m6-overview-scope .m6-focus-row > a {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -258,6 +259,12 @@
   color: #59677b;
   line-height: 1.75;
 }
+.m6-risk-scope {
+  display: block;
+  margin-bottom: 7px;
+  color: #69778b;
+  font-size: 11px;
+}
 .m6-risk-callout p b {
   color: #962a36;
 }
@@ -308,6 +315,20 @@
 .m6-summary-label {
   font-size: 12px;
   color: #69778b;
+}
+.m6-summary-main {
+  display: block;
+  border-radius: 4px;
+}
+.m6-summary-main:hover .m6-summary-label,
+.m6-summary-main:hover .m6-summary-value,
+.m6-overview-scope .m6-focus-row > a:hover {
+  color: var(--m6-blue);
+}
+.m6-summary-main:focus-visible,
+.m6-focus-row > a:focus-visible {
+  outline: 2px solid var(--m6-blue);
+  outline-offset: 3px;
 }
 .m6-summary-value {
   display: block;
@@ -422,6 +443,18 @@
 .m6-sales .m6-card-head .ant-tag {
   color: #8b5c0a;
   background: #fff4dc;
+}
+.m6-card-head .m6-risk-tag-p0 {
+  color: #b42332;
+  background: #fff0f0;
+}
+.m6-card-head .m6-risk-tag-p1 {
+  color: #8b5c0a;
+  background: #fff4dc;
+}
+.m6-card-head .m6-risk-tag-p2 {
+  color: #2467c9;
+  background: #ebf3ff;
 }
 .m6-domain-card h3 {
   font-size: 22px;
@@ -827,7 +860,8 @@
 }
 .m6-actions-section .m6-action-table .ant-table-tbody > tr > td {
   height: 70px;
-  padding: 10px 14px;
+  /* 两行正文和详情入口共55px，压缩纵向留白以保持每行70px。 */
+  padding: 6px 14px;
   border-color: #e6ebf2;
   color: #526176;
   vertical-align: middle;

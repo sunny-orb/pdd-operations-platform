@@ -3,3 +3,11 @@ enabled = true
 timezone = "Asia/Shanghai"
 times = ["10:00", "10:30", "11:00"]
 max_attempts_per_slot = 2
+# 后台串行检查变化；不由页面访问触发。
+monitor_enabled = true
+monitor_interval_seconds = 900
+
+# 固定时点策略已实现；验证后台数仓元数据认证后才切换，避免中断现有接收。
+source_schedule_enabled = false
+warehouse_times = ["08:20", "09:10", "10:10", "10:50", "13:10", "15:10", "16:10"]
+feishu_times = ["08:20", "10:10"]

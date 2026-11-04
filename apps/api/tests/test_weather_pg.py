@@ -243,3 +243,24 @@ def test_weather_truncate_cannot_bypass_immutable_archive(sales_pg, tmp_path):
     sync_weather(sales_pg, sources, tmp_path)
     with pytest.raises(DBAPIError), sales_pg.begin() as c:
         c.execute(sa.text("TRUNCATE public.weather_publications"))
+
+
+def test_archived_weather_temperature_is_projected_without_rewriting(sales_pg, tmp_path):
+    from app.jobs.sync_weather import sync_weather
+
+    result = sync_weather(sales_pg, sources, tmp_path)
+    with sales_pg.connect() as c:
+        before = c.scalar(
+            sa.text("SELECT document FROM weather_publications WHERE id=:id"),
+            {"id": result["publication_id"]},
+        )
+    with client_for(sales_pg) as client:
+        response = client.get("/api/v1/weather/publication").json()
+        assert response["data"]["document"]["today_temperature"]["status"] == "not_mentioned"
+        assert response["meta"]["status"] == "ready"
+    with sales_pg.connect() as c:
+        after = c.scalar(
+            sa.text("SELECT document FROM weather_publications WHERE id=:id"),
+            {"id": result["publication_id"]},
+        )
+    assert before == after

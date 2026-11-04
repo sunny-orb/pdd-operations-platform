@@ -5,3 +5,4 @@ SQLAlchemy>=2.0,<2.1
 psycopg[binary]>=3.2,<4
 alembic>=1.14,<2
 PyMySQL>=1.1,<2
+cryptography>=50.0.2,<51

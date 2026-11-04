@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SalesRatings } from "./SalesRatings";
 import { syntheticAllShops, testFilters, testMeta } from "../testFixtures";
 import type { FiltersResponse } from "../api/contracts";
@@ -195,6 +196,7 @@ it("趋势按本区选店更新列和缺失原因，全取消有提示，旧口�
 });
 
 it("趋势日期改变后等待当前结果，加载期间不显示旧分数或误报缺记录", async () => {
+  const user = userEvent.setup();
   const { container } = render(
     <SalesRatings filters={filters()} shop="" onConflict={onConflict} />,
   );
@@ -202,16 +204,24 @@ it("趋势日期改变后等待当前结果，加载期间不显示旧分数或�
   const panel = within(container.querySelector(".rating-trend-panel")! as HTMLElement);
   fireEvent.click(panel.getByText("查看评分趋势明细"));
   let resolve!: (value: Response) => void;
-  vi.mocked(fetch).mockImplementationOnce(
-    () =>
-      new Promise((done) => {
-        resolve = done;
-      }),
-  );
+  const pending = new Promise<Response>((done) => {
+    resolve = done;
+  });
+  const receive = vi.mocked(fetch).getMockImplementation()!;
+  vi.mocked(fetch).mockImplementation((...args) => {
+    const url = new URL(String(args[0]), "http://localhost");
+    return url.searchParams.get("date_to") === "2026-10-31" ? pending : receive(...args);
+  });
   const end = screen.getByLabelText("评分趋势结束日期");
-  fireEvent.change(end, { target: { value: "2026-10-31" } });
-  fireEvent.keyDown(end, { key: "Enter", code: "Enter" });
-  fireEvent.blur(end);
+  await user.click(end);
+  await user.clear(end);
+  await user.type(end, "2026-10-31{Enter}");
+  await waitFor(() =>
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining("date_to=2026-10-31"),
+      expect.anything(),
+    ),
+  );
   await waitFor(() => expect(panel.getByRole("status").textContent).toContain("正在加载评分趋势"));
   expect(panel.queryByRole("table")).toBeNull();
   expect(panel.queryByText(/暂无记录/)).toBeNull();

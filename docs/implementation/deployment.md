@@ -1,6 +1,6 @@
 # 公司服务器部署准备
 
-**目标与授权：** main已发布提交8f4fb71，独立构建41764958544成功。用户已确认10.254.240.0/28可用于本项目并授权继续；现按验证、重新构建、初始化、部署及验收的顺序执行。服务器操作范围仍仅本项目资源，不删除其他网络、不修改Docker全局配置或共享Traefik。
+**当前状态与边界：** 提交e4d7406已通过构建41775111241和部署41776451188上线。数据库已初始化，API/Web健康，可信HTTPS、未认证访问拦截及用户登录通过。用户已确认管理员批准10.254.240.0/28。首轮接数已发布20项当前数据集，服务器Worker已启动且首轮16来源调度验收通过；不修改共享网络或全局配置。验证与剩余验收见[生产接数记录](../validation/2026-11-04.md#production-first-sync-20261104)。
 
 ## 固定资源边界
 
@@ -10,7 +10,7 @@
 | 服务器项目目录 | /home/songbing/pdd-operations-platform；需预先准备，不由发布脚本创建                               |
 | 数据库         | pg.kktree.cn:5432/pdd_operations，账号songbing；预装扩展及monitor保留                              |
 | 应用域名       | pdd-operations.kktree.cn，发布控制器固定；改变需代码审查                                           |
-| Compose项目    | pdd-operations-production；仅操作本项目api、web及只读database维护服务                              |
+| Compose项目    | pdd-operations-production；仅操作本项目api、web、获准worker及只读database维护服务                  |
 | Docker凭据     | 项目内.docker/config.json；不读写用户默认~/.docker配置                                             |
 | Docker连接     | 本机unix:///var/run/docker.sock；不允许环境变量/context改换daemon                                  |
 | 共享资源       | 仅接入既有traefik-network，使用websecure/myresolver；不修改共享Traefik、网络或其他容器，不全局清理 |
@@ -24,7 +24,7 @@ Docker自身仍负责系统镜像/容器存储；发布程序不直接写这些�
 - 文件写入使用目录描述符、O_NOFOLLOW、独占临时文件及原子替换；发布/上传/回退共用fcntl锁。目录及文件检查用于防误配置和链接越界；不是对抗拥有同一UID或root权限的恶意并发进程的安全沙箱。
 - 每次Docker调用使用新建的最小环境，固定--config、--host、Compose项目名、project-directory和--env-file /dev/null。忽略外部COMPOSE_FILE、DOCKER_CONTEXT、RUNTIME_ENV_FILE、镜像及目录覆盖值。项目Docker配置只允许ghcr.io的auths，不允许credsStore、credHelpers、context或项目cli-plugins覆盖；不自动登录或生成凭据。
 - 镜像仅接受本仓库api/web/worker的sha256 digest。先检查配置、运行中的worker和只读数据库状态；数据库不是already_initialized就停止，不执行--apply。启动只针对api/web。worker运行时须按单独流程先停止，避免新旧版本混用。
-- 成功后将提交、三个镜像digest及对应Compose内容一起原子写入`.release.json`；上一份成功快照为`.release.previous.json`。每次更新前把当前成功快照保存到`.release.recovery.json`，成功提交新状态后清除；发布失败后回退优先恢复这份刚才正常的版本，无失败标记时才回退previous。正常回退自身失败也可再次调用恢复。回退从选定完整快照生成受检的`.compose.rollback.yaml`再启动，不拼接不同版本配置。失败不宣称自动恢复；容器可能已部分更新，需要按记录处理。首次发布没有上一版可回退。旧`.release.env`格式不自动迁移，本项目尚未正式部署。脚本落盘权限600，人工回退使用`bash /home/songbing/pdd-operations-platform/rollback.sh`，不直接执行`./rollback.sh`。
+- 成功后将提交、三个镜像digest及对应Compose内容一起原子写入`.release.json`；上一份成功快照为`.release.previous.json`。每次更新前把当前成功快照保存到`.release.recovery.json`，成功提交新状态后清除；发布失败后回退优先恢复这份刚才正常的版本，无失败标记时才回退previous。正常回退自身失败也可再次调用恢复。回退从选定完整快照生成受检的`.compose.rollback.yaml`再启动，不拼接不同版本配置。失败不宣称自动恢复；容器可能已部分更新，需要按记录处理。首次发布没有上一版可回退。旧`.release.env`格式不自动迁移，本项目首次发布现已完成。脚本落盘权限600，人工回退使用`bash /home/songbing/pdd-operations-platform/rollback.sh`，不直接执行`./rollback.sh`。
 
 ## 构建与部署是两个独立入口
 
@@ -40,13 +40,13 @@ Docker自身仍负责系统镜像/容器存储；发布程序不直接写这些�
 
 | 配置                                                       | 后续需要                                                             | 当前实际状态                                                |
 | ---------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------- |
-| build.yml、deploy.yml与更新的CI/发布代码                   | 审查、获准后进入GitHub                                               | 已进入main，8f4fb71；构建成功，部署未触发                   |
+| build.yml、deploy.yml与更新的CI/发布代码                   | 审查、获准后进入GitHub                                               | 已进入main，e4d7406；构建及部署成功                         |
 | production Environment                                     | 配置允许发布的分支/标签；套餐允许时配置审批                          | 已创建，仅允许main；GitHub返回422，当前套餐不支持必需审批人 |
 | SSH_PRIVATE_KEY                                            | 可登录songbing的私钥，建议production环境Secret                       | 已配置：现有加密私钥                                        |
 | SSH_KNOWN_HOSTS                                            | 已核实的[121.40.167.37]:10022条目                                    | 已配置，使用已核实主机条目                                  |
 | SSH_KEY_PASSPHRASE                                         | 当前加密私钥需要；未加密专用密钥不需要                               | 已配置，2026-11-04只读列表核实                              |
 | SSH_HOST/SSH_PORT/SSH_USER/DEPLOY_DIR/APP_DOMAIN Variables | 不再需要；目标已固定在代码中，设置这些值也不会改变目标               | 目前0个Variables                                            |
-| GITHUB_TOKEN                                               | GitHub自动提供；build job显式packages:write，deploy job actions:read | 构建认证已验证；部署job尚未运行                             |
+| GITHUB_TOKEN                                               | GitHub自动提供；build job显式packages:write，deploy job actions:read | 构建及部署job均已成功运行                                   |
 | GHCR服务器拉取身份                                         | 仅可读所需镜像的classic PAT，read:packages                           | 已登录；只读验证Token有效且仅read:packages                  |
 
 页面入口：[Secrets](https://github.com/sunny-orb/pdd-operations-platform/settings/secrets/actions)、[Environments](https://github.com/sunny-orb/pdd-operations-platform/settings/environments)、[Actions权限](https://github.com/sunny-orb/pdd-operations-platform/settings/actions)。[GHCR认证说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)区分Actions的GITHUB_TOKEN和服务器拉取身份；不为拉取额外授予删除包权限。
@@ -89,7 +89,13 @@ GitHub production仅允许main；SSH_PRIVATE_KEY及SSH_KNOWN_HOSTS已设置，�
 
 ## 同步、证书与容量限制
 
-Worker仍为独立可选sync profile，不能通过本次发布自动启用。须另行准备UID10001可写runtime/lark-home、飞书和数仓专用登录、WAREHOUSE_PASSWORD及同次构建worker digest；不复制Mac钥匙串/个人会话。production同步必须显式SYNC_DATABASE_URL，不回退本机库。
+Worker为独立sync profile，发布api/web不会自动启用。现已准备UID10001可写runtime/lark-home、专用飞书身份及数仓网页登录，同次构建worker digest来自.release.json。数仓口令独立保存于runtime/local-db/sources.env（600），不注入API环境；production同步显式使用SYNC_DATABASE_URL。登录仅通过新建专用窗口取得并只上传数仓域状态，本机中转文件已删除。
+
+服务器compose.sync.yaml与仓库配置一致：3GiB内存、1CPU、512进程、256MiB共享内存、只读根目录和512MiB临时目录；只有runtime/lark-home两个可写绑定，只接本项目app网络。Docker日志上限10MiB×3，restart=unless-stopped。上述是实际限制，不代表长期容量验收；OOM或同步失败保留旧版并检查任务租约，不无限重试。
+
+常驻进程每轮完成后等待60秒，沿config/sync.toml：数仓8源每日08:20/09:10/10:10/10:50/13:10/15:10/16:10，飞书2源08:20/10:10；聚水潭/天气等沿15分钟检查及10:00/10:30/11:00完整任务，全部串行。漏点只补当天最近槽，不伪造时间或跨日补跑。本机cn.kocotree.pdd-operations.sync已停用并移除触发文件，原plist在部署验收目录保存；本地数据库与归档保留。
+
+后续升级前须等当前任务完成，再只停止本项目worker；现有发布控制器会拒绝worker运行时发布。api/web更新成功后，从新的.release.json取得worker digest重新启动，并验证真实任务、来源检查点及业务接口。回退调度同样先确认无任务；只恢复本项目触发器，不允许本机和服务器同时承担计划拉数。
 
 数据库模板sslmode=require只加密、不校验服务器身份；公司CA和证书域名确认后再适配verify-full。AMD64 Actions构建、服务器API/Web镜像拉取已验证。HTTPS入口当前返回自签名证书，尚未通过可信证书校验；公司首次初始化和实际站点访问仍未执行。本机Linux测试以隔离容器验证账号/文件/环境边界，Docker调用使用替身，不冒充生产端到端验证。
 
@@ -117,3 +123,13 @@ DNS A为121.40.167.37，本次AAAA查询无结果；HTTP返回308跳转HTTPS。�
 首次发布没有上一份成功快照，不能调用rollback假定有历史版本。失败先保留证据，只处理本项目api/web；不删除数据库、不执行全局prune、不移除共享网络。后续已存在成功快照时才按受保护rollback入口恢复。
 
 仍无法提前完成的验证：GitHub runner真实SSH解锁和连通、候选网络创建、镜像内数据库连通/初始化、实际可信证书、正确口令端到端登录与业务接口响应。已有本机及云端单元/集成验证不能替代这些运行验收。
+
+## 首次部署实际结果（2026-11-04）
+
+构建41775111241成功，随后安装同版本Compose并创建本项目10.254.240.0/28网络，维护入口返回initialized、复核already_initialized。32张业务表、524列及所有权检查通过。初始化前后受保护对象摘要一致（16个扩展及monitor等目录对象），未改公司预装对象。
+
+部署41776451188成功；.release.json指向e4d7406b65ff09797d589dd8d2c2402686455b07，API/Web digest均与清单一致，两容器running/healthy，无Worker。HTTPS最初遇到ACME 500 Unable to validate JWS，后续只读复查证书已签发成功，未修改共享代理或ACME账户。证书为Let's Encrypt YR2，域名匹配，2027-02-02 04:06:03 UTC到期；服务器及本机可信校验均通过，首页/API未认证401，healthz为200，API内部ready且数据库connected。
+
+入口https://pdd-operations.kktree.cn/，账号songbing，使用用户私密向导中设置的网站口令。用户已确认正确口令登录；业务库首轮20项数据集已发布，Worker首轮16来源调度验收通过；system/status含固定bootstrap/planned字段，不用于判定实际模块实现程度。
+
+管理员后续表示网段可能不合适，用户明确要求保持当前进度并完成现有部署核验。用户随后已最终确认管理员批准当前网段；如需换网段，只在批准的维护窗口更新项目配置并重建本项目网络/容器，保留数据库与凭据，不执行全局清理。

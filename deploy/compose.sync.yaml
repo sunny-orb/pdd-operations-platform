@@ -5,12 +5,21 @@ services:
     profiles: [sync]
     init: true
     restart: unless-stopped
+    mem_limit: 3g
+    cpus: 1.0
+    pids_limit: 512
+    shm_size: 256m
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
     stop_grace_period: 30s
     env_file:
       - path: ${RUNTIME_ENV_FILE:-./.env.runtime}
         format: raw
     environment:
       APP_ENV: production
+      LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1"
+      LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1"
     volumes:
       - type: bind
         source: ./runtime

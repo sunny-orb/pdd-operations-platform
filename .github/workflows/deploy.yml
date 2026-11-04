@@ -1,0 +1,65 @@
+name: 部署已构建版本
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 成功的“仅构建发布镜像”运行ID（不是提交SHA）
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 校验构建来源
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ inputs.build_run_id }}
+        run: python3 deploy/dispatch.py verify-run "$BUILD_RUN_ID"
+      - name: 获取同次构建的镜像清单
+        uses: actions/download-artifact@v4
+        with:
+          name: release-manifest
+          path: ${{ runner.temp }}/pdd-manifest
+          run-id: ${{ steps.build.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: 使用构建对应的发布代码
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.build.outputs.commit }}
+      - name: 配置SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          SSH_KEY_PASSPHRASE: ${{ secrets.SSH_KEY_PASSPHRASE }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          test -s ~/.ssh/id_ed25519
+          test -s ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+          echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+          printf '#!/bin/sh\nprintf "%%s\n" "$SSH_KEY_PASSPHRASE"\n' > "$RUNNER_TEMP/pdd-askpass"
+          chmod 700 "$RUNNER_TEMP/pdd-askpass"
+          SSH_ASKPASS="$RUNNER_TEMP/pdd-askpass" SSH_ASKPASS_REQUIRE=force DISPLAY=:0 ssh-add ~/.ssh/id_ed25519 < /dev/null
+          rm -f "$RUNNER_TEMP/pdd-askpass"
+      - name: 在固定项目目录接收并部署
+        env:
+          BUILD_COMMIT: ${{ steps.build.outputs.commit }}
+        run: python3 deploy/dispatch.py send "$RUNNER_TEMP/pdd-manifest/release-manifest.json" "$BUILD_COMMIT"
+      - if: always()
+        run: |
+          rm -f ~/.ssh/id_ed25519 "$RUNNER_TEMP/pdd-askpass"
+          if [ -n "${SSH_AGENT_PID:-}" ]; then ssh-agent -k; fi

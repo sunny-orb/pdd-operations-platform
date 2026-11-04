@@ -1,0 +1,95 @@
+name: 仅构建发布镜像
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: image-build-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+  images:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      api: ${{ steps.refs.outputs.api }}
+      web: ${{ steps.refs.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: names
+        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - id: api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.api
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+          platforms: linux/amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          push: true
+          tags: ${{ steps.names.outputs.prefix }}-api:sha-${{ github.sha }}
+      - id: web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.web
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+          platforms: linux/amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          push: true
+          tags: ${{ steps.names.outputs.prefix }}-web:sha-${{ github.sha }}
+      - id: worker
+        name: 构建可选同步镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.worker
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+          build-args: API_BASE=${{ steps.names.outputs.prefix }}-api@${{ steps.api.outputs.digest }}
+          platforms: linux/amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          push: true
+          tags: ${{ steps.names.outputs.prefix }}-worker:sha-${{ github.sha }}
+      - id: refs
+        env:
+          PREFIX: ${{ steps.names.outputs.prefix }}
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          WORKER_DIGEST: ${{ steps.worker.outputs.digest }}
+        run: |
+          echo "api=$PREFIX-api@$API_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "web=$PREFIX-web@$WEB_DIGEST" >> "$GITHUB_OUTPUT"
+          python3 - <<'PYTHON'
+          import json, os
+          from pathlib import Path
+          prefix = os.environ['PREFIX']
+          data = {'commit': os.environ['GITHUB_SHA']}
+          for name in ('api', 'web', 'worker'):
+              data[name] = prefix + '-' + name + '@' + os.environ[name.upper() + '_DIGEST']
+          Path('release-manifest.json').write_text(json.dumps(data))
+          PYTHON
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: release-manifest.json
+          retention-days: 30
+          if-no-files-found: error

@@ -19,6 +19,8 @@ from app.jobs.sync_shop_daily import runtime_engine
 
 
 def source_password():
+    if os.environ.get("WAREHOUSE_PASSWORD"):
+        return os.environ["WAREHOUSE_PASSWORD"]
     path = ROOT / "var/local-db/sources.env"
     if path.stat().st_mode & 0o077:
         raise ValueError("SOURCE_CREDENTIAL_PERMISSIONS")
@@ -166,36 +168,31 @@ def main():
                 print(json.dumps(checked, ensure_ascii=False), flush=True)
             monitor_failed = checked["status"] in ("failed", "partial")
         if new_schedule and (args.scheduled or args.check_updates or manual_sources):
-            from app.connectors.warehouse_session import (
-                WarehouseAccountSession,
-                load_account_file,
-            )
+            from app.connectors.warehouse_page import WarehousePageReader
             from app.jobs.source_monitor_runtime import execute_source_schedule
 
-            account_path = ROOT / "var/local-db/warehouse-web-account.json"
-            web_session = (
-                WarehouseAccountSession(lambda: load_account_file(account_path))
-                if account_path.is_file()
-                else None
-            )
-            checked = execute_source_schedule(
-                engine,
-                paths=paths,
-                warehouse_password=source_password,
-                warehouse_headers=warehouse_web_headers,
-                warehouse_session=web_session,
-                warehouse_times=config.warehouse_times,
-                feishu_times=config.feishu_times,
-                **(
-                    {
-                        "source_ids": manual_sources,
-                        "force": True,
-                        "process_products": manual_processing,
-                    }
-                    if manual_sources
-                    else {}
-                ),
-            )
+            # 浏览器按实际到期来源延迟启动；调用方拥有生命周期，调度核心只依赖read。
+            with WarehousePageReader(
+                ROOT / "var/local-db/warehouse-browser/state.json",
+                channel=os.environ.get("WAREHOUSE_BROWSER_CHANNEL", "chrome"),
+            ) as reader:
+                checked = execute_source_schedule(
+                    engine,
+                    paths=paths,
+                    warehouse_password=source_password,
+                    warehouse_reader=reader,
+                    warehouse_times=config.warehouse_times,
+                    feishu_times=config.feishu_times,
+                    **(
+                        {
+                            "source_ids": manual_sources,
+                            "force": True,
+                            "process_products": manual_processing,
+                        }
+                        if manual_sources
+                        else {}
+                    ),
+                )
             if checked.get("checked") or checked["status"] != "checked":
                 print(json.dumps(checked, ensure_ascii=False), flush=True)
             monitor_failed = monitor_failed or checked["status"] in (

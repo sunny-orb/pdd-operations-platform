@@ -362,7 +362,9 @@ def test_scheduled_cli_excludes_migrated_sources_from_both_legacy_paths(
 
     def schedule(engine, **kwargs):
         selections.append(("schedule", tuple(kwargs["warehouse_times"])))
-        assert callable(kwargs["warehouse_headers"])
+        assert callable(kwargs["warehouse_reader"].read)
+        assert "warehouse_headers" not in kwargs
+        assert kwargs["warehouse_reader"].context is None  # 未到源读取时不打开浏览器
         return {"status": "checked", "checked": 0}
 
     monkeypatch.setitem(main.__globals__, "execute_project", execute)

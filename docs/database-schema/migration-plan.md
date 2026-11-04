@@ -20,7 +20,7 @@
 
 ### 首次部署使用
 
-1. 准备PostgreSQL17空库及数据库所有者连接，按环境配置`pdd_app`／`pdd_ingest`独立最小权限角色与口令。凭据不写进SQL或Git。此文件不安装服务、不创建集群角色、不接收业务数据。
+1. 准备PostgreSQL17空库及数据库所有者连接，按环境配置`pdd_app`／`pdd_ingest`独立最小权限角色与口令。凭据不写进SQL或Git。此文件不安装服务、不创建集群角色、不接收业务数据。此处为本机多角色交付。公司部署现用独立派生文件`schema-songbing.sql`及默认只读的`init-deployment-db.py`维护入口，允许保留monitor及登记的扩展对象，账号及数据库名明确限定为songbing/pdd_operations；具体首次初始化、凭据和发布步骤见[部署方案](../implementation/deployment.md)。
 2. 开发侧修改迁移和字段设计后运行`npm run db:schema`；`npm run check`自动执行`check:db-schema`，漏生成或迁移变化会失败。
 3. 在已配置好的数据库所有者连接下执行一次（示例使用PG服务配置名，不含凭据）：
 
@@ -30,6 +30,7 @@
    ```
 
    预期版本`20261104_12`；32张领域表＋1张版本表。所有DDL/权限/版本标记在同一事务中，失败整体回滚。不得再执行weather-publications.sql、target-ranges.sql、source-*.sql等分段审阅稿，也不必逐个运行本机upgrade脚本。
+
 4. 已有库按实际`alembic_version_v2`生成该版本到目标head的增量SQL，备份并演练后执行；不重放完整schema.sql、不手动stamp跳过迁移。例如开发侧`apps/api/.venv/bin/alembic -c apps/api/alembic-v2.ini upgrade 20261104_12:head --sql`。已部署过的revision保持不可变。存在业务数据时沿各迁移的保留/修复回退限制，不能删除重建业务库。
 
 本机旧`db-v2.py`仍固定09，作为历史受控演练入口保留，不用于当前12首次部署；当前交付由`tests/test_schema_delivery.py`真实PG验证。此初始化只完成结构与运行权限，来源接入、服务器配置及正式上线验收沿已有流程。

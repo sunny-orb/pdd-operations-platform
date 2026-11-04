@@ -1,0 +1,30 @@
+# 独立显式启用；需先准备来源身份、浏览器登录和归档目录。
+services:
+  worker:
+    image: ${WORKER_IMAGE:?必须配置WORKER_IMAGE}
+    profiles: [sync]
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    env_file:
+      - path: ${RUNTIME_ENV_FILE:-./.env.runtime}
+        format: raw
+    environment:
+      APP_ENV: production
+    volumes:
+      - type: bind
+        source: ./runtime
+        target: /app/var
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./lark-home
+        target: /home/app
+        bind:
+          create_host_path: false
+    networks: [app]
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

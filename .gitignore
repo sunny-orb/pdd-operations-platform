@@ -26,3 +26,9 @@ var/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+# 服务器部署私密状态、登录及回退记录
+/deploy/.htpasswd
+/deploy/runtime/
+/deploy/lark-home/
+/deploy/.release*
+/deploy/.compose*

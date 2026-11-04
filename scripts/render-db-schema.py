@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import io
+import re
 import sys
 from pathlib import Path
 
@@ -15,6 +16,66 @@ API = ROOT / "apps/api"
 sys.path.insert(0, str(API))
 
 OUTPUT = ROOT / "docs/database-schema/schema.sql"
+DEPLOY_OUTPUT = ROOT / "docs/database-schema/schema-songbing.sql"
+
+
+# 只沿扩展成员(e)及不可独立存在的内部实现(i)识别归属。
+# 普通/自动依赖(n/a/x)并不代表扩展成员，不能据此放行业务对象。
+EXTENSION_MEMBERS = """WITH RECURSIVE extension_members(classid,objid,objsubid) AS (
+  SELECT d.classid,d.objid,d.objsubid
+  FROM pg_catalog.pg_depend d
+  JOIN pg_catalog.pg_extension e ON e.oid=d.refobjid
+  WHERE d.refclassid='pg_catalog.pg_extension'::regclass
+    AND d.deptype='e' AND d.refobjsubid=0
+  UNION
+  SELECT d.classid,d.objid,d.objsubid
+  FROM pg_catalog.pg_depend d
+  JOIN extension_members e
+    ON d.refclassid=e.classid AND d.refobjid=e.objid AND d.refobjsubid=e.objsubid
+  WHERE d.deptype='i'
+)
+"""
+
+
+def deployment_preflight(account: str, database: str = "pdd_operations") -> str:
+    """单账号仅检查并初始化public；保留公司monitor及数据库级权限。"""
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", account):
+        raise ValueError("DEPLOY_ACCOUNT_INVALID")
+    if not re.fullmatch(r"[a-z_][a-z0-9_]{0,62}", database):
+        raise ValueError("DEPLOY_DATABASE_INVALID")
+    return f"""DO $preflight$ BEGIN
+  IF current_database() <> '{database}' THEN
+    RAISE EXCEPTION '初始化数据库不符';
+  END IF;
+  IF current_setting('server_version_num')::integer / 10000 <> 17 THEN
+    RAISE EXCEPTION '初始化文件要求PostgreSQL 17';
+  END IF;
+  IF current_user <> '{account}' THEN
+    RAISE EXCEPTION '初始化身份不符';
+  END IF;
+  PERFORM pg_advisory_xact_lock(726411, 20261104);
+  IF EXISTS(
+    {EXTENSION_MEMBERS}
+    SELECT 1 FROM (
+      SELECT 'pg_catalog.pg_class'::regclass AS classid,oid,relnamespace AS namespace
+      FROM pg_catalog.pg_class
+      UNION ALL
+      SELECT 'pg_catalog.pg_proc'::regclass,oid,pronamespace FROM pg_catalog.pg_proc
+      UNION ALL
+      SELECT 'pg_catalog.pg_type'::regclass,oid,typnamespace FROM pg_catalog.pg_type
+    ) o JOIN pg_catalog.pg_namespace n ON n.oid=o.namespace
+    WHERE n.nspname NOT IN ('information_schema', 'monitor') AND n.nspname !~ '^pg_'
+      AND NOT EXISTS (SELECT 1 FROM extension_members e
+                      WHERE e.classid=o.classid AND e.objid=o.oid AND e.objsubid=0)
+  ) THEN
+    RAISE EXCEPTION '仅允许应用空结构初始化；保留monitor，不重放已有应用库';
+  END IF;
+  IF NOT has_schema_privilege(current_user, 'public', 'USAGE')
+     OR NOT has_schema_privilege(current_user, 'public', 'CREATE') THEN
+    RAISE EXCEPTION 'public创建权限不足';
+  END IF;
+END $preflight$;
+"""
 
 
 def runtime_permissions() -> str:
@@ -63,7 +124,12 @@ END $preflight$;
 """
 
 
-def render_sql(target: str = "head") -> str:
+def render_sql(
+    target: str = "head",
+    *,
+    runtime_account: str | None = None,
+    database: str = "pdd_operations",
+) -> str:
     """完整迁移有序渲染并绑定内容摘要；head附空库保护和原运行权限。"""
     output = io.StringIO()
     config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
@@ -87,15 +153,53 @@ def render_sql(target: str = "head") -> str:
         # Alembic单事务离线输出：在同一事务内加前置保护及部署运行权限。
         if not sql.startswith("BEGIN;") or not sql.endswith("COMMIT;"):
             raise RuntimeError("迁移输出事务边界变化，须先核对生成器")
-        sql = "BEGIN;\n\n" + PREFLIGHT + sql[len("BEGIN;") : -len("COMMIT;")]
-        sql += runtime_permissions() + "\n\nCOMMIT;"
+        body = sql[len("BEGIN;") : -len("COMMIT;")]
+        if runtime_account is None:
+            sql = "BEGIN;\n\n" + PREFLIGHT + body
+            sql += runtime_permissions() + "\n\nCOMMIT;"
+        else:
+            # 基线的public关系检查同样区分扩展；精确匹配旧片段，变化时拒绝生成。
+            # 保留检查本身及同名pdd_v2函数保护，不改写历史revision。
+            baseline_relations = """SELECT 1 FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind IN ('r','p','v','m','S','f')
+          AND c.relname <> 'alembic_version_v2'"""
+            if body.count(baseline_relations) != 1:
+                raise RuntimeError("基线空结构检查变化，须先核对扩展适配")
+            body = body.replace(
+                baseline_relations,
+                EXTENSION_MEMBERS
+                + baseline_relations
+                + " AND NOT EXISTS (SELECT 1 FROM extension_members e "
+                "WHERE e.classid='pg_catalog.pg_class'::regclass "
+                "AND e.objid=c.oid AND e.objsubid=0)",
+            )
+            # 仅移除Alembic离线输出的完整单行角色GRANT；历史revision不改写。
+            # 若未来授权格式变化，拒绝生成，防止静默遗漏角色依赖。
+            body = re.sub(r"(?m)^GRANT [^;\n]+ TO pdd_(?:app|ingest);\n", "", body)
+            if re.search(r"\bpdd_(?:app|ingest)\b", body):
+                raise RuntimeError("部署授权输出变化，须先核对生成器")
+            sql = (
+                "BEGIN;\n\n"
+                + deployment_preflight(runtime_account, database)
+                + body
+                + "\nCOMMIT;"
+            )
+    elif runtime_account is not None:
+        raise ValueError("单账号交付只允许首次base到head初始化")
+    usage = (
+        "-- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。\n"
+        "-- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。\n"
+        if runtime_account is None
+        else f"-- 公司单账号：{runtime_account}；应用结构须空；保留monitor及登记的扩展成员。\n"
+        "-- 不创建角色、不修改数据库或monitor权限；应用对象由执行账号拥有。\n"
+    )
     header = (
         "-- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。\n"
         f"-- 迁移范围：base → {head if target == 'head' else target}；包含Alembic版本表。\n"
         f"-- 迁移、冻结实现及生成器SHA-256：{digest.hexdigest()}\n"
-        "-- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。\n"
-        "-- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。\n"
-        "-- 使用方式和后续升级见docs/database-schema/migration-plan.md。\n\n"
+        + usage
+        + "-- 使用方式和后续升级见docs/database-schema/migration-plan.md。\n\n"
     )
     return (
         "\n".join(line.rstrip() for line in (header + sql).splitlines()).rstrip() + "\n"
@@ -108,13 +212,20 @@ if __name__ == "__main__":
         "--check", action="store_true", help="检查完整SQL与当前迁移链一致"
     )
     args = parser.parse_args()
-    sql = render_sql()
+    outputs = {
+        OUTPUT: render_sql(),
+        DEPLOY_OUTPUT: render_sql(runtime_account="songbing"),
+    }
     if args.check:
-        if not OUTPUT.exists() or OUTPUT.read_text(encoding="utf-8") != sql:
+        if any(
+            not path.exists() or path.read_text(encoding="utf-8") != sql
+            for path, sql in outputs.items()
+        ):
             raise SystemExit(
                 "schema.sql缺失或未覆盖当前迁移，请运行scripts/render-db-schema.py"
             )
         print("schema.sql与现行完整迁移一致；未连接或操作数据库")
     else:
-        OUTPUT.write_text(sql, encoding="utf-8")
-        print(f"已离线生成 {OUTPUT.relative_to(ROOT)}；未连接或操作数据库")
+        for path, sql in outputs.items():
+            path.write_text(sql, encoding="utf-8")
+        print("已离线生成本机与songbing初始化SQL；未连接或操作数据库")

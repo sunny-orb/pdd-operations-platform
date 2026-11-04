@@ -221,8 +221,37 @@ it("固定时点展示数仓与飞书计划，仍仅刷新平台状态", async (
     .mockImplementation(async () => new Response(JSON.stringify(scheduled)));
   mount();
   fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
-  await screen.findByText("按来源定时检查，有变化或接收失败时自动同步。");
+  await screen.findByText("按计划读取数仓网页更新时间，有变化或接收失败时同步对应来源。");
   expect(screen.getByText(/数仓 08:20 \/ 09:10/)).toBeTruthy();
   expect(screen.getAllByText(/下次：2026\/11\/4 09:10:00/)).toHaveLength(2);
   expect(fetcher.mock.calls.every(([url]) => url === "/api/v1/data-status")).toBe(true);
+});
+
+it("网页自动读取与登录失效保留旧数据分别说明", async () => {
+  const base = payload();
+  const data = {
+    ...base,
+    data: {
+      ...base.data,
+      sources: [
+        {
+          ...row,
+          upstream: {
+            ...row.upstream,
+            state: "failed",
+            error_code: "WAREHOUSE_WEB_LOGIN_REQUIRED",
+            observation: { date: "2026-11-02", basis: "warehouse_web_page" },
+          },
+        },
+      ],
+    },
+  };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await screen.findByText("网页自动读取");
+  fireEvent.click(screen.getByRole("button", { name: "展开来源详情" }));
+  expect(
+    screen.getByText("数仓网页登录已失效，保留上次更新时间和可用数据。重新登录后按计划继续检查。"),
+  ).toBeTruthy();
 });

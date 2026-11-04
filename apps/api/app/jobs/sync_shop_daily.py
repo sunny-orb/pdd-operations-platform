@@ -33,7 +33,14 @@ def sync_engine(url):
 
 
 def runtime_engine():
-    """沿既有本机写入身份，限定连接目标；不初始化或变更任何密码。"""
+    """部署显式注入任务连接；未配置时沿既有本机身份，不变更密码。"""
+    configured = os.environ.get("SYNC_DATABASE_URL")
+    if configured:
+        from app.core.config import Settings
+
+        return sync_engine(Settings(database_url=configured).database_url.get_secret_value())
+    if os.environ.get("APP_ENV") == "production":
+        raise ValueError("SYNC_DATABASE_URL_REQUIRED")
     from migrations_v2.local import local_url
 
     password = (ROOT / "var/local-db/sync.env").read_text().strip().split("=", 1)[1]

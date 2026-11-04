@@ -82,9 +82,11 @@ function UpstreamUpdate({ row }: { row: SourceStatus }) {
       <div className="m6-update-cell-stack">
         <span className="m6-update-time">{row.upstream.web_updated_at}</span>
         <small className="m6-update-subtext">
-          {row.upstream.observation.basis === "warehouse_web_metadata"
-            ? "数仓更新时间"
-            : "网页记录"}
+          {row.upstream.observation.basis === "warehouse_web_page"
+            ? "网页自动读取"
+            : row.upstream.observation.basis === "warehouse_web_metadata"
+              ? "数仓更新时间"
+              : "网页记录"}
         </small>
         <small className="m6-update-subtext">核对：{time(row.upstream.web_checked_at)}</small>
       </div>
@@ -215,7 +217,8 @@ function SourceDetail({ row }: { row: SourceStatus }) {
         <div>
           <dt>检查依据</dt>
           <dd>
-            {observation.basis === "warehouse_web_metadata"
+            {observation.basis === "warehouse_web_metadata" ||
+            observation.basis === "warehouse_web_page"
               ? "数仓表更新时间；16:10补查获准范围内的历史修订"
               : observation.basis === "table_revision"
                 ? "飞书表修订号"
@@ -242,7 +245,9 @@ function SourceDetail({ row }: { row: SourceStatus }) {
                 ? "同步期间来源再次变化，等待下一轮接收。"
                 : row.upstream.error_code === "SYNC_FAILED"
                   ? "本轮接收未成功，保留最近可用数据。"
-                  : "本轮上游检查失败，保留上次观测。"}
+                  : row.upstream.error_code === "WAREHOUSE_WEB_LOGIN_REQUIRED"
+                    ? "数仓网页登录已失效，保留上次更新时间和可用数据。重新登录后按计划继续检查。"
+                    : "本轮上游检查失败，保留上次观测。"}
             </dd>
           </div>
         )}
@@ -333,7 +338,7 @@ function StatusContent() {
           {!data
             ? "正在读取数据更新状态…"
             : data.monitor.source_schedule_enabled
-              ? "按来源定时检查，有变化或接收失败时自动同步。"
+              ? "按计划读取数仓网页更新时间，有变化或接收失败时同步对应来源。"
               : data.monitor.enabled
                 ? `后台自动检查并同步数据；当前每 ${data.monitor.interval_seconds / 60} 分钟检查一次。`
                 : "自动检查尚未启用。"}

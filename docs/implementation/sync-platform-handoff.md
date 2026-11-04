@@ -48,11 +48,12 @@ result = execute_project(
 
 先停平台触发并确认无运行中任务，再恢复旧触发器，继续使用同一有效数据与归档；不清库、不删除版本、不重跑旧迁移。若同时更换业务代码或映射，回退前验证其能读取已发布revision，不能只回退调度器后用旧解析覆盖新输入。重放或修订通过新版本发布，保留旧报告和来源证据。
 
-
 ### 固定来源调度入口（2026-11-04）
 
-新入口 `app.jobs.source_monitor_runtime.execute_source_schedule(engine, *, paths, warehouse_password, warehouse_headers, warehouse_session=None, now=None, warehouse_times=None, feishu_times=None, source_ids=None, force=False, process_products=True)`。外部平台注入稳定带时区运行时刻与服务身份provider；`warehouse_headers`仅在元数据请求时读取，不保存浏览器会话；也可注入`WarehouseAccountSession(credentials_provider)`，使用现有账号独立登录，会话只留本轮内存。核心策略 `modules/data_status/schedule_policy.py`不访问数据库，`jobs/source_schedule.py`编排，`checkpoint_store.py`负责PG状态和锁，连接器负责只读协议。产品接收通过`execute_project(product_sources=...)`复用未改来源的不可变版本。
+新入口 `app.jobs.source_monitor_runtime.execute_source_schedule(engine, *, paths, warehouse_password, warehouse_reader=None, warehouse_headers=None, warehouse_session=None, now=None, warehouse_times=None, feishu_times=None, source_ids=None, force=False, process_products=True)`。当前CLI注入`WarehousePageReader(state_path)`读取可见网页；调用方负责创建/关闭浏览器，read(source_id)只返回表ID、时间与basis的小型摘要。核心策略不依赖Playwright、Chrome路径或状态文件；未来平台可替换reader。网页登录由用户在专用浏览器完成，状态仅在批准运行环境的私密目录保存；迁移服务器须重新核准登录环境和验证，不自动复制个人浏览器资料。旧warehouse_headers/warehouse_session仅为兼容入口，CLI不再选择后台账号认证。
 
-启用 `source_schedule_enabled`时CLI将8数仓和2飞书从旧完整任务和15分钟监控同时排除；聚水潭4来源、天气2来源及售后派生沿旧路径。新固定路径只重试商品评分，不能改变聚水潭报告触发时间。未来平台接管先停对应本机触发器，再调用同一入口；保留数据库状态/共享归档，不复制调度逻辑或启动API内定时器。认证验证失败时不得启用替换开关，不能依靠浏览器可访问推定服务身份可用。
+核心策略 `modules/data_status/schedule_policy.py`不访问数据库，`jobs/source_schedule.py`编排，`checkpoint_store.py`负责PG状态和锁，连接器负责读取。商品接收通过`execute_project(product_sources=...)`复用未变来源的不可变版本。
+
+启用 `source_schedule_enabled`时CLI将8数仓和2飞书从旧完整任务和15分钟监控同时排除；聚水潭4来源、天气2来源及售后派生沿旧路径。新固定路径只重试商品评分，不能改变聚水潭报告触发时间。未来平台接管先停对应本机触发器，再调用同一入口；保留数据库状态/共享归档，不复制调度逻辑或启动API内定时器。独立浏览器会话读取和接收验证失败时不得启用替换开关，不能依靠人工看过网页推定自动采集可用。
 
 source_ids只可缩小到已注册迁移范围；force=True用于明确手动补跑，复用锁/状态但不消费固定槽；process_products=False保留手动只接收不重算的选择。不要通过伪造now提前触发或伪造实际接收时刻。

@@ -350,3 +350,62 @@ def test_changed_product_sources_fail_independently_using_published_inputs(
     assert heads["product_daily"] == seed["versions"]["product_daily"]
     assert heads["profile_records"] != seed["versions"]["profile_records"]
     assert states == {"product_daily": "failed", "profile_records": "succeeded"}
+
+
+def test_page_reader_updates_web_evidence_and_login_failure_keeps_success(sales_pg):
+    from app.connectors.warehouse_page import WarehousePageError
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    observation = dict(
+        basis="warehouse_web_page", table_id="cAc3IVT4i3", updated_at="2026-11-03 10:02:10"
+    )
+    run_scheduled_sources(
+        sales_pg,
+        {"shop_daily": lambda: observation},
+        lambda ids, c: dict.fromkeys(ids, True),
+        now=at("08:20"),
+    )
+
+    def login_expired():
+        raise WarehousePageError("WAREHOUSE_WEB_LOGIN_REQUIRED")
+
+    run_scheduled_sources(
+        sales_pg, {"shop_daily": login_expired}, lambda ids, c: {}, now=at("09:10")
+    )
+    with sales_pg.connect() as c:
+        row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+    assert row["web_updated_at"] == observation["updated_at"]
+    assert row["web_checked_at"] == at("08:20")
+    assert row["accepted_at"] == at("08:20")
+    assert row["error_code"] == "WAREHOUSE_WEB_LOGIN_REQUIRED"
+
+
+def test_injected_page_reader_is_used_without_backend_auth(sales_pg, tmp_path, monkeypatch):
+    from app.jobs import source_monitor_runtime as runtime
+    from tests.test_project_sync_runtime import paths_for
+
+    class Reader:
+        def read(self, code):
+            assert code == "shop_daily"
+            return dict(
+                basis="warehouse_web_page", table_id="cAc3IVT4i3", updated_at="2026-11-03 10:02:10"
+            )
+
+    def forbidden():
+        raise AssertionError("网页读取不应取后台登录凭据")
+
+    monkeypatch.setattr(runtime, "pending_processing", lambda c: [])
+    monkeypatch.setattr(
+        runtime,
+        "execute_project",
+        lambda *a, **kw: {"datasets": {x: {"status": "succeeded"} for x in kw["only"]}},
+    )
+    result = runtime.execute_source_schedule(
+        sales_pg,
+        paths=paths_for(tmp_path),
+        warehouse_password=forbidden,
+        warehouse_reader=Reader(),
+        now=at("08:20"),
+        source_ids=("shop_daily",),
+    )
+    assert result["checked"] == 1

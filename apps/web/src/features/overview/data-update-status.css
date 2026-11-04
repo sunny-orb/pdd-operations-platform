@@ -38,6 +38,7 @@
 .m6-update-toolbar .ant-radio-group {
   display: flex;
   flex-wrap: wrap;
+  max-width: 100%;
   row-gap: 8px;
 }
 .m6-update-dataset {
@@ -130,9 +131,11 @@
 /* 两个页签参与同一网格定高；隐藏页签仍不可见、不可交互。 */
 .m6-update-tabs .ant-tabs-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 .m6-update-tabs .ant-tabs-body > .ant-tabs-content {
   grid-area: 1 / 1;
+  min-width: 0;
 }
 .m6-update-tabs .ant-tabs-body > .ant-tabs-content-hidden {
   display: block;

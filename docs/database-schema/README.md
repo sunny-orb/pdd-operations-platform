@@ -19,6 +19,8 @@
 
 每行代表的对象、1:1/1:N/N:M、FK具体放置及原因统一见[30表关系说明](../database-design.md#table-relationships)。字段字典维护业务含义；[独立初始迁移](../../apps/api/migrations_v2/versions/20261028_01_initial_30_tables.py)及冻结快照维护可执行结构，[schema.sql](schema.sql)为现行完整空库初始化文件，包含版本表、现有权限和空库保护；由迁移离线生成，不可手改，空库只执行此文件，已有库须增量升级。具体约束边界、审查与确认后顺序见[实施与审查计划](migration-plan.md)。不能运行历史M1迁移来实现本设计。
 
+公司单账号首次部署使用[派生SQL](schema-songbing.sql)和[部署维护入口](../implementation/deployment.md)，保留monitor及登记的扩展对象；本机schema.sql与公司文件由同一迁移链生成。
+
 ## 持久化边界
 
 - 保存独立业务输入：店铺和商品链接身份、资料原行及真实链接关系、十类不同粒度的经营事实、目标及实际范围成员。

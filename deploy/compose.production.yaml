@@ -1,0 +1,70 @@
+name: pdd-operations-production
+x-api: &api
+  image: ${API_IMAGE:?必须配置带版本的API_IMAGE}
+  env_file:
+    - path: ${RUNTIME_ENV_FILE:-./.env.runtime}
+      format: raw
+  environment:
+    APP_ENV: production
+  networks: [app]
+  init: true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+services:
+  api:
+    <<: *api
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready',timeout=8)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+  web:
+    image: ${WEB_IMAGE:?必须配置带版本的WEB_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    secrets: [web_htpasswd]
+    networks: [app, traefik]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: traefik-network
+      traefik.http.routers.pdd-operations.rule: Host(`${APP_DOMAIN:-pdd-operations.kktree.cn}`)
+      traefik.http.routers.pdd-operations.entrypoints: websecure
+      traefik.http.routers.pdd-operations.tls: "true"
+      traefik.http.routers.pdd-operations.tls.certresolver: myresolver
+      traefik.http.services.pdd-operations.loadbalancer.server.port: "8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  database:
+    <<: *api
+    profiles: [maintenance]
+    command: [python, scripts/init-deployment-db.py]
+    restart: "no"
+networks:
+  app: {}
+  traefik:
+    external: true
+    name: traefik-network
+secrets:
+  web_htpasswd:
+    file: ${WEB_HTPASSWD_FILE:-./.htpasswd}

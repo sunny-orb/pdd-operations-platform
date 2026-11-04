@@ -56,7 +56,7 @@ def run_scheduled_sources(
                     raise ValueError("INVALID_OBSERVATION")
                 digest = fingerprint(value)
                 web = {}
-                if value.get("basis") == "warehouse_web_metadata":
+                if value.get("basis") in ("warehouse_web_metadata", "warehouse_web_page"):
                     web = dict(web_updated_at=value["updated_at"], web_checked_at=clock())
                 write(
                     code,
@@ -70,12 +70,16 @@ def run_scheduled_sources(
                     **web,
                 )
                 return digest
-            except Exception:
+            except Exception as exc:
                 write(
                     code,
                     checked_at=clock(),
                     check_status="failed",
-                    error_code="CHECK_FAILED",
+                    error_code=(
+                        "WAREHOUSE_WEB_LOGIN_REQUIRED"
+                        if getattr(exc, "code", None) == "WAREHOUSE_WEB_LOGIN_REQUIRED"
+                        else "CHECK_FAILED"
+                    ),
                     duration_ms=int((time.monotonic() - tick) * 1000),
                 )
                 return None

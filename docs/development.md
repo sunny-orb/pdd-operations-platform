@@ -14,7 +14,7 @@
 
 ## 本地 PostgreSQL
 
-沿用现有 PG17 容器、`pdd_operations` 项目库和独立 v2 迁移链。API 使用只读 `pdd_app`，接收使用 `pdd_ingest`，结构迁移由 `pdd_admin` 执行。
+沿用现有 PG17 容器、`pdd_operations` 项目库和独立 v2 迁移链。本机默认API 使用只读 `pdd_app`，接收使用 `pdd_ingest`，结构迁移由 `pdd_admin` 执行。公司部署的账号选择按[架构中的用户决定](architecture.md)：允许使用songbing及其现有读写权限；连接配置及独立初始化入口已按[部署方案](implementation/deployment.md)适配，本轮仅本地验证。
 
 ```bash
 npm run db:status  # 查看项目容器
@@ -45,18 +45,16 @@ npm run check:db-schema
 
 配置唯一入口为[config/sync.toml](../config/sync.toml)，时区Asia/Shanghai，独立launchd每分钟重新读取。source_schedule_enabled=true时，warehouse_times指定8个迁移数仓来源的7个时点，feishu_times指定两张飞书表的2个时点；同槽按源持久去重。原times和monitor_interval_seconds仅继续用于聚水潭4来源、天气2来源；API和页面刷新不访问上游。开关未启用时维持原全项目行为，实际启用进度见TODO。
 
-当前按用户最新选择直接核对已登录网页；以下认证连接器仅为未启用的备选实现，不要求为本次网页核对配置账号。固定计划未切换，实际状态见TODO。
-
-切换前迁移到revision12、核查来源映射并验证后台认证。现有网页登录可用账号密码协议时，运行以下命令交互输入已有账号（密码不回显），成功登录并只读核对8表后才写入`var/local-db/warehouse-web-account.json`（0600，Git忽略）：
+固定策略使用独立网页读取连接器，需要本机安装Google Chrome及锁定Python依赖。先运行专用登录入口，在新浏览器窗口完成既有飞书登录；程序只保存该专用会话的数仓域登录状态，不读取个人Chrome资料，不记录密码：
 
 ```bash
-apps/api/.venv/bin/python scripts/configure-warehouse-login.py
-apps/api/.venv/bin/python scripts/configure-warehouse-login.py --check
+apps/api/.venv/bin/python scripts/configure-warehouse-browser.py --login
+apps/api/.venv/bin/python scripts/configure-warehouse-browser.py --check
 ```
 
-账号文件包含username/password，只用于固定HTTPS数仓主机，不是SQL的ro账号。会话Cookie仅留在本轮进程内存，八表复用一次登录，过期最多续登一次；认证失败本轮不重复撞密码。验证码、短信或强制改密需要人工处理，不能关闭来源安全校验来迁就调度。验证脚本不拉经营事实、不改上游、不启用计划；无需把密码贴在聊天或命令参数中。
+状态文件为`var/local-db/warehouse-browser/state.json`（0600，父目录0700，Git忽略）。--check使用新的无界面浏览器逐表读取8个固定网页，成功不代表经营事实已齐；两命令都不启用计划、不下载经营数据。后台仅到期才启动浏览器，一轮复用、串行读取，结束后关闭；每次重新加载目标文档，不能复用hash切表前的旧时间。登录失效本轮停止重复登录，平台显示检查失败并保留旧数据；用户重跑--login后下个固定槽继续。不会自动回退到后台账号或复制个人浏览器Cookie。
 
-若没有账号文件，保留原显式认证头方式：`var/local-db/warehouse-web-headers.json`（0600）由用户提供批准的请求头对象，不提取浏览器会话。两种方式只选一种，账号认证失败不自动回退。未来平台可注入warehouse_session或warehouse_headers，凭据读取由调用方提供。真实认证未通过时不要打开替换开关，避免中断接收。--set-times只改变旧时点，保留新配置。新策略启用后，--run-now/--only将迁移来源交给同一状态机，更新接收标记而不消费固定槽；聚水潭和天气仍走原项目入口。
+启用前迁移到revision12，完成真实网页读取、实际接收及无变化不下载验证。`source_schedule_enabled=true`切换8数仓和2飞书，两个旧自动路径只保留聚水潭4来源和天气2来源。--set-times只改旧时点并保留新配置；手动--run-now/--only仍走同一来源状态机，不消费固定槽。Playwright和Chrome为网页适配器的运行依赖，未来平台可注入另一个warehouse_reader，不需改调度策略。
 
 ```bash
 apps/api/.venv/bin/python scripts/sync-project.py --status

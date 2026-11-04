@@ -116,8 +116,9 @@ def execute_source_schedule(
     *,
     paths,
     warehouse_password,
-    warehouse_headers,
+    warehouse_headers=None,
     warehouse_session=None,
+    warehouse_reader=None,
     now=None,
     warehouse_times=None,
     feishu_times=None,
@@ -136,7 +137,9 @@ def execute_source_schedule(
     )
     from app.modules.product_board.source import TABLES
 
-    metadata = WarehouseMetadataReader(warehouse_headers, session=warehouse_session)
+    metadata = warehouse_reader or WarehouseMetadataReader(
+        warehouse_headers, session=warehouse_session
+    )
     feishu = SourceProbes(warehouse_password, paths.feishu_root)
     probes = {code: lambda code=code: metadata.read(code) for code in WAREHOUSE_SOURCES}
     probes.update({code: lambda code=code: feishu.read(code) for code in FEISHU_SOURCES})

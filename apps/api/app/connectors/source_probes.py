@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -12,6 +11,7 @@ from app.connectors.product_board import ProductBoardReader
 from app.connectors.retry import execute_read
 from app.connectors.sales_feishu import cli_command
 from app.connectors.weather import receive_weather
+from app.modules.archive_store import close_temporary, run_source_cli, store_for
 from app.modules.data_status.catalog import BY_ID, SOURCES
 from app.modules.sales.datasets import REFUND_BASE, REFUND_FIELDS, REFUND_SHOPS, SPECS
 from app.modules.sales.source_policy import SHOPS, approved_window
@@ -64,45 +64,49 @@ def feishu_revision(source, root):
     """沿既有user身份读一行必要字段，使用分页manifest表修订；不取全表记录。"""
     folder = Path(root) / "var/ingestion/source-checks" / str(uuid4())
     folder.mkdir(mode=0o700, parents=True)
-    output = folder / "revision.ndjson"
-    field = REFUND_FIELDS[0] if source.id == "shop_refunds" else next(iter(TARGET_FIELDS))
-    result = subprocess.run(
-        cli_command()
-        + [
-            "base",
-            "+record-list",
-            "--base-token",
-            REFUND_BASE,
-            "--table-id",
-            source.locator.rsplit("/", 1)[-1],
-            "--as",
-            "user",
-            "--field-id",
-            field,
-            "--limit",
-            "1",
-            "--format",
-            "ndjson",
-            "--output",
-            str(output.relative_to(root)),
-        ],
-        cwd=root,
-        capture_output=True,
-        timeout=50,
-    )
-    if result.returncode:
-        raise ValueError("FEISHU_CHECK_FAILED")
-    manifest = output.with_suffix(".manifest.json")
-    output.chmod(0o600)
-    manifest.chmod(0o600)
-    meta = json.loads(manifest.read_text())
-    if (
-        meta.get("base_token") != REFUND_BASE
-        or meta.get("table_id") != source.locator.rsplit("/", 1)[-1]
-        or meta.get("rev") is None
-    ):
-        raise ValueError("FEISHU_CHECK_METADATA_INVALID")
-    return {"revision": str(meta["rev"]), "basis": "table_revision"}
+    try:
+        store_for(folder / "revision.ndjson").check(64 * 1024**2)
+        output = folder / "revision.ndjson"
+        field = REFUND_FIELDS[0] if source.id == "shop_refunds" else next(iter(TARGET_FIELDS))
+        result = run_source_cli(
+            cli_command()
+            + [
+                "base",
+                "+record-list",
+                "--base-token",
+                REFUND_BASE,
+                "--table-id",
+                source.locator.rsplit("/", 1)[-1],
+                "--as",
+                "user",
+                "--field-id",
+                field,
+                "--limit",
+                "1",
+                "--format",
+                "ndjson",
+                "--output",
+                str(output.relative_to(root)),
+            ],
+            cwd=root,
+            capture_output=True,
+            timeout=50,
+        )
+        if result.returncode:
+            raise ValueError("FEISHU_CHECK_FAILED")
+        manifest = output.with_suffix(".manifest.json")
+        output.chmod(0o600)
+        manifest.chmod(0o600)
+        meta = json.loads(manifest.read_text())
+        if (
+            meta.get("base_token") != REFUND_BASE
+            or meta.get("table_id") != source.locator.rsplit("/", 1)[-1]
+            or meta.get("rev") is None
+        ):
+            raise ValueError("FEISHU_CHECK_METADATA_INVALID")
+        return {"revision": str(meta["rev"]), "basis": "table_revision"}
+    finally:
+        close_temporary(folder)
 
 
 class SourceProbes:

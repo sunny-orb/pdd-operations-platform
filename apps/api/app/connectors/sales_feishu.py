@@ -3,13 +3,13 @@
 import json
 import os
 import shutil
-import subprocess
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
+from app.modules.archive_store import run_source_cli, temporary_pages
 from app.modules.sales.contracts import SalesError
 from app.modules.sales.datasets import REFUND_BASE, REFUND_FIELDS, REFUND_TABLE, SOURCE_MAX_ROWS
 from app.modules.sales.source_normalization import normalize_source
@@ -80,7 +80,7 @@ class FeishuRefundReader:
             "--output",
             str(destination.relative_to(self.root)),
         ]
-        result = subprocess.run(
+        result = run_source_cli(
             arguments, cwd=self.root, capture_output=True, text=True, timeout=50
         )
         if result.returncode:
@@ -140,6 +140,7 @@ class FeishuRefundReader:
             offset = following
         return rows, dict(rev=revision, timezone="Asia/Shanghai", field_mapping=field_mapping)
 
+    @temporary_pages
     def read_stable(self, window):
         validate_read_window(window)
         for _ in range(MAX_ATTEMPTS):

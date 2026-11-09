@@ -1,7 +1,6 @@
 """M5必要原行与固定期间报告发布；仅既有v2表，失败保旧、重跑幂等。"""
 
 import json
-import os
 from datetime import timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -12,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.aftersales.classification import rule_parameters
 from app.modules.aftersales.ingestion import MASTER_TABLE, NOTE, REVISION, TABLES
+from app.modules.archive_store import require_archive, write_archive
 from app.modules.sales.source_policy import SHOPS
 
 FACTS = dict(
@@ -71,11 +71,7 @@ def reflect(engine):
 
 
 def private(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
-    with open(path, "x", opener=lambda p, f: os.open(p, f, 0o600)) as out:
-        out.write(value)
-    return str(path.resolve())
+    return write_archive(path, value)
 
 
 def publish_source(engine, code, receive, root):
@@ -153,8 +149,20 @@ def publish_source(engine, code, receive, root):
                     )
                 ),
             )
-            archive = private(
-                Path(root) / run / "input.ndjson", "\n".join(canonical(r) for r in raw) + "\n"
+            with c.begin():
+                previous = c.execute(
+                    sa.select(v.c.retained_input_ref).where(
+                        v.c.dataset_code == code,
+                        v.c.content_fingerprint == digest,
+                        v.c.state == "published",
+                    )
+                ).scalar_one_or_none()
+            archive = (
+                require_archive(previous)
+                if previous
+                else private(
+                    Path(root) / run / "input.ndjson", "\n".join(canonical(r) for r in raw) + "\n"
+                )
             )
             with c.begin():
                 reuse = c.execute(

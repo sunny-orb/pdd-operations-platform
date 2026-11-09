@@ -1,7 +1,6 @@
 """渠道月GMV目标规范化与不可变发布；完成额只在既有数仓事实查询派生。"""
 
 import hashlib
-import os
 import re
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, localcontext
@@ -10,6 +9,8 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
+
+from app.modules.archive_store import require_archive, write_archive
 
 from .contracts import PublishResult, ReadWindow, SalesError, ShopDailyCandidate
 from .normalization import canonical as raw_canonical
@@ -213,12 +214,7 @@ class SalesTargetStore(ShopDailyStore):
             ("normalized.ndjson", normalized),
             ("interpretation.json", interpretation),
         ):
-            with os.fdopen(
-                os.open(folder / name, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600), "wb"
-            ) as f:
-                f.write(content)
-                f.flush()
-                os.fsync(f.fileno())
+            write_archive(folder / name, content)
             if (folder / name).read_bytes() != content:
                 raise SalesError("ARCHIVE_CHECKSUM_MISMATCH")
         return str(folder / "input.ndjson"), str(folder / "interpretation.json")
@@ -251,11 +247,25 @@ class SalesTargetStore(ShopDailyStore):
         if _producer() != self.loaded_producer:
             raise SalesError("PRODUCER_CODE_CHANGED")
         version = str(uuid4())
-        archive, interpretation = self._archive_target(version, candidate)
         versions, current, tasks = (
             self.tables[n] for n in ("dataset_versions", "current_datasets", "task_runs")
         )
         digest = fingerprint(dict(content=candidate.fingerprint, producer=self.loaded_producer))
+        with c.begin():
+            previous = c.execute(
+                sa.select(versions.c.retained_input_ref, versions.c.interpretation_ref).where(
+                    versions.c.dataset_code == "sales_targets",
+                    versions.c.content_fingerprint == digest,
+                    versions.c.state == "published",
+                )
+            ).first()
+        if previous:
+            archive, interpretation = (
+                require_archive(previous.retained_input_ref),
+                require_archive(previous.interpretation_ref),
+            )
+        else:
+            archive, interpretation = self._archive_target(version, candidate)
         with c.begin():
             self._lease(c, run_id)
             existing_members = set(

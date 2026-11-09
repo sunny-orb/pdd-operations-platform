@@ -9,6 +9,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules.archive_store import write_archive
 from app.modules.product_board.repository import CODES, snapshot
 
 from .service import METRIC_CODES, build_bundle, digest, producer_hash, validate_bundle
@@ -24,8 +25,7 @@ def _archive(path, bundle):
     path.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(path, 0o700)
     file = path / "publication.json"
-    with os.fdopen(os.open(file, os.O_CREAT | os.O_TRUNC | os.O_WRONLY, 0o600), "w") as f:
-        json.dump(bundle, f, ensure_ascii=False, default=str, sort_keys=True)
+    write_archive(file, json.dumps(bundle, ensure_ascii=False, default=str, sort_keys=True))
     os.chmod(file, 0o600)
     return str(file)
 

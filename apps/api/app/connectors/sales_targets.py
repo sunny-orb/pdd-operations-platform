@@ -1,13 +1,13 @@
 """原版拼多多渠道GMV目标只读CLI投影；逐页/双读校验，不读取退款字段。"""
 
 import json
-import subprocess
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
 from app.connectors.sales_feishu import cli_command
+from app.modules.archive_store import run_source_cli, temporary_pages
 from app.modules.sales.contracts import SalesError
 from app.modules.sales.source_policy import MAX_ATTEMPTS
 from app.modules.sales.targets import TARGET_BASE, TARGET_FIELDS, TARGET_TABLE, normalize_targets
@@ -61,7 +61,7 @@ class FeishuTargetReader:
             "--output",
             str(destination.relative_to(self.root)),
         ]
-        result = subprocess.run(args, cwd=self.root, capture_output=True, text=True, timeout=50)
+        result = run_source_cli(args, cwd=self.root, capture_output=True, text=True, timeout=50)
         if result.returncode:
             raise SalesError("FEISHU_TARGET_READ_FAILED", 503)
         meta_path = destination.with_suffix(".manifest.json")
@@ -123,6 +123,7 @@ class FeishuTargetReader:
                 raise SalesError("FEISHU_TARGET_PAGINATION_INCOMPLETE")
             offset = following
 
+    @temporary_pages
     def read_stable(self, *, basis="original_gmv"):
         for _ in range(MAX_ATTEMPTS):
             before_rows, before_meta = self._scan()

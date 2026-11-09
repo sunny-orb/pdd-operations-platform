@@ -14,6 +14,7 @@
 | AI能力规划       | [页面AI分析、项目问答与商品建议兜底草案](ai-assistance.md)（仅规划，规则待用户确认）                                |
 | 看板性能         | [API计算与复测](api-performance.md)、[全库索引](database-performance.md)、[前端请求与渲染](frontend-performance.md) |
 | 跨页筛选         | [共用能力、等级投影及联动统一建议](filter-consistency.md)（业务调整待确认实施）                                     |
+| 采集归档         | [去重、容量与离线保留](archive-retention.md)                                                                        |
 | 公司部署         | [Docker、CI/CD、单账号初始化与回退](deployment.md)                                                                  |
 | 平台迁移         | [完整执行链接管与回退](sync-platform-handoff.md)                                                                    |
 

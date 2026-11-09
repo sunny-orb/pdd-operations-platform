@@ -10,6 +10,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 
 from app.connectors.weather import BULLETIN_URL, MID_RANGE_URL
+from app.modules.archive_store import store_for
 from app.modules.weather.parser import PARSER_REVISION, build_document
 
 LOCK_KEY = "nmc-weather-publication"
@@ -20,6 +21,7 @@ def canonical(value):
 
 
 def _write(path, value):
+    store_for(path).check(len(canonical(value).encode()))
     path.write_text(canonical(value), encoding="utf-8")
     os.chmod(path, 0o600)
 

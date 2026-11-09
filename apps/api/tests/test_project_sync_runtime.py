@@ -190,7 +190,8 @@ def test_portable_trigger_real_pg_complete_pipeline_idempotence_lock_and_failure
         assert json.loads(evidence.read_text())["status"] == row.status
         assert "synthetic-secret-not-for-output" not in evidence.read_text()
     assert "synthetic-secret-not-for-output" not in capsys.readouterr().out
-    assert len(list((tmp_path / "inputs/aftersales").glob("*/input.ndjson"))) == 10
+    # 重跑复用三份原始来源，不再为十次成功接收保留十份重复输入。
+    assert len(list((tmp_path / "inputs/aftersales").glob("*/input.ndjson"))) == 3
 
 
 def cli_main(monkeypatch, tmp_path, args):

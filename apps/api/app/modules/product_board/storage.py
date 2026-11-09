@@ -9,6 +9,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules.archive_store import require_archive, store_for, write_archive
 from app.modules.sales.source_policy import SHOPS
 
 from .source import SHOP_PROFILE, TABLES, fingerprint, identity, parse_ids, windows
@@ -220,20 +221,53 @@ class ProductBoardStore:
                     raise ValueError("SOURCE_INPUT_MISSING")
                 if producer_hash() != code_hash:
                     raise ValueError("PRODUCER_CODE_CHANGED")
+                # 局部更新也必须保护未重新接收的依赖归档，不能发布缺档的派生版本。
+                with c.begin():
+                    for source_version in reuse_sources.values():
+                        retained = c.scalar(
+                            sa.select(self.tables["dataset_versions"].c.retained_input_ref).where(
+                                self.tables["dataset_versions"].c.id == source_version
+                            )
+                        )
+                        if not retained:
+                            raise ValueError("ARCHIVE_RESTORE_REQUIRED")
+                        require_archive(retained)
                 archive = self.archive_root / run
                 archive.mkdir(parents=True, mode=0o700)
                 os.chmod(archive, 0o700)
                 for code, values in rows.items():
                     if code in reuse_sources:
                         continue
+                    digest = fingerprint(
+                        dict(
+                            rows=values,
+                            revision=REVISION,
+                            producer=LOADED_PRODUCER_HASH,
+                            end=None if code == "profile_records" else end,
+                            inputs=None,
+                        )
+                    )
+                    v = self.tables["dataset_versions"]
+                    with c.begin():
+                        previous = c.execute(
+                            sa.select(v.c.retained_input_ref).where(
+                                v.c.dataset_code == code,
+                                v.c.content_fingerprint == digest,
+                                v.c.state.in_(("validated", "published")),
+                            )
+                        ).scalar_one_or_none()
+                    if previous:
+                        require_archive(previous)
+                        continue
                     p = archive / (code + ".json")
-                    p.write_text(
-                        json.dumps(values, default=str, ensure_ascii=False, separators=(",", ":"))
+                    write_archive(
+                        p,
+                        json.dumps(values, default=str, ensure_ascii=False, separators=(",", ":")),
                     )
                     os.chmod(p, 0o600)
                 for name in ("source.py", "storage.py", "profile_rules.py"):
                     p = archive / name
-                    p.write_text(Path(__file__).with_name(name).read_text())
+                    write_archive(p, Path(__file__).with_name(name).read_text())
                     os.chmod(p, 0o600)
                 manifest = dict(
                     revision=REVISION,
@@ -245,8 +279,8 @@ class ProductBoardStore:
                     reused_source_versions=dict(reuse_sources),
                     files={p.name: fingerprint(p.read_text()) for p in archive.iterdir()},
                 )
-                (archive / "manifest.json").write_text(
-                    json.dumps(manifest, default=str, ensure_ascii=False)
+                write_archive(
+                    archive / "manifest.json", json.dumps(manifest, default=str, ensure_ascii=False)
                 )
                 os.chmod(archive / "manifest.json", 0o600)
                 versions = self._stage(
@@ -254,11 +288,19 @@ class ProductBoardStore:
                 )
                 if self.reconcile_full_scope:
                     changes = archive / "reconciliation.json"
-                    changes.write_text(json.dumps(self.changes, ensure_ascii=False))
+                    write_archive(changes, json.dumps(self.changes, ensure_ascii=False))
                     os.chmod(changes, 0o600)
                     manifest["files"][changes.name] = fingerprint(changes.read_text())
                     manifest["reconciliation_policy"] = "stable-full-scope"
+                    store_for(archive / "manifest.json").check(
+                        len(json.dumps(manifest, default=str).encode())
+                    )
                     (archive / "manifest.json").write_text(json.dumps(manifest, default=str))
+                    (archive / "manifest.json.sha256").write_text(
+                        __import__("hashlib")
+                        .sha256((archive / "manifest.json").read_bytes())
+                        .hexdigest()
+                    )
                 if producer_hash() != code_hash:
                     raise ValueError("PRODUCER_CODE_CHANGED")
                 with c.begin():
@@ -471,11 +513,12 @@ class ProductBoardStore:
             v = self.tables["dataset_versions"]
             with c.begin():
                 existing = c.execute(
-                    sa.select(v.c.id, v.c.state).where(
+                    sa.select(v.c.id, v.c.state, v.c.retained_input_ref).where(
                         v.c.dataset_code == code, v.c.content_fingerprint == digest
                     )
                 ).first()
             if existing and existing.state in ("validated", "published"):
+                require_archive(existing.retained_input_ref)
                 versions[code] = existing.id
                 continue
             vid = str(uuid4())

@@ -10,6 +10,8 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules.archive_store import require_archive, write_archive
+
 from .contracts import PublishResult, SalesError
 from .datasets import EXTENDED_REVISION, INSERT_BATCH_SIZE, READ_SPECS
 from .normalization import canonical, fingerprint
@@ -218,10 +220,7 @@ class ShopDailyStore:
             ("interpretation.json", policy.encode()),
             ("producer-source.json", canonical(LOADED_PRODUCER_SOURCES).encode()),
         ):
-            with open(folder / name, "xb", opener=lambda p, f: os.open(p, f, 0o600)) as output:
-                output.write(content)
-                output.flush()
-                os.fsync(output.fileno())
+            write_archive(folder / name, content)
             if (folder / name).stat().st_mode & 0o077:
                 raise SalesError("ARCHIVE_PERMISSIONS")
         if (folder / "input.ndjson").read_bytes() != data:
@@ -242,7 +241,21 @@ class ShopDailyStore:
             )
         )
         version_id = str(uuid4())
-        archive, interpretation = self._archive(version_id, candidate)
+        with connection.begin():
+            previous = connection.execute(
+                sa.select(
+                    versions.c.id, versions.c.retained_input_ref, versions.c.interpretation_ref
+                ).where(
+                    versions.c.dataset_code == self.code,
+                    versions.c.content_fingerprint == candidate.fingerprint,
+                    versions.c.state == "published",
+                )
+            ).first()
+        if previous:
+            archive = require_archive(previous.retained_input_ref)
+            interpretation = require_archive(previous.interpretation_ref)
+        else:
+            archive, interpretation = self._archive(version_id, candidate)
         expected = {r["source_row_key"]: r for r in candidate.rows}
         with connection.begin():
             self._lease(connection, run_id)
@@ -263,10 +276,11 @@ class ShopDailyStore:
                 removed = sum(tuple(row) not in new_keys for row in old_rows)
                 if removed and not self.reconcile_full_scope:
                     raise SalesError("SOURCE_OLD_KEY_MISSING")
-                if self.reconcile_full_scope:
+                if self.reconcile_full_scope and not previous:
                     evidence = Path(archive).parent / "reconciliation.json"
-                    evidence.write_text(
-                        canonical(dict(previous_version=old, removed_or_moved_keys=removed))
+                    write_archive(
+                        evidence,
+                        canonical(dict(previous_version=old, removed_or_moved_keys=removed)),
                     )
                     os.chmod(evidence, 0o600)
             reuse = connection.execute(

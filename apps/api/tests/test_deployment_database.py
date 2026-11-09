@@ -21,6 +21,31 @@ def load_script(name, filename):
     return module
 
 
+@pytest.mark.parametrize("database", ["pdd_operations", "pdd_dashboard"])
+def test_maintenance_connection_preserves_selected_project_database(database):
+    initializer = load_script("relocation_initializer", "init-deployment-db.py")
+    params = initializer.connection_parameters(
+        f"postgresql+psycopg://songbing:example@pg.kktree.cn:5432/{database}?sslmode=require"
+    )
+    assert params["dbname"] == database
+    assert params["sslmode"] == "require"
+    assert params["user"] == "songbing"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql+psycopg://songbing:example@pg.kktree.cn/other_project",
+        "postgresql+psycopg://postgres:example@pg.kktree.cn/pdd_dashboard",
+        "postgresql://songbing:example@pg.kktree.cn/pdd_dashboard",
+    ],
+)
+def test_maintenance_connection_rejects_unapproved_database_or_identity(url):
+    initializer = load_script("relocation_initializer", "init-deployment-db.py")
+    with pytest.raises(ValueError, match="DEPLOY_CONNECTION_INVALID"):
+        initializer.connection_parameters(url)
+
+
 @pytest.fixture
 def allocated_database():
     """仅在随机本机库授权现有普通测试角色；不修改集群角色。"""

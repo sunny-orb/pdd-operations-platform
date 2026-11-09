@@ -75,31 +75,37 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
         return "initialized"
 
 
+def connection_parameters(value: str) -> dict:
+    """解析公司维护连接；只允许迁移前后两项目库，拒绝错误身份与驱动。"""
+    url = make_url(value)
+    if (
+        url.drivername != "postgresql+psycopg"
+        or url.database not in ("pdd_operations", "pdd_dashboard")
+        or url.username != "songbing"
+    ):
+        raise ValueError("DEPLOY_CONNECTION_INVALID")
+    params = dict(url.query)
+    params.update(
+        host=url.host,
+        port=url.port or 5432,
+        dbname=url.database,
+        user=url.username,
+        password=url.password,
+        connect_timeout=10,
+    )
+    return params
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     try:
-        url = make_url(os.environ["DATABASE_URL"])
-        if (
-            url.drivername != "postgresql+psycopg"
-            or url.database != "pdd_operations"
-            or url.username != "songbing"
-        ):
-            raise ValueError("DEPLOY_CONNECTION_INVALID")
-        params = dict(url.query)
-        params.update(
-            host=url.host,
-            port=url.port or 5432,
-            dbname=url.database,
-            user=url.username,
-            password=url.password,
-            connect_timeout=10,
-        )
+        params = connection_parameters(os.environ["DATABASE_URL"])
         with psycopg.connect(**params, autocommit=True) as connection:
             status = initialize(
                 connection,
-                database="pdd_operations",
+                database=params["dbname"],
                 account="songbing",
                 apply=args.apply,
             )

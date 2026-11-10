@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.archive_store import write_archive
+from app.modules.database_residency import ensure_online
 from app.modules.product_board.repository import CODES, snapshot
 
 from .service import METRIC_CODES, build_bundle, digest, producer_hash, validate_bundle
@@ -344,6 +345,7 @@ def publish_scores(engine, *, archive_root=None):
                         dict(codes=list(CODES)),
                     ).all()
                 )
+                ensure_online(c, bundle["inputs"].values())
                 if current != bundle["inputs"]:
                     raise ValueError("SCORE_INPUTS_CHANGED")
                 lease = c.execute(

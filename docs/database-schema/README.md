@@ -1,12 +1,12 @@
-# 五页看板数据库完整字段设计（现行32张，经营基线30张）
+# 五页看板数据库完整字段设计（现行37张，经营基线30张）
 
 **经营基线维护用户已选定的30张表方案，原01共494个显式字段、50处正式外键；08为退款金额区间追加4列，现经营30表共498字段，外键数不变。** 天气独立扩展`weather_publications`（8字段/1FK）通过Alembic07追加，退款目标08范围扩展见[target-ranges.sql](target-ranges.sql)及[M5专用设计](../implementation/m5-aftersales-implementation.md)，原01迁移保持不变，schema.sql统一包含现行完整迁移链；唯一字段/事务/权限设计见[M6专用方案](../implementation/m6-overview-implementation.md#天气对象数据库与发布专用设计)，派生审阅稿为[weather-publications.sql](weather-publications.sql)。 本轮已修正六处审查问题，删除7个逐行常量，并统一资料重放、标准/计分解耦及报告期间/修订选择，并补齐公共时间/金额/状态和查询索引设计。每张表列出含义、类型、主外键、可空、唯一约束和发布/删除边界；旧72表不再作为现行方案。结构由独立Alembic基线及派生审阅SQL维护；实际创建和验证状态见[TODO](../../TODO.md#当前任务与范围)及[执行记录](../validation/2026-10-28.md#database-v2-local-created)，不将空结构视为业务接入验收。
 
-现行head为`20261104_12`：经营30表（498字段）＋天气发布1表（8字段）＋来源检查1表（18字段），共32张领域表／524字段／51处正式外键，另有1张Alembic技术版本表。来源检查10—12的字段与约束见[source-checkpoints.md](source-checkpoints.md)。天气“修订2”是`weather_publications.revision_no`内容修订；11/03气温解析修正未新增数据库列，`document`内解析状态及只读投影由应用契约维护。
+现行代码head为`20261110_13`：经营30表（498字段）＋天气发布1表（8字段）＋来源检查1表（18字段）＋保留维护5表（35字段），共37张应用表／559字段／58处正式外键，另有1张Alembic技术版本表。新增运维字段及保护约束见[数据库离线保留字段设计](database-retention.md)。该head本轮只在随机本机隔离库验证，不代表生产已升级。来源检查10—12的字段与约束见[source-checkpoints.md](source-checkpoints.md)。天气“修订2”是`weather_publications.revision_no`内容修订；11/03气温解析修正未新增数据库列，`document`内解析状态及只读投影由应用契约维护。
 
 数据库确定为PostgreSQL，前期无Redis。输入以[数据契约3.5中文展示字段](../data-contract.md#page-display-contracts)和指定新版`sites-current`五页原型为准；旧M1前后端/迁移不作为设计依据。来源仍是数仓、聚水潭、飞书表；天气按既定范围单独设计。业务答复、剩余参数和真实来源技术待验继续遵守契约，不因字段设计完成而变成已实现或验收。
 
-来源监测另由Alembic10追加一张运行状态表（不改变经营30表），Alembic11追加成功观测、网页更新时间及核对时刻，Alembic12追加固定槽与来源接收状态。本版本要求数据库结构达到`20261104_12`：[source_checkpoints字段/权限/回退](source-checkpoints.md)，[建表审阅SQL](source-checkpoints.sql)，[时间字段审阅SQL](source-update-times.sql)，[调度字段审阅SQL](source-schedule.sql)。
+来源监测另由Alembic10追加一张运行状态表（不改变经营30表），Alembic11追加成功观测、网页更新时间及核对时刻，Alembic12追加固定槽与来源接收状态。来源监测部分要求数据库结构至少达到`20261104_12`；完整代码head见上文：[source_checkpoints字段/权限/回退](source-checkpoints.md)，[建表审阅SQL](source-checkpoints.sql)，[时间字段审阅SQL](source-update-times.sql)，[调度字段审阅SQL](source-schedule.sql)。
 
 ## 完整字典入口与唯一表清单
 
@@ -300,3 +300,5 @@ PK/UQ会建立对应索引，不能再建同列同序普通索引；FK的引用�
 - **来源与性能：**真实业务键/修订删除、单位、完整日和查询容量继续技术验证。本轮不接来源、不测PG约束/性能，不把静态字段核对当成数据已齐。
 
 后续实施必须先形成专用Alembic/回退、索引、事务、接入与验收方案，再按明确授权进行。文档检查证据见[验证记录](../validation.md)，当前进度仅在[TODO](../../TODO.md)维护。
+
+数据库保留的五张运维表、字段与受控事务边界见[离线保留字典](database-retention.md)；经营字段保持原样，本地迁移13不执行生产清理。

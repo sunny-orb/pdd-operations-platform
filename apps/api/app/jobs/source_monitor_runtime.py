@@ -93,6 +93,20 @@ def execute_monitor(engine, *, paths, warehouse_password, interval_seconds=900, 
             )
             for group in groups
         }
+        states["_deferred"] = {
+            group: next(
+                outputs.get(step, {}).get("error_code")
+                for step in GROUP_STEPS.get(group, (group,))
+                if outputs.get(step, {}).get("error_code")
+                in ("DATASET_RESTORE_REQUIRED", "MAINTENANCE_DEFERRED")
+            )
+            for group in groups
+            if any(
+                outputs.get(step, {}).get("error_code")
+                in ("DATASET_RESTORE_REQUIRED", "MAINTENANCE_DEFERRED")
+                for step in GROUP_STEPS.get(group, (group,))
+            )
+        }
         states["_processing_failed"] = any(
             outputs.get(step, {}).get("status") != "succeeded"
             for step in steps
@@ -190,6 +204,16 @@ def execute_source_schedule(
             )
             == "succeeded"
             for code in sources
+        }
+        states["_deferred"] = {
+            code: outputs.get("products" if bootstrap and code in TABLES else code, {}).get(
+                "error_code"
+            )
+            for code in sources
+            if outputs.get("products" if bootstrap and code in TABLES else code, {}).get(
+                "error_code"
+            )
+            in ("DATASET_RESTORE_REQUIRED", "MAINTENANCE_DEFERRED")
         }
         states["_processing_failed"] = any(
             outputs.get(step, {}).get("status") != "succeeded"

@@ -196,6 +196,11 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                             item["last_success_at"] = p["sync_finished_at"]
                         elif p.get("accepted_at"):
                             item["last_success_at"] = p["accepted_at"]
+                for item in datasets:
+                    reason = p.get("error_code") or item.get("error_code")
+                    if reason in ("DATASET_RESTORE_REQUIRED", "MAINTENANCE_DEFERRED"):
+                        item.update(attempt_status="deferred", error_code=reason)
+                deferred = any(item["attempt_status"] == "deferred" for item in datasets)
                 has_data = all(row["version_id"] for row in datasets)
                 running = any(row["attempt_status"] == "running" for row in datasets)
                 failed = (
@@ -225,7 +230,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                     else "failed"
                     if failed
                     else "pending"
-                    if changed
+                    if changed or deferred
                     else "available"
                     if has_data
                     else "unavailable"

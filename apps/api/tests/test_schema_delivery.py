@@ -72,9 +72,9 @@ def test_complete_sql_matches_migrations_on_real_pg():
             actual = catalog(a)
             assert actual == catalog(b)
             domain_columns = [row for row in actual["columns"] if row[0] != "alembic_version_v2"]
-            assert len({row[0] for row in domain_columns}) == 32
-            assert len(domain_columns) == 524
-            assert sum("FOREIGN KEY" in row[2] for row in actual["constraints"]) == 51
+            assert len({row[0] for row in domain_columns}) == 37
+            assert len(domain_columns) == 559
+            assert sum("FOREIGN KEY" in row[2] for row in actual["constraints"]) == 58
             head = ScriptDirectory.from_config(
                 Config(str(ROOT / "apps/api/alembic-v2.ini"))
             ).get_current_head()

@@ -57,7 +57,7 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
                 "AND NOT EXISTS (SELECT 1 FROM extension_members e "
                 "WHERE e.classid='pg_catalog.pg_class'::regclass AND e.objid=c.oid AND e.objsubid=0)"
             ).fetchone()
-            if (tables, columns, owned) != (32, 524, True):
+            if (tables, columns, owned) != (37, 559, True):
                 raise ValueError("DEPLOY_SCHEMA_MISMATCH")
             return "already_initialized"
         # 与派生SQL共用前置检查；只读检查不申请事务写锁。

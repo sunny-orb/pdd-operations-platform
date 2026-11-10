@@ -83,6 +83,7 @@ function attemptLabel(status: string | null) {
         cancelled: "已取消",
         running: "进行中",
         queued: "等待执行",
+        deferred: "已暂缓",
       } as Record<string, string>
     )[status ?? ""] ?? "尚无记录"
   );
@@ -263,13 +264,17 @@ function SourceDetail({ row }: { row: SourceStatus }) {
           <div>
             <dt>本次结果</dt>
             <dd>
-              {row.upstream.error_code === "SOURCE_CHANGED_DURING_SYNC"
-                ? "同步期间来源再次变化，等待下一轮接收。"
-                : row.upstream.error_code === "SYNC_FAILED"
-                  ? "本轮接收未成功，保留最近可用数据。"
-                  : row.upstream.error_code === "WAREHOUSE_WEB_LOGIN_REQUIRED"
-                    ? "数仓网页登录已失效，保留上次更新时间和可用数据。重新登录后按计划继续检查。"
-                    : "本轮上游检查失败，保留上次观测。"}
+              {row.upstream.error_code === "DATASET_RESTORE_REQUIRED"
+                ? "继续展示最近可用数据；本次更新需要技术人员恢复历史输入后继续。"
+                : row.upstream.error_code === "MAINTENANCE_DEFERRED"
+                  ? "项目维护暂缓了本次更新，现有数据继续可用，稍后按计划重试。"
+                  : row.upstream.error_code === "SOURCE_CHANGED_DURING_SYNC"
+                    ? "同步期间来源再次变化，等待下一轮接收。"
+                    : row.upstream.error_code === "SYNC_FAILED"
+                      ? "本轮接收未成功，保留最近可用数据。"
+                      : row.upstream.error_code === "WAREHOUSE_WEB_LOGIN_REQUIRED"
+                        ? "数仓网页登录已失效，保留上次更新时间和可用数据。重新登录后按计划继续检查。"
+                        : "本轮上游检查失败，保留上次观测。"}
             </dd>
           </div>
         )}

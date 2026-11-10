@@ -39,6 +39,10 @@ def publish(
     rules=None,
     returns=None,
     source_revision="m5-test",
+    revision_no=1,
+    start=date(2026, 9, 28),
+    previous_report_id=None,
+    yoy_report_id=None,
 ):
     tables = build_metadata().tables
 
@@ -81,7 +85,7 @@ def publish(
                     row_schema_revision=source_revision if kind == "source" else "m5-test",
                     interpretation_ref="synthetic:fixed-groups",
                     producer_revision="synthetic:test",
-                    period_start=date(2026, 9, 28),
+                    period_start=start,
                     period_end=end,
                     rule_set_id=rule_id if kind == "derived" else None,
                 )
@@ -192,7 +196,7 @@ def publish(
                     output_version_id=out,
                     input_role=role,
                     input_version_id=code + suffix,
-                    window_start=date(2026, 9, 28),
+                    window_start=start,
                     window_end=end,
                 )
             )
@@ -203,14 +207,16 @@ def publish(
                 id="report" + suffix,
                 dataset_version_id=out,
                 report_type="custom",
-                period_start=date(2026, 9, 28),
+                period_start=start,
                 period_end=end,
-                revision_no=1,
+                revision_no=revision_no,
                 source_generated_time_status="unknown",
-                previous_comparison_status="missing",
-                previous_comparison_reason="合成无上期",
-                yoy_comparison_status="missing",
-                yoy_comparison_reason="合成无去年",
+                previous_report_id=previous_report_id,
+                previous_comparison_status="available" if previous_report_id else "missing",
+                previous_comparison_reason=None if previous_report_id else "合成无上期",
+                yoy_report_id=yoy_report_id,
+                yoy_comparison_status="available" if yoy_report_id else "missing",
+                yoy_comparison_reason=None if yoy_report_id else "合成无去年",
             )
         )
         seal(out)

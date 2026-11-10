@@ -12,6 +12,7 @@ from app.modules.data_status.schedule_policy import (
     WAREHOUSE_TIMES,
     due_sources,
 )
+from app.modules.database_residency import deferred_reason
 
 
 def run_scheduled_sources(
@@ -91,7 +92,9 @@ def run_scheduled_sources(
             prior = previous.get(code, {})
             same = prior.get("scheduled_slot_at") == slot
             interrupted = (
-                prior.get("sync_status") == "running" or prior.get("check_status") == "checking"
+                prior.get("sync_status") == "running"
+                or prior.get("check_status") == "checking"
+                or prior.get("error_code") == "MAINTENANCE_DEFERRED"
             )
             if (
                 not force
@@ -129,9 +132,25 @@ def run_scheduled_sources(
             return {"status": "checked", "checked": 0, "sources": []}
         try:
             results = synchronize(tuple(selected), c)
-        except Exception:
-            results = {"_processing_failed": True}
+        except Exception as exc:
+            reason = deferred_reason(exc)
+            results = (
+                {"_deferred": {code: reason for code in selected}}
+                if reason
+                else {"_processing_failed": True}
+            )
+        deferred = results.get("_deferred", {})
         for code in selected:
+            if code in deferred:
+                prior = previous.get(code, {})
+                write(
+                    code,
+                    sync_status=prior.get("sync_status"),
+                    sync_started_at=prior.get("sync_started_at"),
+                    sync_finished_at=prior.get("sync_finished_at"),
+                    error_code=deferred[code],
+                )
+                continue
             succeeded = bool(results.get(code))
             write(
                 code, sync_status="succeeded" if succeeded else "failed", sync_finished_at=clock()
@@ -158,10 +177,14 @@ def run_scheduled_sources(
         )
         processing_failed = bool(results.get("_processing_failed"))
         return {
-            "status": "partial" if failures or pending or processing_failed else "checked",
+            "status": "deferred"
+            if deferred
+            else "partial"
+            if failures or pending or processing_failed
+            else "checked",
             "checked": len(observed),
             "failed": failures,
-            "pending": pending,
+            "pending": pending + len(deferred),
             "sources": selected,
             "processing_failed": processing_failed,
         }

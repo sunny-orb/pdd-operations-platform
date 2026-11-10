@@ -370,3 +370,32 @@ it("平台处理异常同样标行并可定位解释，不改变等待重算的�
   expect(screen.getByLabelText("处理异常：商品评分")).toBeTruthy();
   expect(screen.getByText(/影响页面：商品数据/)).toBeTruthy();
 });
+
+it("历史输入待恢复时保留可用数据，不误报上游检查失败", async () => {
+  const base = payload();
+  const data = {
+    ...base,
+    data: {
+      ...base.data,
+      sources: [
+        {
+          ...row,
+          platform_state: "pending",
+          datasets: [
+            { ...dataset, attempt_status: "deferred", error_code: "DATASET_RESTORE_REQUIRED" },
+          ],
+          upstream: { ...row.upstream, state: "changed", error_code: "DATASET_RESTORE_REQUIRED" },
+        },
+      ],
+    },
+  };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await screen.findByText("聚水潭销售 · 已发货 / 已取消");
+  fireEvent.click(screen.getByRole("button", { name: "展开来源详情" }));
+  expect(
+    screen.getByText("继续展示最近可用数据；本次更新需要技术人员恢复历史输入后继续。"),
+  ).toBeTruthy();
+  expect(screen.queryByText("本轮上游检查失败，保留上次观测。")).toBeNull();
+});

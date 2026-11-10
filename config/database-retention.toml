@@ -1,0 +1,8 @@
+# 本地第一阶段；默认只读，不设置定时删除。
+revision = "db-retention-v1"
+production_apply_enabled = false
+minimum_hours = 24
+max_versions_per_apply = 1
+lock_timeout_ms = 1000
+# 同时作为单条SQL和整笔维护事务总预算；只允许缩短。
+statement_timeout_ms = 30000

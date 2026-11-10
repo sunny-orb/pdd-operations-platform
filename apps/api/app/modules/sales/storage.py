@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.archive_store import require_archive, write_archive
+from app.modules.database_residency import deferred_reason, ensure_online
 
 from .contracts import PublishResult, SalesError
 from .datasets import EXTENDED_REVISION, INSERT_BATCH_SIZE, READ_SPECS
@@ -163,7 +164,9 @@ class ShopDailyStore:
                         .one()
                     )
                     if task["status"] == "running" and task["worker_ref"] == worker:
-                        code = exc.code if isinstance(exc, SalesError) else "INGESTION_FAILED"
+                        code = deferred_reason(exc) or (
+                            exc.code if isinstance(exc, SalesError) else "INGESTION_FAILED"
+                        )
                         connection.execute(
                             tasks.update()
                             .where(tasks.c.id == run_id)
@@ -252,6 +255,8 @@ class ShopDailyStore:
                 )
             ).first()
         if previous:
+            with connection.begin():
+                ensure_online(connection, [previous.id])
             archive = require_archive(previous.retained_input_ref)
             interpretation = require_archive(previous.interpretation_ref)
         else:

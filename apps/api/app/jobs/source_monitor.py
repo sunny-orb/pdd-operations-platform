@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import sqlalchemy as sa
 
 from app.modules.data_status.catalog import BY_ID, job_for
+from app.modules.database_residency import deferred_reason
 
 
 def fingerprint(value):
@@ -105,11 +106,19 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
             # 同一一致性组只接收一次；先检查完所有来源，失败来源不误当已追平。
             try:
                 results = synchronize(tuple(groups), c) if observed else {}
-            except Exception:
-                results = {"_processing_failed": True}
+            except Exception as exc:
+                reason = deferred_reason(exc)
+                results = (
+                    {"_deferred": {group: reason for group in groups}}
+                    if reason
+                    else {"_processing_failed": True}
+                )
             for code, digest in observed.items():
                 group = BY_ID[code].group
                 if not digest or group not in groups:
+                    continue
+                if group in results.get("_deferred", {}):
+                    write(code, error_code=results["_deferred"][group])
                     continue
                 if not results.get(group):
                     write(
@@ -146,10 +155,20 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                 r["check_status"] == "failed" or r["error_code"] == "SYNC_FAILED"
                 for r in checked_rows
             )
-            pending = sum(r["error_code"] == "SOURCE_CHANGED_DURING_SYNC" for r in checked_rows)
+            pending = sum(
+                r["error_code"]
+                in (
+                    "SOURCE_CHANGED_DURING_SYNC",
+                    "DATASET_RESTORE_REQUIRED",
+                    "MAINTENANCE_DEFERRED",
+                )
+                for r in checked_rows
+            )
             processing_failed = bool(results.get("_processing_failed"))
             status = (
-                "failed"
+                "deferred"
+                if results.get("_deferred")
+                else "failed"
                 if observed and failed == len(observed)
                 else "partial"
                 if failed or processing_failed

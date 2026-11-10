@@ -12,11 +12,11 @@
 
 <a id="current-schema-delivery"></a>
 
-## 当前空库初始化交付（2026-11-04）
+## 当前空库初始化交付（2026-11-10）
 
 用户要求未部署阶段保持`schema.sql`及数据库设计同步，减少首次部署步骤。执行方案：离线从现行v2迁移链base→唯一head生成完整SQL，包含Alembic版本表及现有最小运行权限；不合并或改写已执行revision。空库只运行这一份SQL，不再拼接分段审阅文件。已有库继续按当前版本增量迁移，禁止重放初始化文件。
 
-本轮不新增表、字段、关联、索引或数据库服务；原30表、天气发布（1:1数据版本）、来源检查（每来源一行）的职责和范式保持。生成器增加空库/PG17/角色前置检查；所有非系统schema中的表、函数或自定义类型均会阻止初始化，整体事务失败回滚；不含凭据或业务数据，不创建集群角色。准备好的pdd_app/pdd_ingest沿现有权限，API只读，任务写权限沿02—12迁移。只在随机隔离PG库测试完整SQL与Alembic逐项升级所得目录一致、版本到head、权限、重复执行拒绝及已有用户对象拒绝后数据和权限保留；不改本机业务库，不部署生产。未来结构变化由`--check`校验派生文件，并在常规check中执行。
+现行13迁移增加5张保留运维表，专用设计见[数据库离线保留](database-retention.md)，生产apply硬关闭；原经营30表、天气发布（1:1数据版本）、来源检查（每来源一行）的职责和范式保持。生成器增加空库/PG17/角色前置检查；所有非系统schema中的表、函数或自定义类型均会阻止初始化，整体事务失败回滚；不含凭据或业务数据，不创建集群角色。准备好的pdd_app/pdd_ingest沿现有权限，API只读，任务写权限沿02—12迁移，13新增运维对象仅授权普通角色读取。只在随机隔离PG库测试完整SQL与Alembic逐项升级所得目录一致、版本到head、权限、重复执行拒绝及已有用户对象拒绝后数据和权限保留；不改本机业务库，不部署生产。未来结构变化由`--check`校验派生文件，并在常规check中执行。
 
 ### 首次部署使用
 
@@ -29,11 +29,11 @@
    PGSERVICE=pdd_deploy psql -X -v ON_ERROR_STOP=1 -c 'SELECT version_num FROM public.alembic_version_v2;'
    ```
 
-   预期版本`20261104_12`；32张领域表＋1张版本表。所有DDL/权限/版本标记在同一事务中，失败整体回滚。不得再执行weather-publications.sql、target-ranges.sql、source-*.sql等分段审阅稿，也不必逐个运行本机upgrade脚本。
+   当前离线交付预期版本`20261110_13`；37张应用表＋1张版本表。所有DDL/权限/版本标记在同一事务中，失败整体回滚。不得再执行weather-publications.sql、target-ranges.sql、source-*.sql等分段审阅稿，也不必逐个运行本机upgrade脚本。
 
 4. 已有库按实际`alembic_version_v2`生成该版本到目标head的增量SQL，备份并演练后执行；不重放完整schema.sql、不手动stamp跳过迁移。例如开发侧`apps/api/.venv/bin/alembic -c apps/api/alembic-v2.ini upgrade 20261104_12:head --sql`。已部署过的revision保持不可变。存在业务数据时沿各迁移的保留/修复回退限制，不能删除重建业务库。
 
-本机旧`db-v2.py`仍固定09，作为历史受控演练入口保留，不用于当前12首次部署；当前交付由`tests/test_schema_delivery.py`真实PG验证。此初始化只完成结构与运行权限，来源接入、服务器配置及正式上线验收沿已有流程。
+本机旧`db-v2.py`仍固定09，作为历史受控演练入口保留，不用于当前head首次部署；当前交付由`tests/test_schema_delivery.py`真实PG验证。此初始化只完成结构与运行权限，来源接入、服务器配置及正式上线验收沿已有流程。
 
 ## Global Constraints
 

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import sqlalchemy as sa
 
 from app.modules.data_status.schedule_policy import FEISHU_TIMES, WAREHOUSE_TIMES
+from app.modules.database_residency import deferred_reason
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,7 @@ def run_project(
                     results[name] = dict(
                         status="failed",
                         error=type(exc).__name__,
+                        error_code=deferred_reason(exc),
                         error_module=type(exc).__module__,
                         source_code=exc.args[0]
                         if exc.args and isinstance(exc.args[0], int)

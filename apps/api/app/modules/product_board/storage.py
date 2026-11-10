@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules.archive_store import require_archive, store_for, write_archive
+from app.modules.database_residency import deferred_reason, ensure_online
 from app.modules.sales.source_policy import SHOPS
 
 from .source import SHOP_PROFILE, TABLES, fingerprint, identity, parse_ids, windows
@@ -223,6 +224,7 @@ class ProductBoardStore:
                     raise ValueError("PRODUCER_CODE_CHANGED")
                 # 局部更新也必须保护未重新接收的依赖归档，不能发布缺档的派生版本。
                 with c.begin():
+                    ensure_online(c, reuse_sources.values())
                     for source_version in reuse_sources.values():
                         retained = c.scalar(
                             sa.select(self.tables["dataset_versions"].c.retained_input_ref).where(
@@ -250,14 +252,16 @@ class ProductBoardStore:
                     v = self.tables["dataset_versions"]
                     with c.begin():
                         previous = c.execute(
-                            sa.select(v.c.retained_input_ref).where(
+                            sa.select(v.c.id, v.c.retained_input_ref).where(
                                 v.c.dataset_code == code,
                                 v.c.content_fingerprint == digest,
                                 v.c.state.in_(("validated", "published")),
                             )
-                        ).scalar_one_or_none()
+                        ).first()
+                        if previous:
+                            ensure_online(c, [previous.id])
                     if previous:
-                        require_archive(previous)
+                        require_archive(previous.retained_input_ref)
                         continue
                     p = archive / (code + ".json")
                     write_archive(
@@ -364,7 +368,7 @@ class ProductBoardStore:
                             status="failed",
                             finished_at=sa.func.clock_timestamp(),
                             lease_expires_at=None,
-                            error_code="M1_RECEPTION_FAILED",
+                            error_code=deferred_reason(exc) or "M1_RECEPTION_FAILED",
                             error_summary=type(exc).__name__,
                         )
                     )
@@ -518,6 +522,8 @@ class ProductBoardStore:
                     )
                 ).first()
             if existing and existing.state in ("validated", "published"):
+                with c.begin():
+                    ensure_online(c, [existing.id])
                 require_archive(existing.retained_input_ref)
                 versions[code] = existing.id
                 continue

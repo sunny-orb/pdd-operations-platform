@@ -13,6 +13,12 @@ from tests.test_promotion_api import client_for, publish_products
 pytest_plugins = ["tests.sales_pg_support"]
 
 
+@pytest.fixture(params=[False, True], autouse=True)
+def content_storage_mode(request, monkeypatch):
+    """两种物理表示都必须遵守相同的字段/日期/行数读取边界。"""
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(request.param).lower())
+
+
 def promotion_row(day, product="900", *, name="窗口商品", spend="1"):
     return dict(
         id=f"{day}-{product}",
@@ -75,7 +81,7 @@ def test_overview_reuses_full_scope_labels_and_only_reads_comparison_windows(
         event.remove(sales_pg, "after_cursor_execute", record_sql)
     assert len(label_calls) <= 3, "本期、前期各自筛选商品，固定来源范围的标签仍只构建一次"
     fact_queries = [
-        item for item in statements if "FROM public.product_promotion_records" in item[0]
+        item for item in statements if "FROM public.read_product_promotion_records" in item[0]
     ]
     assert all("SELECT *" not in sql and "source_payload" not in sql for sql, _ in fact_queries)
     metric_queries = [(sql, count) for sql, count in fact_queries if "spend" in sql]
@@ -124,7 +130,7 @@ def test_days_reads_only_selected_window_and_identity(sales_pg, tmp_path):
     statements = []
 
     def record_sql(conn, cursor, statement, parameters, context, executemany):
-        if "FROM public.product_promotion_records" in statement and "spend" in statement:
+        if "FROM public.read_product_promotion_records" in statement and "spend" in statement:
             statements.append((statement, cursor.rowcount))
 
     event.listen(sales_pg, "after_cursor_execute", record_sql)
@@ -273,7 +279,7 @@ def test_selected_options_resolve_published_identities_without_date_or_facts(sal
     statements = []
 
     def record_sql(conn, cursor, statement, parameters, context, executemany):
-        if "FROM public.product_promotion_records" in statement:
+        if "FROM public.read_product_promotion_records" in statement:
             statements.append(statement)
 
     selected = [identities[key] for key in ("901", "900", "123", "902", "901")]

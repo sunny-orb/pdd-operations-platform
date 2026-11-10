@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     db_pool_size: int = Field(default=8, ge=1, le=20)
     db_max_overflow: int = Field(default=4, ge=0, le=10)
     db_connect_timeout_seconds: int = Field(default=5, ge=1, le=30)
+    content_reuse_enabled: bool = False
 
     @field_validator("database_url")
     @classmethod

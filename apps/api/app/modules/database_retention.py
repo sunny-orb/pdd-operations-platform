@@ -14,7 +14,7 @@ from psycopg import sql
 
 from migrations_v2.baseline_20261028.schema import build_metadata
 
-HEAD = "20261110_13"
+HEAD = "20261110_14"
 POLICY = "db-retention-v1"
 TARGETS = {
     "product_daily": "product_daily_facts",
@@ -23,6 +23,7 @@ TARGETS = {
 }
 ROOT = Path(__file__).resolve().parents[4]
 MIGRATION = import_module("migrations_v2.versions.20261110_13_database_retention")
+CONTENT = import_module("migrations_v2.versions.20261110_14_content_reuse")
 
 
 def policy():
@@ -80,6 +81,8 @@ def validate_schema(c):
         "source_checkpoints",
         "alembic_version_v2",
         *MIGRATION.TABLES,
+        *CONTENT.TABLES,
+        *CONTENT.VIEWS,
     }
     actual = set(
         c.execute(
@@ -102,7 +105,11 @@ def validate_schema(c):
                 raise ValueError("RETENTION_SCHEMA_COLUMNS")
         # 所有业务指向版本的关系已有固定清单；未知关系不能随schema头未变绕过检查。
         signature[table + ":fks"] = inspector.get_foreign_keys(table, schema="public")
-    column_count = sum(len(value) for key, value in signature.items() if not key.endswith(":fks"))
+    column_count = sum(
+        len(value)
+        for key, value in signature.items()
+        if not key.endswith(":fks") and key not in CONTENT.VIEWS
+    )
     expected_fk_count = len(
         re.findall(
             r"REFERENCES public\.[a-z_]+\s*\(",
@@ -110,7 +117,7 @@ def validate_schema(c):
         )
     )
     if (
-        column_count != 560
+        column_count != 712
         or sum(len(v) for k, v in signature.items() if k.endswith(":fks")) != expected_fk_count
     ):
         raise ValueError("RETENTION_SCHEMA_RELATIONSHIPS")
@@ -144,6 +151,18 @@ def validate_schema(c):
         ("retention_operations", "pdd_retention_operation_guard", "pdd_retention_operation_guard"),
         ("retention_operation_items", "pdd_retention_item_guard", "pdd_retention_item_guard"),
     }
+    required |= {(table, "pdd_content_guard", "pdd_content_guard") for table in CONTENT.TABLES}
+    required |= {
+        (table, "pdd_content_no_truncate", "pdd_v2_forbid_truncate") for table in CONTENT.TABLES
+    }
+    required |= {(table, "pdd_content_format", "pdd_content_publish") for table in CONTENT.FACTS}
+    required |= {
+        ("dataset_versions", "pdd_content_publish", "pdd_content_publish"),
+        ("fact_content_blocks", "pdd_content_complete", "pdd_content_complete"),
+    }
+    signature["views"] = {
+        name: inspector.get_view_definition(name, schema="public") for name in CONTENT.VIEWS
+    }
     guards = set(
         c.execute(
             sa.text("""SELECT r.relname,t.tgname,p.proname FROM pg_trigger t
@@ -163,6 +182,7 @@ def copy_rows(c, table, version_id=None):
     allowed = (
         {t.name for t in build_metadata().tables.values()}
         | set(MIGRATION.TABLES)
+        | set(CONTENT.TABLES)
         | {"weather_publications", "source_checkpoints", "alembic_version_v2"}
     )
     if table not in allowed:
@@ -198,7 +218,7 @@ def snapshot(c, *, now=None, with_content=True):
     schema_hash = validate_schema(c)
     if c.scalar(sa.text("SELECT count(*) FROM public.task_runs WHERE status='running'")):
         raise ValueError("RETENTION_BUSY")
-    protected = set(c.execute(sa.text(MIGRATION.PROTECTED_SQL)).scalars())
+    protected = set(c.execute(sa.text(CONTENT.PROTECTED_SQL)).scalars())
     versions = list(
         c.execute(
             sa.text("""SELECT v.id,v.dataset_code,v.state,s.state AS storage_state,

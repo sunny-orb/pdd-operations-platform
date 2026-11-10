@@ -86,14 +86,15 @@ def test_single_account_initializes_without_database_ownership_and_preserves_mon
         )
         assert (
             c.exec_driver_sql("SELECT version_num FROM public.alembic_version_v2").scalar_one()
-            == "20261110_13"
+            == "20261110_14"
         )
         assert (
             c.exec_driver_sql(
                 "SELECT count(*) FROM information_schema.columns "
-                "WHERE table_schema='public' AND table_name <> 'alembic_version_v2'"
+                "WHERE table_schema='public' AND table_name <> 'alembic_version_v2' "
+                "AND table_name NOT LIKE 'read_%%'"
             ).scalar_one()
-            == 559
+            == 711
         )
         assert (
             c.exec_driver_sql(

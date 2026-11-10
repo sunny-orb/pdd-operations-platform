@@ -1,6 +1,6 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
--- 迁移范围：base → 20261110_13；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：4c2e3470e74ceda087afc232f080e3eed874385062562742e60c300ba37ca76e
+-- 迁移范围：base → 20261110_14；包含Alembic版本表。
+-- 迁移、冻结实现及生成器SHA-256：81b56ebd14282629edcad0052bedb91f414d3f895fcef25f0e4c5015109efd83
 -- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。
 -- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。
@@ -3243,6 +3243,384 @@ GRANT SELECT ON public.retention_operation_items TO pdd_app;
 GRANT SELECT ON public.retention_operation_items TO pdd_ingest;
 
 UPDATE public.alembic_version_v2 SET version_num='20261110_13' WHERE public.alembic_version_v2.version_num = '20261104_12';
+
+-- Running upgrade 20261110_13 -> 20261110_14
+
+CREATE TABLE public.fact_content_blocks(
+      id text PRIMARY KEY CHECK(id ~ '^[0-9a-f]{64}$'),
+      table_name text NOT NULL CHECK(table_name IN ('product_daily_facts','product_promotion_records','product_region_records','product_sales_records','return_records')),
+      dataset_code text NOT NULL CHECK(btrim(dataset_code)<>''),
+      row_schema_revision text NOT NULL CHECK(btrim(row_schema_revision)<>''),
+      bucket text NOT NULL CHECK(length(bucket) BETWEEN 1 AND 32),
+      row_count bigint NOT NULL CHECK(row_count>0),
+      state text NOT NULL DEFAULT 'building' CHECK(state IN ('building','sealed')),
+      created_at timestamptz NOT NULL DEFAULT clock_timestamp());
+
+CREATE TABLE public.fact_content_manifests(
+      version_id text PRIMARY KEY REFERENCES public.dataset_versions(id) ON DELETE RESTRICT,
+      table_name text NOT NULL CHECK(table_name IN ('product_daily_facts','product_promotion_records','product_region_records','product_sales_records','return_records')),
+      format_revision integer NOT NULL DEFAULT 1 CHECK(format_revision=1),
+      row_count bigint NOT NULL CHECK(row_count>=0));
+
+CREATE TABLE public.fact_content_members(
+      version_id text NOT NULL REFERENCES public.fact_content_manifests(version_id)
+        ON DELETE RESTRICT,
+      bucket text NOT NULL CHECK(length(bucket) BETWEEN 1 AND 32),
+      block_id text NOT NULL REFERENCES public.fact_content_blocks(id) ON DELETE RESTRICT,
+      PRIMARY KEY(version_id,bucket));
+
+CREATE INDEX ix_fact_members_block ON public.fact_content_members(block_id);
+
+CREATE TABLE public.shared_product_daily_facts(LIKE public.product_daily_facts INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+
+ALTER TABLE public.shared_product_daily_facts DROP COLUMN id, DROP COLUMN dataset_version_id;
+
+ALTER TABLE public.shared_product_daily_facts ADD COLUMN block_id text NOT NULL REFERENCES public.fact_content_blocks(id) ON DELETE RESTRICT, ADD PRIMARY KEY(block_id,source_row_key);
+
+ALTER TABLE public.shared_product_daily_facts ADD FOREIGN KEY(listing_id) REFERENCES public.listings(id) ON DELETE RESTRICT;
+
+CREATE VIEW public.read_product_daily_facts AS SELECT * FROM public.product_daily_facts UNION ALL SELECT 'shared:' || encode(convert_to(jsonb_build_array(m.version_id,f.source_row_key)::text,'UTF8'),'hex') AS id,m.version_id AS dataset_version_id,f.source_row_key,f.source_record_id,f.listing_id,f.listing_match_status,f.source_shop_id,f.source_shop_name,f.source_product_id,f.source_product_name,f.source_dt_raw,f.business_date,f.date_status,f.source_related_date_raw,f.views,f.visitors,f.favorites,f.buyers,f.orders,f.units,f.product_revenue,f.source_conversion_rate,f.source_first_category,f.source_second_category,f.source_third_category,f.source_created_time_raw,f.source_created_at FROM public.fact_content_members m JOIN public.shared_product_daily_facts f ON f.block_id=m.block_id;
+
+CREATE TABLE public.shared_product_promotion_records(LIKE public.product_promotion_records INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+
+ALTER TABLE public.shared_product_promotion_records DROP COLUMN id, DROP COLUMN dataset_version_id;
+
+ALTER TABLE public.shared_product_promotion_records ADD COLUMN block_id text NOT NULL REFERENCES public.fact_content_blocks(id) ON DELETE RESTRICT, ADD PRIMARY KEY(block_id,source_row_key);
+
+ALTER TABLE public.shared_product_promotion_records ADD FOREIGN KEY(listing_id) REFERENCES public.listings(id) ON DELETE RESTRICT;
+
+CREATE VIEW public.read_product_promotion_records AS SELECT * FROM public.product_promotion_records UNION ALL SELECT 'shared:' || encode(convert_to(jsonb_build_array(m.version_id,f.source_row_key)::text,'UTF8'),'hex') AS id,m.version_id AS dataset_version_id,f.source_row_key,f.source_record_id,f.listing_id,f.listing_match_status,f.source_shop_id,f.source_shop_name,f.source_product_id,f.source_product_name,f.source_dt_raw,f.source_start_dt_raw,f.source_granularity,f.period_start,f.period_end,f.date_status,f.source_grouping,f.promotion_name,f.promotion_type,f.bidding_method,f.source_deleted_label,f.spend,f.transaction_spend,f.attributed_revenue,f.attributed_deals,f.net_attributed_revenue,f.net_attributed_deals,f.settled_attributed_revenue,f.settled_attributed_deals,f.impressions,f.clicks,f.source_roi,f.source_net_roi,f.source_settlement_roi,f.source_ctr,f.source_cvr,f.source_created_time_raw,f.source_created_at FROM public.fact_content_members m JOIN public.shared_product_promotion_records f ON f.block_id=m.block_id;
+
+CREATE TABLE public.shared_product_region_records(LIKE public.product_region_records INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+
+ALTER TABLE public.shared_product_region_records DROP COLUMN id, DROP COLUMN dataset_version_id;
+
+ALTER TABLE public.shared_product_region_records ADD COLUMN block_id text NOT NULL REFERENCES public.fact_content_blocks(id) ON DELETE RESTRICT, ADD PRIMARY KEY(block_id,source_row_key);
+
+ALTER TABLE public.shared_product_region_records ADD FOREIGN KEY(shop_id) REFERENCES public.shops(id) ON DELETE RESTRICT;
+
+CREATE VIEW public.read_product_region_records AS SELECT * FROM public.product_region_records UNION ALL SELECT 'shared:' || encode(convert_to(jsonb_build_array(m.version_id,f.source_row_key)::text,'UTF8'),'hex') AS id,m.version_id AS dataset_version_id,f.source_row_key,f.source_record_id,f.shop_id,f.shop_match_status,f.source_shop_id,f.source_shop_name,f.source_style_code,f.source_product_code,f.source_product_name,f.source_color_specification,f.source_product_category,f.source_virtual_category,f.source_region_name,f.source_dt_raw,f.source_granularity,f.period_start,f.period_end,f.date_status,f.actual_shipped_qty,f.actual_shipped_amount,f.actual_returned_qty,f.actual_returned_amount,f.source_refund_rate,f.source_updated_time_raw,f.source_updated_at FROM public.fact_content_members m JOIN public.shared_product_region_records f ON f.block_id=m.block_id;
+
+CREATE TABLE public.shared_product_sales_records(LIKE public.product_sales_records INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+
+ALTER TABLE public.shared_product_sales_records DROP COLUMN id, DROP COLUMN dataset_version_id;
+
+ALTER TABLE public.shared_product_sales_records ADD COLUMN block_id text NOT NULL REFERENCES public.fact_content_blocks(id) ON DELETE RESTRICT, ADD PRIMARY KEY(block_id,source_row_key);
+
+ALTER TABLE public.shared_product_sales_records ADD FOREIGN KEY(shop_id) REFERENCES public.shops(id) ON DELETE RESTRICT;
+
+CREATE VIEW public.read_product_sales_records AS SELECT * FROM public.product_sales_records UNION ALL SELECT 'shared:' || encode(convert_to(jsonb_build_array(m.version_id,f.source_row_key)::text,'UTF8'),'hex') AS id,m.version_id AS dataset_version_id,f.source_row_key,f.source_record_id,f.row_kind,f.source_row_kind,f.shop_id,f.shop_match_status,f.source_shop_id,f.source_shop_name,f.source_style_code,f.source_product_code,f.source_product_name,f.source_color_specification,f.source_product_category,f.source_subcategory,f.source_virtual_category,f.source_period_label,f.period_start,f.period_end,f.date_status,f.sales_amount,f.source_sales_qty FROM public.fact_content_members m JOIN public.shared_product_sales_records f ON f.block_id=m.block_id;
+
+CREATE TABLE public.shared_return_records(LIKE public.return_records INCLUDING DEFAULTS INCLUDING CONSTRAINTS);
+
+ALTER TABLE public.shared_return_records DROP COLUMN id, DROP COLUMN dataset_version_id;
+
+ALTER TABLE public.shared_return_records ADD COLUMN block_id text NOT NULL REFERENCES public.fact_content_blocks(id) ON DELETE RESTRICT, ADD PRIMARY KEY(block_id,source_row_key);
+
+ALTER TABLE public.shared_return_records ADD FOREIGN KEY(shop_id) REFERENCES public.shops(id) ON DELETE RESTRICT;
+
+CREATE VIEW public.read_return_records AS SELECT * FROM public.return_records UNION ALL SELECT 'shared:' || encode(convert_to(jsonb_build_array(m.version_id,f.source_row_key)::text,'UTF8'),'hex') AS id,m.version_id AS dataset_version_id,f.source_row_key,f.source_record_id,f.row_kind,f.source_row_kind,f.shop_id,f.shop_match_status,f.source_shop_id,f.source_shop_name,f.source_style_code,f.source_product_code,f.source_product_name,f.source_color_specification,f.source_product_category,f.source_subcategory,f.source_virtual_category,f.source_return_reason,f.source_analysis_fields,f.source_aftersale_type,f.source_aftersale_status,f.source_period_label,f.period_start,f.period_end,f.date_status,f.actual_returned_qty,f.actual_inbound_amount FROM public.fact_content_members m JOIN public.shared_return_records f ON f.block_id=m.block_id;
+
+CREATE FUNCTION public.pdd_content_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $pdd_v2$
+DECLARE b public.fact_content_blocks; v public.dataset_versions;
+        manifest public.fact_content_manifests;
+        n bigint; expected_bucket text; key text;
+BEGIN
+ IF TG_TABLE_NAME='fact_content_blocks' THEN
+   IF TG_OP='INSERT' THEN
+     IF NEW.state<>'building' THEN RAISE EXCEPTION 'CONTENT_BUILD_STATE'; END IF;
+     NEW.created_at:=clock_timestamp(); RETURN NEW;
+   END IF;
+   IF TG_OP<>'UPDATE' OR OLD.state<>'building' OR NEW.state<>'sealed' OR
+      (to_jsonb(NEW)-'state') IS DISTINCT FROM (to_jsonb(OLD)-'state') THEN
+     RAISE EXCEPTION 'CONTENT_IMMUTABLE'; END IF;
+   EXECUTE format('SELECT count(*) FROM public.%I WHERE block_id=$1','shared_'||NEW.table_name)
+     INTO n USING NEW.id;
+   IF n<>NEW.row_count THEN RAISE EXCEPTION 'CONTENT_BLOCK_INCOMPLETE'; END IF;
+   RETURN NEW;
+ END IF;
+ IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'CONTENT_IMMUTABLE'; END IF;
+ IF TG_TABLE_NAME LIKE 'shared_%' THEN
+   SELECT * INTO b FROM public.fact_content_blocks WHERE id=NEW.block_id FOR UPDATE;
+   IF NOT FOUND THEN RAISE EXCEPTION 'CONTENT_BLOCK_SCOPE'; END IF;
+   expected_bucket := CASE WHEN TG_TABLE_NAME='shared_product_daily_facts'
+     THEN coalesce(to_jsonb(NEW)->>'business_date','?')
+     ELSE coalesce(to_jsonb(NEW)->>'period_start','?')||'/'
+       ||coalesce(to_jsonb(NEW)->>'period_end','?') END
+     ||':'||mod(('x'||substr(md5(NEW.source_row_key),1,8))::bit(32)::bigint,64)::text;
+   IF b.state<>'building' OR TG_TABLE_NAME<>'shared_'||b.table_name
+      OR expected_bucket<>b.bucket THEN
+     RAISE EXCEPTION 'CONTENT_BLOCK_SCOPE'; END IF;
+   RETURN NEW;
+ END IF;
+ SELECT * INTO v FROM public.dataset_versions WHERE id=NEW.version_id FOR UPDATE;
+ IF NOT FOUND OR v.state<>'draft' THEN RAISE EXCEPTION 'CONTENT_VERSION_SEALED'; END IF;
+ IF TG_TABLE_NAME='fact_content_manifests' THEN
+   IF NOT ((NEW.table_name='product_daily_facts' AND v.dataset_code='product_daily') OR
+     (NEW.table_name='product_promotion_records' AND v.dataset_code='product_promotion') OR
+     (NEW.table_name='product_region_records' AND v.dataset_code='product_regions') OR
+     (NEW.table_name='return_records' AND v.dataset_code='jst_returns') OR
+     (NEW.table_name='product_sales_records'
+       AND v.dataset_code IN ('jst_shipped_sales','jst_cancelled_sales'))) THEN
+     RAISE EXCEPTION 'CONTENT_NAMESPACE'; END IF;
+   EXECUTE format('SELECT count(*) FROM public.%I WHERE dataset_version_id=$1',NEW.table_name)
+     INTO n USING NEW.version_id;
+   IF n<>0 THEN RAISE EXCEPTION 'CONTENT_MIXED_FORMAT'; END IF;
+ ELSE
+   SELECT * INTO manifest FROM public.fact_content_manifests WHERE version_id=NEW.version_id;
+   SELECT * INTO b FROM public.fact_content_blocks WHERE id=NEW.block_id;
+   IF manifest.version_id IS NULL OR b.id IS NULL OR b.state<>'sealed'
+      OR b.bucket<>NEW.bucket OR b.table_name<>manifest.table_name
+      OR b.dataset_code<>v.dataset_code OR b.row_schema_revision<>v.row_schema_revision THEN
+     RAISE EXCEPTION 'CONTENT_NAMESPACE'; END IF;
+ END IF;
+ RETURN NEW;
+END;
+$pdd_v2$;
+
+CREATE FUNCTION public.pdd_content_publish() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $pdd_v2$
+DECLARE expected bigint; actual bigint; tab text; duplicated boolean;
+BEGIN
+ IF TG_TABLE_NAME='dataset_versions' THEN
+   IF EXISTS(SELECT 1 FROM public.fact_content_manifests WHERE version_id=NEW.id)
+      AND (NEW.dataset_code IS DISTINCT FROM OLD.dataset_code
+        OR NEW.row_schema_revision IS DISTINCT FROM OLD.row_schema_revision) THEN
+     RAISE EXCEPTION 'CONTENT_NAMESPACE'; END IF;
+   IF NEW.state NOT IN ('validated','published') THEN RETURN NEW; END IF;
+   SELECT row_count,table_name INTO expected,tab FROM public.fact_content_manifests
+     WHERE version_id=NEW.id;
+   IF NOT FOUND THEN RETURN NEW; END IF;
+   IF EXISTS(SELECT 1 FROM public.fact_content_members m
+     JOIN public.fact_content_blocks b ON b.id=m.block_id WHERE m.version_id=NEW.id
+       AND (b.dataset_code<>NEW.dataset_code
+         OR b.row_schema_revision<>NEW.row_schema_revision)) THEN
+     RAISE EXCEPTION 'CONTENT_NAMESPACE'; END IF;
+   SELECT coalesce(sum(b.row_count),0) INTO actual FROM public.fact_content_members m
+     JOIN public.fact_content_blocks b ON b.id=m.block_id AND b.state='sealed'
+     WHERE m.version_id=NEW.id;
+   IF actual<>expected THEN RAISE EXCEPTION 'CONTENT_MANIFEST_INCOMPLETE'; END IF;
+   EXECUTE format('SELECT EXISTS(SELECT f.source_row_key FROM public.%I f '
+     ||'JOIN public.fact_content_members m ON m.block_id=f.block_id '
+     ||'WHERE m.version_id=$1 GROUP BY f.source_row_key HAVING count(*)>1)', 'shared_'||tab)
+     INTO duplicated USING NEW.id;
+   IF duplicated THEN RAISE EXCEPTION 'CONTENT_DUPLICATE_KEY'; END IF;
+ ELSE
+   PERFORM 1 FROM public.dataset_versions WHERE id=NEW.dataset_version_id FOR UPDATE;
+   IF EXISTS(SELECT 1 FROM public.fact_content_manifests
+      WHERE version_id=NEW.dataset_version_id) THEN
+     RAISE EXCEPTION 'CONTENT_MIXED_FORMAT'; END IF;
+ END IF;
+ RETURN NEW;
+END;
+$pdd_v2$;
+
+CREATE FUNCTION public.pdd_content_complete() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $pdd_v2$
+BEGIN
+ IF EXISTS(SELECT 1 FROM public.fact_content_blocks WHERE id=NEW.id AND state<>'sealed') THEN
+   RAISE EXCEPTION 'CONTENT_BLOCK_INCOMPLETE'; END IF;
+ RETURN NULL;
+END;
+$pdd_v2$;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.fact_content_blocks FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.fact_content_blocks FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.fact_content_blocks TO pdd_app;
+
+GRANT SELECT ON public.fact_content_blocks TO pdd_ingest;
+
+GRANT INSERT ON public.fact_content_blocks TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.fact_content_manifests FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.fact_content_manifests FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.fact_content_manifests TO pdd_app;
+
+GRANT SELECT ON public.fact_content_manifests TO pdd_ingest;
+
+GRANT INSERT ON public.fact_content_manifests TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.fact_content_members FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.fact_content_members FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.fact_content_members TO pdd_app;
+
+GRANT SELECT ON public.fact_content_members TO pdd_ingest;
+
+GRANT INSERT ON public.fact_content_members TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.shared_product_daily_facts FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.shared_product_daily_facts FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.shared_product_daily_facts TO pdd_app;
+
+GRANT SELECT ON public.shared_product_daily_facts TO pdd_ingest;
+
+GRANT INSERT ON public.shared_product_daily_facts TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.shared_product_promotion_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.shared_product_promotion_records FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.shared_product_promotion_records TO pdd_app;
+
+GRANT SELECT ON public.shared_product_promotion_records TO pdd_ingest;
+
+GRANT INSERT ON public.shared_product_promotion_records TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.shared_product_region_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.shared_product_region_records FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.shared_product_region_records TO pdd_app;
+
+GRANT SELECT ON public.shared_product_region_records TO pdd_ingest;
+
+GRANT INSERT ON public.shared_product_region_records TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.shared_product_sales_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.shared_product_sales_records FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.shared_product_sales_records TO pdd_app;
+
+GRANT SELECT ON public.shared_product_sales_records TO pdd_ingest;
+
+GRANT INSERT ON public.shared_product_sales_records TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_guard BEFORE INSERT OR UPDATE OR DELETE ON public.shared_return_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_guard();
+
+CREATE TRIGGER pdd_content_no_truncate BEFORE TRUNCATE ON public.shared_return_records FOR EACH STATEMENT EXECUTE FUNCTION public.pdd_v2_forbid_truncate();
+
+GRANT SELECT ON public.shared_return_records TO pdd_app;
+
+GRANT SELECT ON public.shared_return_records TO pdd_ingest;
+
+GRANT INSERT ON public.shared_return_records TO pdd_ingest;
+
+GRANT UPDATE(state) ON public.fact_content_blocks TO pdd_ingest;
+
+CREATE CONSTRAINT TRIGGER pdd_content_complete AFTER INSERT ON public.fact_content_blocks DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION public.pdd_content_complete();
+
+CREATE TRIGGER pdd_content_publish BEFORE UPDATE ON public.dataset_versions FOR EACH ROW EXECUTE FUNCTION public.pdd_content_publish();
+
+CREATE TRIGGER pdd_content_format BEFORE INSERT ON public.product_daily_facts FOR EACH ROW EXECUTE FUNCTION public.pdd_content_publish();
+
+GRANT SELECT ON public.read_product_daily_facts TO pdd_app;
+
+GRANT SELECT ON public.read_product_daily_facts TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_format BEFORE INSERT ON public.product_promotion_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_publish();
+
+GRANT SELECT ON public.read_product_promotion_records TO pdd_app;
+
+GRANT SELECT ON public.read_product_promotion_records TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_format BEFORE INSERT ON public.product_region_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_publish();
+
+GRANT SELECT ON public.read_product_region_records TO pdd_app;
+
+GRANT SELECT ON public.read_product_region_records TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_format BEFORE INSERT ON public.product_sales_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_publish();
+
+GRANT SELECT ON public.read_product_sales_records TO pdd_app;
+
+GRANT SELECT ON public.read_product_sales_records TO pdd_ingest;
+
+CREATE TRIGGER pdd_content_format BEFORE INSERT ON public.return_records FOR EACH ROW EXECUTE FUNCTION public.pdd_content_publish();
+
+GRANT SELECT ON public.read_return_records TO pdd_app;
+
+GRANT SELECT ON public.read_return_records TO pdd_ingest;
+
+CREATE OR REPLACE FUNCTION public.pdd_retention_context(version_key text, table_key text, action text) RETURNS boolean
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $pdd_v2$
+BEGIN
+ RETURN EXISTS(SELECT 1 FROM public.retention_operations o
+ JOIN public.retention_operation_items i ON i.operation_id=o.id
+ JOIN public.retention_archives a ON a.id=o.archive_id
+ WHERE o.id=current_setting('pdd.retention_operation',true)
+ AND o.transaction_id=txid_current() AND o.status='running' AND o.kind=action
+ AND i.version_id=version_key AND i.table_name=table_key
+ AND a.database_name=current_database() AND a.schema_head='20261110_14');
+END;
+$pdd_v2$;
+
+CREATE OR REPLACE FUNCTION public.pdd_retention_item_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $pdd_v2$
+DECLARE action text; archive text; ver_code text; expected_table text; exit_at timestamptz;
+    BEGIN
+      IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'RETENTION_AUDIT_IMMUTABLE'; END IF;
+      IF NOT pg_try_advisory_xact_lock(hashtext('pdd-database-maintenance')) THEN
+        RAISE EXCEPTION 'RETENTION_BUSY'; END IF;
+      IF current_database() !~ '^pdd_operations_v2_test_[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'RETENTION_PRODUCTION_DISABLED'; END IF;
+      SELECT o.kind,o.archive_id INTO action,archive FROM public.retention_operations o
+      JOIN public.retention_archives a ON a.id=o.archive_id
+      WHERE o.id=NEW.operation_id AND o.transaction_id=txid_current() AND o.status='running'
+        AND a.database_name=current_database() AND a.schema_head='20261110_14'
+        AND jsonb_array_length(a.locations)>=2;
+      IF action IS NULL THEN RAISE EXCEPTION 'RETENTION_RECEIPT_REQUIRED'; END IF;
+      SELECT dataset_code INTO ver_code FROM public.dataset_versions WHERE id=NEW.version_id
+        AND state='published' FOR UPDATE;
+      expected_table := CASE ver_code WHEN 'product_daily' THEN 'product_daily_facts'
+        WHEN 'product_promotion' THEN 'product_promotion_records'
+        WHEN 'product_regions' THEN 'product_region_records' END;
+      IF expected_table IS DISTINCT FROM NEW.table_name THEN
+        RAISE EXCEPTION 'RETENTION_SCOPE'; END IF;
+      IF action='offline' THEN
+        IF EXISTS(SELECT 1 FROM (
+WITH RECURSIVE roots(id) AS (
+ SELECT id FROM public.dataset_versions
+ WHERE dataset_code NOT IN ('product_daily','product_promotion','product_regions')
+    OR state <> 'published'
+ UNION SELECT version_id FROM public.fact_content_manifests UNION SELECT version_id FROM public.current_datasets
+ UNION SELECT s.version_id FROM public.dataset_storage s WHERE keep_online
+ UNION SELECT p.previous_version_id FROM public.dataset_publications p
+ JOIN public.current_datasets c ON c.dataset_code=p.dataset_code AND c.revision=p.revision
+ WHERE p.previous_version_id IS NOT NULL
+), protected(id) AS (
+ SELECT id FROM roots UNION
+ SELECT i.input_version_id FROM public.version_inputs i JOIN protected p ON p.id=i.output_version_id
+) SELECT id FROM protected
+) p WHERE p.id=NEW.version_id)
+          OR EXISTS(SELECT 1 FROM public.task_runs WHERE status='running') THEN
+          RAISE EXCEPTION 'RETENTION_PROTECTED'; END IF;
+        SELECT max(occurred_at) INTO exit_at FROM public.dataset_publications
+          WHERE previous_version_id=NEW.version_id;
+        IF exit_at IS NULL OR exit_at > statement_timestamp()-interval '24 hours' THEN
+          RAISE EXCEPTION 'RETENTION_GRACE'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.dataset_storage WHERE version_id=NEW.version_id
+                      AND state='online') THEN
+        RAISE EXCEPTION 'RETENTION_STATE'; END IF;
+      ELSE
+        IF NOT EXISTS(SELECT 1 FROM public.dataset_storage WHERE version_id=NEW.version_id
+          AND state='offline' AND archive_id=archive) THEN
+        RAISE EXCEPTION 'RETENTION_STATE'; END IF;
+      END IF;
+      RETURN NEW;
+    END;
+$pdd_v2$;
+
+UPDATE public.alembic_version_v2 SET version_num='20261110_14' WHERE public.alembic_version_v2.version_num = '20261110_13';
 
 DO $permissions$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());

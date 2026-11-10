@@ -14,6 +14,12 @@ from tests.test_product_board_storage import candidate
 pytest_plugins = ["tests.sales_pg_support"]
 
 
+@pytest.fixture(params=[False, True], autouse=True)
+def content_storage_mode(request, monkeypatch):
+    """两种物理表示都必须遵守相同的字段/日期/行数读取边界。"""
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(request.param).lower())
+
+
 @pytest.mark.parametrize("offset,days", [(0, 1), (0, 31), (0, 60), (35, 1)])
 def test_risks_only_read_period_and_baseline_without_changing_full_scope_result(
     sales_pg, tmp_path, offset, days
@@ -55,7 +61,7 @@ def test_risks_only_read_period_and_baseline_without_changing_full_scope_result(
     projections = []
 
     def record_sql(conn, cursor, statement, parameters, context, executemany):
-        if "FROM public.product_daily_facts" in statement and "product_revenue" in statement:
+        if "FROM public.read_product_daily_facts" in statement and "product_revenue" in statement:
             fetched.append(cursor.rowcount)
             projections.append(statement.split(" FROM ", 1)[0])
 

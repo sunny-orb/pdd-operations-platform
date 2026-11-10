@@ -141,7 +141,8 @@ class Repository:
                     "SELECT id,dataset_version_id,source_row_key,period_start,period_start AS date,"
                     "listing_id,source_shop_id,source_shop_name,source_product_id,"
                     "source_product_name,spend,attributed_revenue,net_attributed_revenue,"
-                    "attributed_deals,impressions,clicks FROM public.product_promotion_records "
+                    "attributed_deals,impressions,clicks "
+                    "FROM public.read_product_promotion_records "
                     "WHERE " + " AND ".join(where) + " ORDER BY source_row_key,id"
                 ),
                 params,
@@ -188,7 +189,7 @@ class Repository:
             return dict(
                 self.c.execute(
                     sa.text(
-                        "SELECT period_start,count(*) FROM public.product_promotion_records "
+                        "SELECT period_start,count(*) FROM public.read_product_promotion_records "
                         "WHERE dataset_version_id=:v AND period_start IS NOT NULL "
                         "GROUP BY period_start"
                     ),
@@ -223,7 +224,7 @@ class Repository:
         return set(
             self.c.execute(
                 sa.text(
-                    "SELECT DISTINCT listing_id FROM public.product_promotion_records "
+                    "SELECT DISTINCT listing_id FROM public.read_product_promotion_records "
                     "WHERE dataset_version_id=:v AND period_start IS NOT NULL"
                 ),
                 dict(v=self.versions["product_promotion"]["id"]),
@@ -250,7 +251,9 @@ class Repository:
                 sa.text(
                     f"SELECT {distinct}period_start AS date,listing_id,source_shop_id,"
                     "source_shop_name,source_product_id,source_product_name "
-                    "FROM public.product_promotion_records WHERE " + " AND ".join(where) + order
+                    "FROM public.read_product_promotion_records WHERE "
+                    + " AND ".join(where)
+                    + order
                 ),
                 params,
             ).mappings()
@@ -320,7 +323,8 @@ class Repository:
             if code == "product_daily" and version:
                 first, last = self.c.execute(
                     sa.text(
-                        "SELECT min(business_date),max(business_date) FROM product_daily_facts "
+                        "SELECT min(business_date),max(business_date) "
+                        "FROM read_product_daily_facts "
                         "WHERE dataset_version_id=:v"
                     ),
                     dict(v=version["id"]),

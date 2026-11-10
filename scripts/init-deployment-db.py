@@ -57,7 +57,31 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
                 "AND NOT EXISTS (SELECT 1 FROM extension_members e "
                 "WHERE e.classid='pg_catalog.pg_class'::regclass AND e.objid=c.oid AND e.objsubid=0)"
             ).fetchone()
-            if (tables, columns, owned) != (37, 559, True):
+            if (tables, columns, owned) != (45, 711, True):
+                raise ValueError("DEPLOY_SCHEMA_MISMATCH")
+            views = connection.execute(
+                "SELECT c.relname,count(a.attnum),bool_and(c.relowner=current_user::regrole) "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped "
+                "WHERE n.nspname='public' AND c.relkind='v' "
+                "AND c.relname=ANY(%s) GROUP BY c.relname ORDER BY c.relname",
+                (
+                    [
+                        "read_product_daily_facts",
+                        "read_product_promotion_records",
+                        "read_product_region_records",
+                        "read_product_sales_records",
+                        "read_return_records",
+                    ],
+                ),
+            ).fetchall()
+            if views != [
+                ("read_product_daily_facts", 27, True),
+                ("read_product_promotion_records", 38, True),
+                ("read_product_region_records", 27, True),
+                ("read_product_sales_records", 23, True),
+                ("read_return_records", 27, True),
+            ]:
                 raise ValueError("DEPLOY_SCHEMA_MISMATCH")
             return "already_initialized"
         # 与派生SQL共用前置检查；只读检查不申请事务写锁。

@@ -9,6 +9,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules import fact_content
 from app.modules.aftersales.classification import rule_parameters
 from app.modules.aftersales.ingestion import MASTER_TABLE, NOTE, REVISION, TABLES
 from app.modules.archive_store import require_archive, write_archive
@@ -40,6 +41,7 @@ def producer():
             p.name: p.read_text()
             for p in (
                 Path(__file__),
+                Path(fact_content.__file__),
                 Path(__file__).with_name("ingestion.py"),
                 Path(__file__).with_name("classification.py"),
                 Path(__file__).with_name("bundle_categories.py"),
@@ -201,14 +203,18 @@ def publish_source(engine, code, receive, root):
                         )
                     )
                     facts = t[FACTS[code]]
-                    for i in range(0, len(rows), 1000):
-                        c.execute(
-                            facts.insert(),
-                            [
-                                dict(row, id=str(uuid4()), dataset_version_id=vid)
-                                for row in rows[i : i + 1000]
-                            ],
-                        )
+                    if fact_content.enabled(c):
+                        fact_content.write_version(c, facts.name, vid, rows)
+                    else:
+                        for i in range(0, len(rows), 1000):
+                            c.execute(
+                                facts.insert(),
+                                [
+                                    dict(row, id=str(uuid4()), dataset_version_id=vid)
+                                    for row in rows[i : i + 1000]
+                                ],
+                            )
+                    facts = fact_content.read_table(c, FACTS[code])
                     # 从PG重读必要字段逐格比对，不只验证插入行数。
                     actual = (
                         c.execute(

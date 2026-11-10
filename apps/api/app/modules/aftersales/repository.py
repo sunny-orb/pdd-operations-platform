@@ -14,9 +14,13 @@ from app.modules.product_board.repository import BoardError
 from .rowset import exact_compaction
 
 ROLES = {
-    "j1_returns": ("jst_returns", "return_records", "售后确认期间明细"),
-    "j2_shipped_sales": ("jst_shipped_sales", "product_sales_records", "已发货支付期间明细"),
-    "j3_cancelled_sales": ("jst_cancelled_sales", "product_sales_records", "已取消支付期间明细"),
+    "j1_returns": ("jst_returns", "read_return_records", "售后确认期间明细"),
+    "j2_shipped_sales": ("jst_shipped_sales", "read_product_sales_records", "已发货支付期间明细"),
+    "j3_cancelled_sales": (
+        "jst_cancelled_sales",
+        "read_product_sales_records",
+        "已取消支付期间明细",
+    ),
 }
 IDENTITY_FIELDS = (
     "source_shop_id",

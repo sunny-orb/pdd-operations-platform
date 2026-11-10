@@ -147,7 +147,7 @@ class Repository:
         self.end = (
             connection.execute(
                 sa.text(
-                    "SELECT max(business_date) FROM public.product_daily_facts "
+                    "SELECT max(business_date) FROM public.read_product_daily_facts "
                     "WHERE dataset_version_id=:product_daily"
                 ),
                 self.params,
@@ -162,7 +162,7 @@ class Repository:
             sa.text(
                 "SELECT count(*),count(DISTINCT "
                 "listing_id),min(business_date),max(business_date) FROM "
-                "public.product_daily_facts WHERE "
+                "public.read_product_daily_facts WHERE "
                 "dataset_version_id=:product_daily AND "
                 "(business_date BETWEEN :start AND :end OR "
                 "business_date BETWEEN :year_start AND :year_end) "
@@ -178,8 +178,8 @@ class Repository:
         coverage = {code: [] for code in CODES}
         observed_through = {}
         for code, table, field in (
-            ("product_daily", "product_daily_facts", "business_date"),
-            ("product_promotion", "product_promotion_records", "period_start"),
+            ("product_daily", "read_product_daily_facts", "business_date"),
+            ("product_promotion", "read_product_promotion_records", "period_start"),
         ):
             observed_through[code] = self.c.execute(
                 sa.text(f"SELECT max({field}) FROM public.{table} WHERE dataset_version_id=:v"),
@@ -333,7 +333,7 @@ class Repository:
         """固定版本/日期读取必要度量；风险投影保留身份和三项规则输入。"""
         if listing_ids is not None and not listing_ids:
             return []
-        table = "product_promotion_records" if ads else "product_daily_facts"
+        table = "read_product_promotion_records" if ads else "read_product_daily_facts"
         code = "product_promotion" if ads else "product_daily"
         day = "period_start" if ads else "business_date"
         cols = self._ADS_COLS if ads else self._RISK_COLS if risk_only else self._DAILY_COLS

@@ -43,6 +43,7 @@ def publish(
     start=date(2026, 9, 28),
     previous_report_id=None,
     yoy_report_id=None,
+    shared=False,
 ):
     tables = build_metadata().tables
 
@@ -131,8 +132,8 @@ def publish(
                 source_subcategory="细类甲",
             )
             if code == "jst_returns":
-                c.execute(
-                    tab("return_records").insert(),
+                table_name = "return_records"
+                fact_rows = (
                     [{**base, "source_aftersale_type": None, **r} for r in returns]
                     if returns is not None
                     else [
@@ -153,34 +154,44 @@ def publish(
                             actual_inbound_amount=None if missing else Decimal("4.99"),
                             source_return_reason="质量问题",
                         ),
-                    ],
+                    ]
                 )
             else:
+                table_name = "product_sales_records"
                 if coarse:
                     base["source_subcategory"] = None
-                c.execute(
-                    tab("product_sales_records")
-                    .insert()
-                    .values(
-                        **base,
+                fact_rows = [
+                    dict(
+                        base,
                         id=code + suffix,
                         source_row_key="s",
                         sales_amount=Decimal(amount),
                         source_sales_qty=Decimal("5"),
-                    )
-                )
-                # 无退货的销售组必须参与总体分母。
-                c.execute(
-                    tab("product_sales_records")
-                    .insert()
-                    .values(
-                        **dict(base, source_style_code="0002", source_product_code="SKU2"),
+                    ),
+                    dict(
+                        base,
+                        source_style_code="0002",
+                        source_product_code="SKU2",
                         id=code + "extra" + suffix,
                         source_row_key="extra",
                         sales_amount=Decimal("10"),
                         source_sales_qty=Decimal("1"),
-                    )
+                    ),
+                ]
+            if shared:
+                from app.modules.fact_content import write_version
+
+                write_version(
+                    c,
+                    table_name,
+                    vid,
+                    [
+                        {k: v for k, v in r.items() if k not in ("id", "dataset_version_id")}
+                        for r in fact_rows
+                    ],
                 )
+            else:
+                c.execute(tab(table_name).insert(), fact_rows)
             seal(vid)
         out = "report-" + suffix
         version(out, "aftersales_report", "derived")

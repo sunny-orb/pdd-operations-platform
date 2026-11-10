@@ -10,6 +10,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules import fact_content
 from app.modules.archive_store import require_archive, write_archive
 from app.modules.database_residency import deferred_reason, ensure_online
 
@@ -262,6 +263,7 @@ class ShopDailyStore:
         else:
             archive, interpretation = self._archive(version_id, candidate)
         expected = {r["source_row_key"]: r for r in candidate.rows}
+        readable = fact_content.read_table(connection, self.fact_table)
         with connection.begin():
             self._lease(connection, run_id)
             old = connection.execute(
@@ -272,8 +274,8 @@ class ShopDailyStore:
             if old:
                 old_rows = connection.execute(
                     sa.select(
-                        facts.c.source_row_key, facts.c.shop_id, facts.c[self.date_column]
-                    ).where(facts.c.dataset_version_id == old)
+                        readable.c.source_row_key, readable.c.shop_id, readable.c[self.date_column]
+                    ).where(readable.c.dataset_version_id == old)
                 ).all()
                 new_keys = {
                     (r["source_row_key"], r["shop_id"], r[self.date_column]) for r in candidate.rows
@@ -326,25 +328,33 @@ class ShopDailyStore:
                     )
                 )
         if not reuse:
-            for offset in range(0, len(candidate.rows), INSERT_BATCH_SIZE):
+            if self.fact_table in fact_content.FACTS and fact_content.enabled(connection):
                 with connection.begin():
                     self._lease(connection, run_id)
-                    connection.execute(
-                        facts.insert(),
-                        [
-                            dict(row, id=str(uuid4()), dataset_version_id=version_id)
-                            for row in candidate.rows[offset : offset + INSERT_BATCH_SIZE]
-                        ],
+                    fact_content.write_version(
+                        connection, self.fact_table, version_id, candidate.rows
                     )
                     self._lease(connection, run_id)
-                    connection.execute(
-                        tasks.update()
-                        .where(tasks.c.id == run_id)
-                        .values(
-                            lease_expires_at=sa.func.clock_timestamp()
-                            + sa.text(f"interval '{LEASE_SECONDS} seconds'")
+            else:
+                for offset in range(0, len(candidate.rows), INSERT_BATCH_SIZE):
+                    with connection.begin():
+                        self._lease(connection, run_id)
+                        connection.execute(
+                            facts.insert(),
+                            [
+                                dict(row, id=str(uuid4()), dataset_version_id=version_id)
+                                for row in candidate.rows[offset : offset + INSERT_BATCH_SIZE]
+                            ],
                         )
-                    )
+                        self._lease(connection, run_id)
+                        connection.execute(
+                            tasks.update()
+                            .where(tasks.c.id == run_id)
+                            .values(
+                                lease_expires_at=sa.func.clock_timestamp()
+                                + sa.text(f"interval '{LEASE_SECONDS} seconds'")
+                            )
+                        )
         with connection.begin():
             self._lease(connection, run_id)
             connection.execute(
@@ -354,7 +364,7 @@ class ShopDailyStore:
                 # 内容触发器的FOR SHARE锁与这里的FOR UPDATE冲突；封版前拒绝遗漏或改写。
                 count = 0
                 result = connection.execute(
-                    sa.select(facts).where(facts.c.dataset_version_id == version_id),
+                    sa.select(readable).where(readable.c.dataset_version_id == version_id),
                     execution_options={"stream_results": True, "yield_per": 1000},
                 ).mappings()
                 for stored in result:
@@ -434,6 +444,7 @@ def producer_sources():
     """仅首链必要实现的版本内容；无配置文件、凭据、依赖或其他业务域。"""
     root = Path(__file__).resolve().parents[2]
     names = [
+        "modules/fact_content.py",
         "modules/sales/contracts.py",
         "modules/sales/promotion_history.py",
         "modules/sales/datasets.py",

@@ -23,7 +23,7 @@ def identity_rows(connection, version, start, end):
                            source_shop_id,source_product_id,source_row_key) AS first_row,
                        max(business_date) FILTER (WHERE source_product_name IS NOT NULL
                            AND source_product_name<>'') OVER (PARTITION BY listing_id) AS last_name
-                FROM public.product_daily_facts
+                FROM public.read_product_daily_facts
                 WHERE dataset_version_id=:v AND business_date BETWEEN :start AND :end
             ) SELECT listing_id,business_date,source_shop_id,source_shop_name,
                      source_product_id,source_product_name FROM ranked
@@ -41,7 +41,7 @@ def page_rows(connection, version, start, end, listing_ids, page, size):
         return [], 0
     params = dict(v=version, start=start, end=end, **listing_filter(listing_ids))
     where = (
-        "FROM public.product_daily_facts WHERE dataset_version_id=:v "
+        "FROM public.read_product_daily_facts WHERE dataset_version_id=:v "
         "AND business_date BETWEEN :start AND :end AND " + LISTING_FILTER
     )
     count = connection.execute(sa.text("SELECT count(*) " + where), params).scalar_one()
@@ -72,7 +72,7 @@ def rows_at(connection, version, keys):
         clauses.append("(listing_id IS NULL AND business_date=ANY(:null_days))")
         params["null_days"] = null_days
     statement = sa.text(
-        "SELECT listing_id,business_date,product_revenue FROM public.product_daily_facts "
+        "SELECT listing_id,business_date,product_revenue FROM public.read_product_daily_facts "
         "WHERE dataset_version_id=:v AND (" + " OR ".join(clauses) + ") "
         "ORDER BY business_date,source_shop_id,source_product_id,source_row_key"
     )

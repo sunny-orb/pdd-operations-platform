@@ -36,6 +36,7 @@ def catalog(c):
     queries = {
         "columns": "SELECT table_name,column_name,data_type,is_nullable,column_default "
         "FROM information_schema.columns WHERE table_schema='public' ORDER BY 1,2",
+        "views": "SELECT viewname,definition FROM pg_views WHERE schemaname='public' ORDER BY 1",
         "constraints": "SELECT conrelid::regclass::text,conname,pg_get_constraintdef(oid) "
         "FROM pg_constraint WHERE connamespace='public'::regnamespace ORDER BY 1,2",
         "indexes": "SELECT tablename,indexname,indexdef FROM pg_indexes "
@@ -71,10 +72,15 @@ def test_complete_sql_matches_migrations_on_real_pg():
         with engines[0].connect() as a, engines[1].connect() as b:
             actual = catalog(a)
             assert actual == catalog(b)
-            domain_columns = [row for row in actual["columns"] if row[0] != "alembic_version_v2"]
-            assert len({row[0] for row in domain_columns}) == 37
-            assert len(domain_columns) == 559
-            assert sum("FOREIGN KEY" in row[2] for row in actual["constraints"]) == 58
+            domain_columns = [
+                row
+                for row in actual["columns"]
+                if row[0] != "alembic_version_v2" and not row[0].startswith("read_")
+            ]
+            assert len({row[0] for row in domain_columns}) == 45
+            assert len(domain_columns) == 711
+            assert len(actual["views"]) == 5
+            assert sum("FOREIGN KEY" in row[2] for row in actual["constraints"]) == 71
             head = ScriptDirectory.from_config(
                 Config(str(ROOT / "apps/api/alembic-v2.ini"))
             ).get_current_head()

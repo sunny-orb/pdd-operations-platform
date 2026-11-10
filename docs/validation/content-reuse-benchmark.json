@@ -1,0 +1,62 @@
+{
+  "days": 60,
+  "rows_per_day": 500,
+  "versions": 6,
+  "logical_rows": 180000,
+  "shared_physical_rows": 32893,
+  "bytes": {
+    "product_sales_records": 59383808,
+    "shared_product_sales_records": 12222464,
+    "fact_content_blocks": 2220032,
+    "fact_content_manifests": 32768,
+    "fact_content_members": 5668864
+  },
+  "write_seconds": {
+    "legacy": [1.6083, 1.7233, 1.7921, 2.0078, 1.7121, 1.7357],
+    "shared": [5.5009, 0.6254, 0.6721, 0.5788, 0.5856, 0.5657]
+  },
+  "query": {
+    "legacy": {
+      "median_ms": 3.764,
+      "result": ["30000", "3000311.80", "45000.0"]
+    },
+    "shared": {
+      "median_ms": 6.966,
+      "result": ["30000", "3000311.80", "45000.0"]
+    }
+  },
+  "blocks": [
+    {
+      "new_blocks": 3839,
+      "reused_blocks": 0,
+      "rows": 30000
+    },
+    {
+      "new_blocks": 73,
+      "reused_blocks": 3766,
+      "rows": 30000
+    },
+    {
+      "new_blocks": 73,
+      "reused_blocks": 3766,
+      "rows": 30000
+    },
+    {
+      "new_blocks": 73,
+      "reused_blocks": 3766,
+      "rows": 30000
+    },
+    {
+      "new_blocks": 72,
+      "reused_blocks": 3766,
+      "rows": 30000
+    },
+    {
+      "new_blocks": 74,
+      "reused_blocks": 3764,
+      "rows": 30000
+    }
+  ],
+  "synthetic_only": true,
+  "production_enabled": false
+}

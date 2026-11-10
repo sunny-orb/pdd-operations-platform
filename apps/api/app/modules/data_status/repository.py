@@ -10,17 +10,17 @@ from app.modules.product_board.repository import BoardError
 
 DATE_TABLES = {
     "shop_daily": ("shop_daily_facts", "business_date"),
-    "product_daily": ("product_daily_facts", "business_date"),
-    "product_promotion": ("product_promotion_records", "period_end"),
+    "product_daily": ("read_product_daily_facts", "business_date"),
+    "product_promotion": ("read_product_promotion_records", "period_end"),
     "shop_ratings": ("shop_rating_daily", "rating_date"),
     "shop_channel_product_promotion": ("shop_channel_promotion_daily", "business_date"),
     "shop_channel_star_shop": ("shop_channel_promotion_daily", "business_date"),
     "shop_regions": ("shop_region_daily", "business_date"),
-    "product_regions": ("product_region_records", "period_end"),
+    "product_regions": ("read_product_region_records", "period_end"),
     "shop_refunds": ("shop_refund_records", "business_date"),
-    "jst_returns": ("return_records", "period_end"),
-    "jst_shipped_sales": ("product_sales_records", "period_end"),
-    "jst_cancelled_sales": ("product_sales_records", "period_end"),
+    "jst_returns": ("read_return_records", "period_end"),
+    "jst_shipped_sales": ("read_product_sales_records", "period_end"),
+    "jst_cancelled_sales": ("read_product_sales_records", "period_end"),
     "sales_targets": ("sales_targets", "period_end"),
 }
 

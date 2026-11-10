@@ -1,11 +1,18 @@
 """推广筛选目录真实PG验证：目录完整、日期边界与经营数据分离。"""
 
+import pytest
 from sqlalchemy import event
 
 from app.modules.sales.source_policy import SHOPS
 from tests.test_promotion_api import client_for, publish_products
 
 pytest_plugins = ["tests.sales_pg_support"]
+
+
+@pytest.fixture(params=[False, True], autouse=True)
+def content_storage_mode(request, monkeypatch):
+    """两种物理表示都必须遵守相同的字段/日期/行数读取边界。"""
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(request.param).lower())
 
 
 def test_catalog_exposes_every_listing_without_business_metrics(sales_pg, tmp_path):
@@ -144,6 +151,6 @@ def test_filter_bootstrap_does_not_load_full_business_rows(sales_pg, tmp_path):
             assert result.json()["data"]["total"] == 2
     finally:
         event.remove(sales_pg, "before_cursor_execute", record_sql)
-    fact_queries = [s for s in statements if "FROM public.product_promotion_records" in s]
+    fact_queries = [s for s in statements if "FROM public.read_product_promotion_records" in s]
     assert fact_queries
     assert all("SELECT *" not in s and "source_payload" not in s for s in fact_queries)

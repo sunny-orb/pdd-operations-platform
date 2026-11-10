@@ -26,7 +26,7 @@ PRODUCT_CTE_TEMPLATE = """WITH labeled AS (
  AND position('未设置' in source_product_code)=0
  THEN btrim(source_product_code)
  ELSE NULL END AS code
- FROM public.product_region_records WHERE dataset_version_id=:v
+ FROM public.read_product_region_records WHERE dataset_version_id=:v
  AND regexp_replace(coalesce(source_product_category,''),'[[:space:]_－—-]','','g')
  NOT IN ('包材','儿童赠品','分类未设置')
 ) """

@@ -9,6 +9,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules import fact_content
 from app.modules.archive_store import require_archive, store_for, write_archive
 from app.modules.database_residency import deferred_reason, ensure_online
 from app.modules.sales.source_policy import SHOPS
@@ -24,13 +25,22 @@ FACT_TABLES = dict(
 REVISION = "m1-board-v2-1"
 
 
+def producer_sources():
+    """摘要与归档共用同一份必要代码清单，避免新存储模块失去版本追溯。"""
+    return {
+        path.name: path.read_text()
+        for path in (
+            *(
+                Path(__file__).with_name(name)
+                for name in ("storage.py", "source.py", "profile_rules.py")
+            ),
+            Path(fact_content.__file__),
+        )
+    }
+
+
 def producer_hash():
-    return fingerprint(
-        {
-            name: Path(__file__).with_name(name).read_text()
-            for name in ("storage.py", "source.py", "profile_rules.py")
-        }
-    )
+    return fingerprint(producer_sources())
 
 
 LOADED_PRODUCER_HASH = producer_hash()
@@ -83,7 +93,7 @@ class ProductBoardStore:
                     raise ValueError("SOURCE_INPUT_MISSING")
                 for code, version in versions.items():
                     source_versions[code] = version["id"]
-                    table = self.tables[FACT_TABLES[code]]
+                    table = fact_content.read_table(c, FACT_TABLES[code])
                     columns = [
                         col for col in table.c if col.name not in ("id", "dataset_version_id")
                     ]
@@ -122,7 +132,7 @@ class ProductBoardStore:
                     if vid is None:
                         raise ValueError("SOURCE_INPUT_MISSING")
                     reused[code] = vid
-                    table = self.tables[FACT_TABLES[code]]
+                    table = fact_content.read_table(c, FACT_TABLES[code])
                     columns = [
                         col for col in table.c if col.name not in ("id", "dataset_version_id")
                     ]
@@ -269,9 +279,9 @@ class ProductBoardStore:
                         json.dumps(values, default=str, ensure_ascii=False, separators=(",", ":")),
                     )
                     os.chmod(p, 0o600)
-                for name in ("source.py", "storage.py", "profile_rules.py"):
+                for name, source in producer_sources().items():
                     p = archive / name
-                    write_archive(p, Path(__file__).with_name(name).read_text())
+                    write_archive(p, source)
                     os.chmod(p, 0o600)
                 manifest = dict(
                     revision=REVISION,
@@ -392,7 +402,7 @@ class ProductBoardStore:
             if code in reuse_sources:
                 continue  # 同一RR快照的不可变来源，最终发布时再锁定验证指针。
             # Compare only overlapping received dates: moving the 60-day window is not deletion.
-            t = self.tables[FACT_TABLES[code]]
+            t = fact_content.read_table(c, FACT_TABLES[code])
             with c.begin():
                 old = c.execute(
                     sa.text(
@@ -581,10 +591,17 @@ class ProductBoardStore:
                 )
                 for r in raw
             ]
-            for offset in range(0, len(values), 1000):
+            if t.name in fact_content.FACTS and fact_content.enabled(c):
                 heartbeat()
                 with c.begin():
-                    c.execute(t.insert(), values[offset : offset + 1000])
+                    fact_content.write_version(c, t.name, vid, raw)
+                heartbeat()
+            else:
+                for offset in range(0, len(values), 1000):
+                    heartbeat()
+                    with c.begin():
+                        c.execute(t.insert(), values[offset : offset + 1000])
+            t = fact_content.read_table(c, FACT_TABLES[code])
             with c.begin():
                 # Verify the complete stored projection (not only a row count/sum).
                 actual = (

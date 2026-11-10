@@ -1,6 +1,6 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
 -- 迁移范围：base → 20261110_14；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：81b56ebd14282629edcad0052bedb91f414d3f895fcef25f0e4c5015109efd83
+-- 迁移、冻结实现及生成器SHA-256：be022cbeffc6100c9e34b3c2462e2d76bf022b681a473c53627c58735e2b5cc5
 -- 公司单账号：songbing；应用结构须空；保留monitor及登记的扩展成员。
 -- 不创建角色、不修改数据库或monitor权限；应用对象由执行账号拥有。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。
@@ -3399,6 +3399,13 @@ BEGIN
      ||'WHERE m.version_id=$1 GROUP BY f.source_row_key HAVING count(*)>1)', 'shared_'||tab)
      INTO duplicated USING NEW.id;
    IF duplicated THEN RAISE EXCEPTION 'CONTENT_DUPLICATE_KEY'; END IF;
+   -- 原日表部分唯一索引的语义作用于整版，不能仅在单块内约束。
+   IF tab='product_daily_facts' AND EXISTS(
+     SELECT f.listing_id,f.business_date FROM public.shared_product_daily_facts f
+     JOIN public.fact_content_members m ON m.block_id=f.block_id
+     WHERE m.version_id=NEW.id AND f.listing_id IS NOT NULL AND f.business_date IS NOT NULL
+     GROUP BY f.listing_id,f.business_date HAVING count(*)>1
+   ) THEN RAISE EXCEPTION 'CONTENT_DUPLICATE_LISTING_DATE'; END IF;
  ELSE
    PERFORM 1 FROM public.dataset_versions WHERE id=NEW.dataset_version_id FOR UPDATE;
    IF EXISTS(SELECT 1 FROM public.fact_content_manifests

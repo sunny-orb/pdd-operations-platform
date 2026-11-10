@@ -250,6 +250,13 @@ BEGIN
      ||'WHERE m.version_id=$1 GROUP BY f.source_row_key HAVING count(*)>1)', 'shared_'||tab)
      INTO duplicated USING NEW.id;
    IF duplicated THEN RAISE EXCEPTION 'CONTENT_DUPLICATE_KEY'; END IF;
+   -- 原日表部分唯一索引的语义作用于整版，不能仅在单块内约束。
+   IF tab='product_daily_facts' AND EXISTS(
+     SELECT f.listing_id,f.business_date FROM public.shared_product_daily_facts f
+     JOIN public.fact_content_members m ON m.block_id=f.block_id
+     WHERE m.version_id=NEW.id AND f.listing_id IS NOT NULL AND f.business_date IS NOT NULL
+     GROUP BY f.listing_id,f.business_date HAVING count(*)>1
+   ) THEN RAISE EXCEPTION 'CONTENT_DUPLICATE_LISTING_DATE'; END IF;
  ELSE
    PERFORM 1 FROM public.dataset_versions WHERE id=NEW.dataset_version_id FOR UPDATE;
    IF EXISTS(SELECT 1 FROM public.fact_content_manifests

@@ -6,22 +6,22 @@
   "shared_physical_rows": 32893,
   "bytes": {
     "product_sales_records": 59383808,
-    "shared_product_sales_records": 12222464,
-    "fact_content_blocks": 2220032,
+    "shared_product_sales_records": 12230656,
+    "fact_content_blocks": 2129920,
     "fact_content_manifests": 32768,
-    "fact_content_members": 5668864
+    "fact_content_members": 5677056
   },
   "write_seconds": {
-    "legacy": [1.6083, 1.7233, 1.7921, 2.0078, 1.7121, 1.7357],
-    "shared": [5.5009, 0.6254, 0.6721, 0.5788, 0.5856, 0.5657]
+    "legacy": [1.6796, 1.7719, 1.7691, 1.7845, 1.7734, 1.844],
+    "shared": [5.7805, 0.6114, 0.582, 0.6123, 0.5884, 0.6088]
   },
   "query": {
     "legacy": {
-      "median_ms": 3.764,
+      "median_ms": 4.044,
       "result": ["30000", "3000311.80", "45000.0"]
     },
     "shared": {
-      "median_ms": 6.966,
+      "median_ms": 6.982,
       "result": ["30000", "3000311.80", "45000.0"]
     }
   },

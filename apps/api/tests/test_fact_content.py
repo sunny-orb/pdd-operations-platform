@@ -434,3 +434,85 @@ def test_numeric_scale_is_preserved_for_existing_serialized_roundtrip(sales_pg):
             .all()
         )
         assert actual == ["100.0100", "100.01"]
+
+
+def _daily_business_rows(c, keys, *, matched=True, dated=True):
+    """同一链接/日期的两来源行；NULL身份或日期保留原部分唯一索引语义。"""
+    c.execute(sa.text("INSERT INTO shops(id,status) VALUES('s','active')"))
+    c.execute(
+        sa.text(
+            "INSERT INTO listings(id,shop_id,platform_code,platform_product_id,status) "
+            "VALUES('l','s','pdd','001','active')"
+        )
+    )
+    return [
+        dict(
+            source_row_key=key,
+            listing_id="l" if matched else None,
+            listing_match_status="matched" if matched else "not_provided",
+            business_date=date(2026, 10, 26) if dated else None,
+            date_status="verified_period" if dated else "missing",
+            product_revenue=Decimal("23.17"),
+        )
+        for key in keys
+    ]
+
+
+@pytest.mark.parametrize("keys,block_count", [(("r5", "r6"), 1), (("a", "b"), 2)])
+def test_daily_business_key_is_unique_across_entire_shared_version(sales_pg, keys, block_count):
+    from app.modules.fact_content import write_version
+    from migrations_v2.baseline_20261028.schema import build_metadata
+
+    publish_pointer(sales_pg, "product_daily", "duplicate", published=False)
+    vid = "product_daily-duplicate"
+    with sales_pg.begin() as c:
+        values = _daily_business_rows(c, keys)
+    legacy = build_metadata().tables["public.product_daily_facts"]
+    # 先证明同一输入在旧存储中已被数据库拒绝，而非给业务增加新规则。
+    with pytest.raises(sa.exc.IntegrityError, match="version_listing_date"):
+        with sales_pg.begin() as c:
+            c.execute(
+                legacy.insert(),
+                [dict(row, id=row["source_row_key"], dataset_version_id=vid) for row in values],
+            )
+    with pytest.raises(sa.exc.DBAPIError, match="CONTENT_DUPLICATE_LISTING_DATE"):
+        with sales_pg.begin() as c:
+            write_version(c, "product_daily_facts", vid, values)
+            assert c.scalar(sa.text("SELECT count(*) FROM fact_content_members")) == block_count
+            seal(c, vid)
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT state FROM dataset_versions WHERE id=:v"), {"v": vid}) == (
+            "draft"
+        )
+        assert c.scalar(sa.text("SELECT count(*) FROM shared_product_daily_facts")) == 0
+        assert c.scalar(sa.text("SELECT count(*) FROM fact_content_manifests")) == 0
+
+
+@pytest.mark.parametrize("matched,dated", [(False, True), (True, False), (False, False)])
+def test_daily_partial_business_key_keeps_missing_identity_or_date(sales_pg, matched, dated):
+    from app.modules.fact_content import write_version
+    from migrations_v2.baseline_20261028.schema import build_metadata
+
+    for suffix in ("old", "shared"):
+        publish_pointer(sales_pg, "product_daily", suffix, published=False)
+    with sales_pg.begin() as c:
+        values = _daily_business_rows(c, ("a", "b"), matched=matched, dated=dated)
+        c.execute(
+            build_metadata().tables["public.product_daily_facts"].insert(),
+            [
+                dict(row, id=row["source_row_key"], dataset_version_id="product_daily-old")
+                for row in values
+            ],
+        )
+        seal(c, "product_daily-old")
+        write_version(c, "product_daily_facts", "product_daily-shared", values)
+        seal(c, "product_daily-shared")
+        assert c.execute(
+            sa.text(
+                "SELECT dataset_version_id,count(*),sum(product_revenue) "
+                "FROM read_product_daily_facts GROUP BY 1 ORDER BY 1"
+            )
+        ).all() == [
+            ("product_daily-old", 2, Decimal("46.34")),
+            ("product_daily-shared", 2, Decimal("46.34")),
+        ]

@@ -12,6 +12,8 @@
 - `/health/live` 检查进程；`/health/ready` 检查应用库可连接。未配置数据库时就绪 503 是预期，健康检查不等于经营验收。
 - Node 与 Python 使用项目锁文件；后端从 `requirements-dev.in` 在独立环境解析更新 `requirements-dev.lock`，不只改输入文件。
 
+本地API核验脚本使用Vite中间件实例时，配置会自动使用按进程隔离的`node_modules/.vite-verification/<pid>`缓存，避免覆盖5173页面服务的预构建依赖；调用方已显式指定缓存时沿用其目录，该目录也必须与页面服务隔离。额外启动普通浏览器测试服务也应指定独立`cacheDir`。如旧会话因缓存混用出现`Invalid hook call`白屏，先停止共用缓存的核验实例，重启前端（必要时在项目根目录执行`npm run dev --workspace @pdd/web -- --force`）并刷新页面；不要删除经营归档或重装依赖来处理。验证见跳转白屏修复（2026-11-10本地验收记录）。
+
 ## 本地 PostgreSQL
 
 沿用现有 PG17 容器、`pdd_operations` 项目库和独立 v2 迁移链。本机默认API 使用只读 `pdd_app`，接收使用 `pdd_ingest`，结构迁移由 `pdd_admin` 执行。公司部署的账号选择按[架构中的用户决定](architecture.md)：允许使用songbing及其现有读写权限；连接配置及独立初始化入口已按[部署方案](implementation/deployment.md)适配，本轮仅本地验证。

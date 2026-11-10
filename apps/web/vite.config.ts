@@ -2,7 +2,18 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: "isolate-verification-cache",
+      // API核验的中间件实例不能重写浏览器服务正在使用的React预构建文件。
+      config(config) {
+        if (config.server?.middlewareMode && !config.cacheDir) {
+          return { cacheDir: `node_modules/.vite-verification/${process.pid}` };
+        }
+      },
+    },
+  ],
   build: {
     rollupOptions: {
       output: {

@@ -17,7 +17,48 @@ const dataset = z.object({
   error_code: text,
   revision: text,
 });
+export const historyCoverageSchema = z.object({
+  state: z.enum([
+    "gaps",
+    "observed",
+    "pending",
+    "unavailable",
+    "unverified",
+    "not_applicable",
+    "failed",
+    "stale",
+  ]),
+  window_start: z.string().optional(),
+  window_end: z.string().optional(),
+  checked_through: z.string().optional(),
+  checked_at: z.string().optional(),
+  attempted_at: z.string().optional(),
+  missing_count: z.number().optional(),
+  missing_date_count: z.number().optional(),
+  groups: z
+    .array(z.object({ shop_id: z.string(), shop_name: z.string(), dates: z.array(z.string()) }))
+    .optional(),
+});
+export type HistoryCoverageStatus = z.infer<typeof historyCoverageSchema>;
+
 const source = z.object({
+  timeliness: z
+    .object({
+      state: z.enum([
+        "updated",
+        "waiting",
+        "awaiting_check",
+        "delayed",
+        "unknown",
+        "not_applicable",
+      ]),
+      baseline_updated_at: z.string().optional(),
+      confirmed_updated_at: z.string().optional(),
+      expected_by: z.string().optional(),
+      observed_at: z.string().optional(),
+    })
+    .optional(),
+  history: historyCoverageSchema.optional(),
   id: z.string(),
   name: z.string(),
   system: z.enum(["warehouse", "feishu", "nmc"]),

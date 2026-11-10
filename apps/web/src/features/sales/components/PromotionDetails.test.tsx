@@ -119,7 +119,7 @@ it("缺行和空字段按实际指标结果提示，展开后才列店铺、渠�
   );
   expect(screen.getByText(/推广花费按已有金额汇总/).textContent).toContain("ROI暂无数据");
   expect(container.querySelector("details")!.open).toBe(false);
-  await userEvent.click(screen.getByText("查看异常明细"));
+  await userEvent.click(screen.getByText("查看数据明细"));
   const detail = container.querySelector("details")!;
   expect(detail.textContent).toContain("官方店 · 商品推广 · 推广成交额为空（有记录）：2026-10-26");
   expect(detail.textContent).toContain("官方店 · 商品推广 · 无推广记录：2026-10-27");
@@ -146,7 +146,7 @@ it("只有点击字段为空时仅提示点击率，不将有值ROI或真实零�
       }}
     />,
   );
-  expect(screen.getByText(/本期推广数据不完整/).textContent).toContain("点击率暂无数据");
+  expect(screen.getByText(/本期推广数据说明/).textContent).toContain("点击率暂无数据");
   expect(container.textContent).not.toMatch(/ROI|推广花费按/);
 });
 
@@ -164,8 +164,8 @@ it("单渠道部分缺记录仍有结果时不误报无法计算，换店和日�
       shops={testFilters.data.shops}
     />,
   );
-  expect(screen.getByText(/本期推广数据不完整/).textContent).toContain("ROI按已有完整记录计算");
-  await userEvent.click(screen.getByText("查看异常明细"));
+  expect(screen.getByText(/本期推广数据说明/).textContent).toContain("ROI按已有完整记录计算");
+  await userEvent.click(screen.getByText("查看数据明细"));
   rerender(
     <PromotionDetails
       shops={testFilters.data.shops}
@@ -210,8 +210,8 @@ it("没有接入数据不推断漏采，缺失日期未返回时不编造明细"
       }}
     />,
   );
-  expect(screen.getByText(/本期推广数据不完整/).textContent).toContain("推广花费暂无数据");
-  await userEvent.click(screen.getByText("查看异常明细"));
+  expect(screen.getByText(/本期推广数据说明/).textContent).toContain("推广花费暂无数据");
+  await userEvent.click(screen.getByText("查看数据明细"));
   expect(container.textContent).toContain("商品推广：暂无可用数据");
   expect(container.textContent).not.toContain("无推广记录");
   rerender(
@@ -233,7 +233,7 @@ it("适用渠道检查失败显示实际保旧状态，不展示其他店的失�
   expect(
     screen.getByText(/商品推广：最近检查未成功，当前显示上次成功数据/).closest("details"),
   ).toBeNull();
-  expect(container.textContent).not.toContain("本期推广数据不完整");
+  expect(container.textContent).not.toContain("本期推广数据说明");
   rerender(
     <PromotionDetails data={data} sources={{ shop_channel_star_shop: sources[product.code] }} />,
   );

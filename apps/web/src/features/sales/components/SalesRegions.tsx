@@ -2,7 +2,8 @@ import { ProductRegionNotes } from "./ProductRegionNotes";
 import { formatFixedDecimal } from "../../../shared/format/decimal";
 import { SalesRegionNotes } from "./SalesRegionNotes";
 import { memo, useState } from "react";
-import { Button, DatePicker, Input, Select, Table } from "antd";
+import { Button, DatePicker, Select, Table } from "antd";
+import { SearchInput } from "../../../shared/components/SearchInput";
 import dayjs from "dayjs";
 import type { FiltersResponse } from "../api/contracts";
 import { detailPath, productFiltersSchema, regionSchema, useSalesDetail } from "../api/details";
@@ -84,6 +85,10 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
   const [category, setCategory] = useState("");
   const [search, setSearch] = useState("");
   const [productKey, setProductKey] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState<{ key: string; label: string } | null>(
+    null,
+  );
+  const [searchReset, setSearchReset] = useState(0);
   const [offset, setOffset] = useState(0);
   const { data, error, retry } = useSalesDetail(
     detailPath(product ? "product-regions" : "regions", version, {
@@ -232,7 +237,21 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                   label: `${x.name} · ${x.code}`,
                 })) ?? []),
               ]}
-              onChange={setProductKey}
+              onChange={(key) => {
+                setProductKey(key);
+                const selected = options.data?.data.products.find((item) => item.key === key);
+                setSelectedProduct(
+                  selected ? { key, label: `${selected.name} · ${selected.code}` } : null,
+                );
+              }}
+              labelRender={(item) => {
+                const current = options.data?.data.products.find((p) => p.key === item.value);
+                return current
+                  ? `${current.name} · ${current.code}`
+                  : selectedProduct?.key === item.value
+                    ? selectedProduct.label
+                    : item.label;
+              }}
               popupMatchSelectWidth={360}
               classNames={{ popup: { root: "m3-product-region-options" } }}
               popupRender={(menu) => (
@@ -268,15 +287,15 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
           </div>
           <div className="product-search">
             <span>查找产品</span>
-            <Input
+            <SearchInput
               disabled={!version}
               variant="borderless"
               placeholder="名称 / 编码"
               aria-label="查找产品名称或编码"
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setProductKey("");
+              resetKey={JSON.stringify([searchReset, category])}
+              onSearch={(value) => {
+                setSearch(value);
                 setOffset(0);
               }}
             />
@@ -292,6 +311,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                 setShop("");
                 setCategory("");
                 setSearch("");
+                setSearchReset((n) => n + 1);
                 setProductKey("");
                 setOffset(0);
                 setDates(null);

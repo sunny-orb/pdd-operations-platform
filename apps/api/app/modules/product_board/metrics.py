@@ -4,6 +4,8 @@ from datetime import timedelta
 from decimal import Decimal, Inexact, localcontext
 
 D = Decimal
+# 香草流量门槛：流量下滑的当日/基准均至少100，其他预警仅要求当日高于100。
+RISK_TRAFFIC_THRESHOLD = 100
 METRICS = (
     ("revenue", "交易金额", "currency"),
     ("visitors", "商品访客数", "number"),
@@ -244,7 +246,7 @@ def _risk(rows, end, top):
     cv = divide(o, v)
     drop = compare(v, avg)
     label = priority = score = kind = field = None
-    if v >= 100 and o == 0:
+    if v > RISK_TRAFFIC_THRESHOLD and o == 0:
         label, priority, score, now, baseline, kind, field = (
             "有流量无成交",
             "P1",
@@ -256,7 +258,7 @@ def _risk(rows, end, top):
         )
         reasons = ["有流量无成交", "商品承接待核查"]
         action = "核查价格、优惠、评价、详情页和商品可售状态。"
-    elif v >= 100 and cb and cv is not None and cv <= cb * D(".7"):
+    elif v > RISK_TRAFFIC_THRESHOLD and cb and cv is not None and cv <= cb * D(".7"):
         label, priority, score, now, baseline, kind, field = (
             "严重订单转化下滑",
             "P1",
@@ -268,7 +270,13 @@ def _risk(rows, end, top):
         )
         reasons = ["订单转化率下滑", "价格/详情页待核查"]
         action = "优先复核价格、优惠、主图、评价与详情页承接。"
-    elif avg >= 30 and drop is not None and drop <= D("-.4") and avg - v >= 30:
+    elif (
+        v >= RISK_TRAFFIC_THRESHOLD
+        and avg >= RISK_TRAFFIC_THRESHOLD
+        and drop is not None
+        and drop <= D("-.4")
+        and avg - v >= 30
+    ):
         priority = "P0" if top and po >= 10 else "P1"
         label, score, now, baseline, kind, field = (
             "爆品严重流量下滑" if priority == "P0" else "严重流量下滑",
@@ -280,7 +288,7 @@ def _risk(rows, end, top):
         )
         reasons = ["访客显著下滑", "活动/素材/流量入口待核查"]
         action = "检查活动状态、素材、推广计划与自然流量入口变化。"
-    elif v >= 100 and cb and cv is not None and cv <= cb * D(".85"):
+    elif v > RISK_TRAFFIC_THRESHOLD and cb and cv is not None and cv <= cb * D(".85"):
         label, priority, score, now, baseline, kind, field = (
             "中度订单转化下滑",
             "P2",
@@ -292,7 +300,13 @@ def _risk(rows, end, top):
         )
         reasons = ["订单转化率下滑", "商品承接待优化"]
         action = "复核优惠、详情页承接和商品可售状态，隔日复盘。"
-    elif avg >= 30 and drop is not None and drop <= D("-.2") and avg - v >= 20:
+    elif (
+        v >= RISK_TRAFFIC_THRESHOLD
+        and avg >= RISK_TRAFFIC_THRESHOLD
+        and drop is not None
+        and drop <= D("-.2")
+        and avg - v >= 20
+    ):
         label, priority, score, now, baseline, kind, field = (
             "中度流量下滑",
             "P2",

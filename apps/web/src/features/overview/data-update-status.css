@@ -15,40 +15,91 @@
   flex-wrap: wrap;
 }
 .m6-update-modal {
-  --m6-update-body-height: min(560px, 50vh);
   max-width: calc(100vw - 32px);
-  top: 24px;
-  padding-bottom: 32px;
+  top: 16px;
+  padding-bottom: 0;
+}
+.m6-update-modal .ant-modal-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 32px);
+  padding: 16px 20px;
+  overflow: hidden;
+}
+.m6-update-modal .ant-modal-header {
+  flex: none;
+  margin: 0 0 8px;
+  padding-right: 52px;
 }
 .m6-update-modal .ant-modal-title {
-  font-size: 22px;
+  font-size: 20px;
+  line-height: 32px;
   color: #19355d;
+}
+.m6-update-modal .ant-modal-close {
+  top: 10px;
+  right: 12px;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  z-index: 2;
+}
+.m6-update-modal .ant-modal-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
 }
 .m6-update-intro,
 .m6-update-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
+  flex: none;
 }
 .m6-update-intro {
-  margin: 20px 0 8px;
+  margin: 0 0 8px;
   color: #64748b;
-  font-size: 13px;
+  font-size: 12px;
 }
 .m6-update-toolbar {
-  margin: 8px 0 20px;
+  margin: 0 0 10px;
 }
 .m6-update-toolbar h3 {
-  margin: 0 0 6px;
+  margin: 0;
   color: #19355d;
-  font-size: 16px;
+  font-size: 15px;
 }
 .m6-update-toolbar .ant-radio-group {
   display: flex;
   flex-wrap: wrap;
   max-width: 100%;
-  row-gap: 8px;
+  row-gap: 4px;
+}
+.m6-update-toolbar .m6-update-page-select {
+  display: none;
+}
+.m6-update-explanation {
+  flex: none;
+  max-height: 25dvh;
+  overflow: auto;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.m6-update-explanation summary {
+  width: fit-content;
+  cursor: pointer;
+  padding: 4px 0;
+  color: #486588;
+}
+.m6-update-explanation p {
+  margin: 4px 0;
 }
 .m6-update-dataset {
   display: flex;
@@ -65,8 +116,7 @@
   font-weight: 400;
   margin-left: 10px;
 }
-.m6-update-toolbar p,
-.m6-update-footnote {
+.m6-update-toolbar p {
   margin: 0;
   color: #64748b;
   font-size: 12px;
@@ -97,7 +147,7 @@
 }
 .m6-update-table-name {
   display: block;
-  max-width: 270px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -120,12 +170,18 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
+  min-width: 0;
+  max-width: 100%;
 }
 .m6-update-cell-stack .ant-tag {
   margin-inline-end: 0;
 }
+.m6-update-table .ant-tag {
+  max-width: 100%;
+  white-space: normal;
+}
 .m6-update-time {
-  white-space: nowrap;
+  white-space: normal;
 }
 .m6-update-name small,
 .m6-update-subtext {
@@ -137,39 +193,91 @@
 .m6-update-muted {
   color: #7c899c;
 }
-/* 两个页签参与同一网格定高；隐藏页签仍不可见、不可交互。 */
-.m6-update-tabs .ant-tabs-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-}
-.m6-update-tabs .ant-tabs-body > .ant-tabs-content {
-  grid-area: 1 / 1;
+/* 仅列表纵向滚动；页签、标题和关闭入口不被长表格推出视口。 */
+.m6-update-tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   min-width: 0;
 }
-.m6-update-tabs .ant-tabs-body > .ant-tabs-content-hidden {
-  display: block;
-  visibility: hidden;
-  pointer-events: none;
+.m6-update-tabs > .ant-tabs-nav {
+  flex: none;
+  margin-bottom: 10px;
 }
-.m6-update-table .ant-table-body {
-  height: var(--m6-update-body-height);
+.m6-update-tabs .ant-tabs-tab {
+  padding-block: 7px;
+}
+.m6-update-tabs .ant-tabs-body,
+.m6-update-tabs .ant-tabs-body-holder,
+.m6-update-tabs .ant-tabs-content-holder {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.m6-update-tabs .ant-tabs-content {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.m6-update-tabs .ant-tabs-content-active,
+.m6-update-tabs .ant-tabs-tabpane-active,
+.m6-update-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.m6-update-panel {
+  height: 100%;
+}
+.m6-update-tabs .ant-tabs-content-hidden {
+  display: none;
+}
+.m6-update-list {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 1px solid #e4eaf2;
+  border-radius: 8px;
+}
+.m6-update-table table {
+  width: 100%;
+  table-layout: fixed;
+}
+.m6-update-table .ant-table-thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 .m6-update-table .ant-table-thead > tr > th {
   background: #f2f6fc;
   color: #53667e;
+  font-size: 12px;
+  padding: 10px 6px;
 }
 .m6-update-table .ant-table-cell {
   font-variant-numeric: tabular-nums;
-  line-height: 1.65;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  white-space: normal;
+}
+.m6-update-table .ant-table-row-expand-icon-cell {
+  padding-inline: 2px;
 }
 .m6-update-table .ant-table-tbody > tr > td {
-  padding-top: 18px;
-  padding-bottom: 18px;
+  padding: 10px 8px;
 }
 .m6-update-detail {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-  gap: 32px;
+  gap: 20px;
   align-items: flex-start;
   padding: 8px 12px;
   font-size: 12px;
@@ -222,45 +330,100 @@
 .m6-update-warning {
   color: #9b661d;
 }
-.m6-update-footnote {
-  margin-top: 14px;
-}
-.m6-update-analysis {
-  padding: 48px 16px 64px;
-  min-height: 360px;
-  text-align: center;
-  color: #64748b;
-}
-@media (max-width: 640px) {
-  .m6-update-modal {
-    --m6-update-body-height: 32dvh;
-    top: 12px;
-    max-width: calc(100vw - 16px);
+/* 小窗口把同一份表格单元格排成带标题的两列，保持所有字段可读而不横滚。 */
+@media (max-width: 1000px) {
+  .m6-update-toolbar .ant-radio-group {
+    display: none;
   }
-  .m6-update-intro,
-  .m6-update-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
+  .m6-update-toolbar .m6-update-page-select {
+    display: block;
+    width: 140px;
+    flex: none;
   }
-  .m6-update-intro {
-    padding-right: 0;
+  .m6-update-table .ant-table-thead,
+  .m6-update-table colgroup {
+    display: none;
   }
-  .m6-update-analysis {
-    padding: 28px 0;
+  .m6-update-table table,
+  .m6-update-table tbody {
+    display: block;
+    width: 100%;
+  }
+  .m6-update-table .ant-table-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-bottom: 1px solid #dce4ef;
+  }
+  .m6-update-table .ant-table-row > td {
+    display: block;
+    width: auto;
+    border-bottom: 0;
+  }
+  .m6-update-table .ant-table-row > td:first-child {
+    grid-column: 1 / -1;
+    padding: 4px 8px;
+  }
+  .m6-update-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    color: #63758e;
+    font-size: 12px;
+    margin-bottom: 5px;
+  }
+  .m6-update-table .ant-table-expanded-row,
+  .m6-update-table .ant-table-expanded-row > td {
+    display: block;
+    width: 100%;
   }
   .m6-update-detail {
-    grid-template-columns: 1fr;
-    gap: 16px;
-    width: min(1100px, calc(100vw - 100px));
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 4px;
   }
   .m6-update-platform-details {
     border-left: 0;
     border-top: 1px solid #dce4ef;
     padding: 12px 0 0;
   }
+}
+@media (max-width: 640px) {
+  .m6-update-modal {
+    top: 8px;
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px);
+  }
+  .m6-update-modal .ant-modal-container {
+    height: calc(100dvh - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 12px;
+  }
+  .m6-update-modal .ant-modal-title {
+    font-size: 18px;
+  }
+  .m6-update-intro > span {
+    min-width: 0;
+  }
+  .m6-update-detail dl > div {
+    gap: 8px;
+  }
+  .m6-update-detail dt {
+    width: 76px;
+  }
   .m6-overview-scope .m6-scope-actions {
     gap: 10px;
+  }
+}
+/* 极矮视口保留固定标题和关闭按钮，正文允许纵向滚动以免裁切内容。 */
+@media (max-height: 540px) {
+  .m6-update-modal .ant-modal-body {
+    overflow-y: auto;
+  }
+  .m6-update-tabs,
+  .m6-update-tabs .ant-tabs-body,
+  .m6-update-tabs .ant-tabs-content-active,
+  .m6-update-list {
+    flex: none;
+    overflow: visible;
   }
 }
 
@@ -286,18 +449,27 @@
   vertical-align: middle;
   flex-shrink: 0;
 }
-.m6-update-alert-summary {
+.m6-update-status-label {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px 10px;
-  margin: 12px 0;
-  color: #8d3341;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
 }
-.m6-update-alert-summary .ant-btn {
-  padding-inline: 0;
+.m6-update-record-dot {
+  background: #8c8c8c;
+  margin-right: 0;
 }
-
+.m6-update-badge-delayed .ant-badge-dot,
+.m6-update-delay-dot {
+  background: #d48806;
+}
+.m6-update-delay-dot {
+  margin-right: 0;
+}
+.m6-update-status-label .ant-tag {
+  min-width: 0;
+}
 .m6-update-detail > p,
 .m6-update-detail > .m6-update-dataset {
   grid-column: 1 / -1;
@@ -305,4 +477,56 @@
 }
 .m6-update-detail {
   row-gap: 12px;
+}
+
+.m6-history-coverage {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.m6-history-coverage p {
+  margin: 6px 0;
+}
+.m6-history-coverage ul {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+.m6-history-coverage time {
+  white-space: nowrap;
+}
+
+.m6-update-status-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 24px;
+  flex: none;
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+.m6-update-status-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.m6-update-status-group strong {
+  color: #14223a;
+}
+.m6-update-status-group .ant-btn {
+  padding: 0;
+  height: auto;
+  font-size: inherit;
+  line-height: 24px;
+}
+
+.m6-update-status-group .m6-update-delay {
+  color: #ad6800;
+}
+.m6-update-timeliness {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.m6-update-timeliness p {
+  margin: 6px 0;
 }

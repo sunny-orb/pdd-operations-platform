@@ -169,18 +169,30 @@ it("诊断按需读取，分页后搜索全组、重开复用、晚响应隔离�
   fireEvent.click(within(details).getByTitle("2"));
   await waitFor(() => expect(within(details).getByText("第二页商品")).toBeTruthy());
   const searchInput = within(details).getByRole("searchbox");
+  const beforeComposition = calls.length;
+  fireEvent.compositionStart(searchInput);
+  fireEvent.change(searchInput, { target: { value: "shangpin" } });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 650)));
+  expect(calls).toHaveLength(beforeComposition);
+  fireEvent.change(searchInput, { target: { value: "商品" } });
+  fireEvent.compositionEnd(searchInput, { data: "商品" });
+  await waitFor(() => expect(within(details).getByText("商品命中商品")).toBeTruthy());
   fireEvent.change(searchInput, { target: { value: "末页" } });
+  fireEvent.keyDown(searchInput, { key: "Enter", keyCode: 13 });
   await waitFor(() => expect(within(details).getByText("末页命中商品")).toBeTruthy());
   expect(calls.at(-1)?.searchParams.get("page")).toBe("1");
   expect(within(details).getByText("匹配 1 / 27 个对象")).toBeTruthy();
   fireEvent.change(searchInput, { target: { value: "慢" } });
+  fireEvent.keyDown(searchInput, { key: "Enter", keyCode: 13 });
   await waitFor(() => expect(releaseSlow).toBeTruthy());
   fireEvent.change(searchInput, { target: { value: "快" } });
+  fireEvent.keyDown(searchInput, { key: "Enter", keyCode: 13 });
   await waitFor(() => expect(within(details).getByText("快命中商品")).toBeTruthy());
   expect(slowSignal?.aborted).toBe(true);
   await act(async () => releaseSlow?.());
   expect(within(details).queryByText("慢命中商品")).toBeNull();
   fireEvent.change(searchInput, { target: { value: "失败" } });
+  fireEvent.keyDown(searchInput, { key: "Enter", keyCode: 13 });
   await waitFor(() => expect(within(details).getByText("清单暂时无法加载")).toBeTruthy(), {
     timeout: 4000,
   });
@@ -188,7 +200,7 @@ it("诊断按需读取，分页后搜索全组、重开复用、晚响应隔离�
   fireEvent.click(within(details).getByRole("button", { name: /重\s*试/ }));
   await waitFor(() => expect(within(details).getByText("失败命中商品")).toBeTruthy());
   client.clear();
-});
+}, 10000);
 
 it("关闭的诊断清单不挂载表格行，展开分页保留全量搜索，重新打开读取新结果", () => {
   const products = Array.from({ length: 250 }, (_, i) => object(`合成商品${i}`));

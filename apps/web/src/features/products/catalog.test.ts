@@ -42,3 +42,13 @@ it("旧混合等级保留精确筛选并回显，搜索不丢失已选范围", (
   expect(search.products).toEqual([]);
   expect(search.selection.products).toEqual(["1"]);
 });
+
+it("右侧关键词仍联动候选，左侧查找可临时覆盖候选搜索但不改变已选", () => {
+  const selected = { ...scope, products: ["1", "2"], keyword: "商品1" };
+  expect(catalogOptions(catalog, selected).products.map((p) => p.value)).toEqual(["1"]);
+  const typing = catalogOptions(catalog, selected, "商品2");
+  expect(typing.products.map((p) => p.value)).toEqual(["2"]);
+  expect(typing.selection.products).toEqual(["1", "2"]);
+  expect(selected.keyword).toBe("商品1");
+  expect(catalogOptions(catalog, selected).products.map((p) => p.value)).toEqual(["1"]);
+});

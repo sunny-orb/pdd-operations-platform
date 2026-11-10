@@ -48,3 +48,7 @@
 业务回退将`monitor_enabled=false`并回退相关API／前端，保留原每日全量同步和该表。迁移降级先锁表：空表才允许删除，存在记录则拒绝，避免破坏运行证据；不得为降级自动清空表。修复优先追加revision，不改写已执行迁移。
 
 Alembic12的专用设计见[固定调度实施](../implementation/project-sync-implementation.md#source-daily-schedule-proposal-20261104)，[派生SQL](source-schedule.sql)只供审阅。追加5列、不改事实/版本关系；同槽按源去重，检查失败保留上次观测，接收失败保留成功水位。回退应用保持列；只要存在固定槽或接收证据，降级拒绝删列。是否已升级与切换以TODO和本日验证记录为准。
+
+2026-11-10派生摘要扩展：`platform_snapshot.history`保存按版本、规则、窗口绑定的历史记录覆盖结果；无DDL或业务事实变化。字段语义只见[历史覆盖契约](../data-contract.md#history-record-coverage)，事务/失败恢复见[实施设计](../implementation/m6-overview-implementation.md#近30天记录覆盖提醒2026-11-10本地实施)。
+
+2026-11-10上游时效证据扩展：`platform_snapshot.update_timing`保存最多今天/昨天两条网页时间证据，原网页时间与摘要在同一既有事务提交；日期/覆盖摘要刷新必须保留该键。无DDL、索引、权限或事实关系变化。字段语义见[时效契约](../data-contract.md#upstream-update-timeliness)，专用设计见[M6实施](../implementation/m6-overview-implementation.md#上游每日更新时效2026-11-10确认)。

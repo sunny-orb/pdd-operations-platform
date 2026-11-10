@@ -123,16 +123,16 @@ const states = (): DomainState[] =>
     error: null,
     refresh: vi.fn(),
   }));
-it("首页仅展示六项关注及对应建议，查看全部才显示真实总数和分页，可收回且动态更新", () => {
+it("顶部统计全部预警及真实建议，默认完整清单分页，筛选与翻页不改总数", () => {
   const data = states();
   const items = Array.from({ length: 110 }, (_, i) => ({
     ...obs,
-    id: `preview-${i}`,
-    objectKey: JSON.stringify(["listing", "source-shop", `preview-${i}`]),
-    title: `首页提示${i + 1}`,
+    id: `full-${i}`,
+    objectKey: JSON.stringify(["listing", "source-shop", `full-${i}`]),
+    title: `全量提示${i + 1}`,
   }));
   data[1].data!.observations = items;
-  // 前六对象有一项未返回建议；不从第七项凑满六条。
+  // 一项没有来源建议，预警与待办分别统计，不补建议凑数。
   data[1].data!.actions = items
     .filter((_, i) => i !== 1)
     .map((item) => actionFromObservation(item, "来源建议", "来源原因", "来源验证"));
@@ -146,49 +146,57 @@ it("首页仅展示六项关注及对应建议，查看全部才显示真实总�
   const summary = screen.getByLabelText("经营总览关键数据");
   const alerts = document.getElementById("alerts")!;
   const actions = document.getElementById("actions")!;
-  expect(summary.textContent).toContain("异常数量6 项");
-  expect(summary.textContent).toContain("待办动作5 项");
-  expect(summary.textContent).not.toMatch(/110|109/);
-  expect(document.getElementById("overview")!.textContent).toContain("待办动作 5 项");
-  expect(within(alerts).getAllByRole("listitem")).toHaveLength(6);
+  expect(summary.textContent).toContain("异常数量110 项");
+  expect(summary.textContent).toContain("待办动作109 项");
+  expect(document.getElementById("overview")!.textContent).toContain("待办动作 109 项");
+  expect(
+    within(within(alerts).getByRole("list", { name: "预警列表" })).getAllByRole("listitem"),
+  ).toHaveLength(6);
   expect(
     within(actions).getByRole("table").querySelectorAll("tbody tr[data-row-key]"),
-  ).toHaveLength(5);
-  expect(within(alerts).queryByRole("navigation", { name: "预警分页" })).toBeNull();
-  expect(within(actions).queryByRole("navigation", { name: "动作分页" })).toBeNull();
-  expect(within(alerts).queryByRole("group", { name: "来源优先级" })).toBeNull();
-  fireEvent.click(within(summary).getByRole("link", { name: "查看全部预警 →" }));
+  ).toHaveLength(6);
   expect(within(alerts).getByRole("navigation", { name: "预警分页" }).textContent).toContain(
     "共 110 条",
   );
-  fireEvent.click(within(alerts).getByTitle("2"));
-  expect(within(alerts).getByText("首页提示7", { exact: true })).toBeTruthy();
-  const attentionLink = within(summary).getByRole("link", { name: "异常数量6 项" });
-  expect(attentionLink.getAttribute("href")).toBe("#alerts");
-  fireEvent.click(attentionLink);
-  expect(within(alerts).getByText("首页提示1", { exact: true })).toBeTruthy();
-  expect(within(alerts).queryByText("首页提示7", { exact: true })).toBeNull();
-  fireEvent.click(within(actions).getByRole("button", { name: "查看全部建议" }));
   expect(within(actions).getByRole("navigation", { name: "动作分页" }).textContent).toContain(
     "共 109 条",
   );
+  expect(within(alerts).getByRole("group", { name: "来源优先级" })).toBeTruthy();
+  expect(within(alerts).queryByRole("button", { name: /首页关注|查看全部预警/ })).toBeNull();
+  expect(within(actions).queryByRole("button", { name: /首页建议|查看全部建议/ })).toBeNull();
+  fireEvent.click(within(alerts).getByRole("button", { name: "P1" }));
+  expect(within(alerts).queryAllByRole("listitem")).toHaveLength(0);
+  expect(summary.textContent).toContain("异常数量110 项");
+  expect(summary.textContent).toContain("待办动作109 项");
+  fireEvent.click(within(alerts).getByRole("button", { name: "全部" }));
+  fireEvent.click(within(alerts).getByTitle("2"));
+  expect(within(alerts).getByText("全量提示7", { exact: true })).toBeTruthy();
+  const attentionLink = within(summary).getByRole("link", { name: "异常数量110 项" });
+  expect(attentionLink.getAttribute("href")).toBe("#alerts");
+  fireEvent.click(attentionLink);
+  expect(within(alerts).getByText("全量提示7", { exact: true })).toBeTruthy();
   fireEvent.click(within(actions).getByTitle("2"));
-  expect(within(actions).getByRole("link", { name: "首页提示8" })).toBeTruthy();
-  const actionLink = within(summary).getByRole("link", { name: "待办动作5 项" });
+  expect(within(actions).getByRole("link", { name: "全量提示8" })).toBeTruthy();
+  const actionLink = within(summary).getByRole("link", { name: "待办动作109 项" });
   expect(actionLink.getAttribute("href")).toBe("#actions");
   fireEvent.click(actionLink);
+  expect(within(actions).getByRole("link", { name: "全量提示8" })).toBeTruthy();
   const heroAction = within(document.getElementById("overview")!).getByRole("link", {
-    name: /待办动作 5 项/,
+    name: /待办动作 109 项/,
   });
   expect(heroAction.getAttribute("href")).toBe("#actions");
-  expect(within(actions).queryByRole("link", { name: "首页提示8" })).toBeNull();
   data[1].data!.observations = items.slice(7, 9);
   data[1].data!.actions = data[1].data!.actions.slice(6, 8);
   rerender(view());
   expect(summary.textContent).toContain("异常数量2 项");
   expect(summary.textContent).toContain("待办动作2 项");
-  expect(within(alerts).getByText("首页提示8", { exact: true })).toBeTruthy();
-  expect(within(actions).getByRole("link", { name: "首页提示8" })).toBeTruthy();
+  expect(within(alerts).getByText("全量提示8", { exact: true })).toBeTruthy();
+  expect(within(actions).getByRole("link", { name: "全量提示8" })).toBeTruthy();
+  data[1].data!.observations = [];
+  data[1].data!.actions = [];
+  rerender(view());
+  expect(summary.textContent).toContain("异常数量0 项");
+  expect(summary.textContent).toContain("待办动作0 项");
   expect(data[1].refresh).not.toHaveBeenCalled();
 });
 it("同对象跨域只展示一行，双来源入口保留，筛选及动态更新与售后独立", () => {
@@ -225,10 +233,11 @@ it("同对象跨域只展示一行，双来源入口保留，筛选及动态更�
   const table = screen.getByRole("table");
   expect(within(table).getAllByRole("row")).toHaveLength(2);
   expect(table.textContent).toContain("复核源域事实；调整预算");
+  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("异常数量1 项");
+  expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("待办动作1 项");
   expect(within(document.getElementById("overview")!).getByText("1 项")).toBeTruthy();
   expect(document.querySelector(".m6-risk-callout")?.textContent).toContain("1 项 P0 风险");
   expect(document.querySelector(".m6-risk-callout")?.textContent).toContain("39.94%");
-  fireEvent.click(within(alerts).getByRole("button", { name: "查看全部预警" }));
   fireEvent.click(within(alerts).getByRole("button", { name: "P1" }));
   expect(within(alerts).queryAllByRole("listitem")).toHaveLength(0);
   expect(within(table).getAllByRole("row")).toHaveLength(2);
@@ -281,9 +290,6 @@ it("全部来源失败时建议统计不补零，有待核域真实观察时范�
   expect(definitions.textContent).toContain("— 条来源建议 · — 条归并建议");
   expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("异常数量— 项");
   expect(screen.getByLabelText("经营总览关键数据").textContent).toContain("待办动作— 项");
-  fireEvent.click(
-    within(document.getElementById("actions")!).getByRole("button", { name: "查看全部建议" }),
-  );
   expect(document.getElementById("actions")!.textContent).toContain("当前清单 — 条归并建议");
   data[1] = states()[1];
   data[2] = states()[2];
@@ -326,7 +332,6 @@ it("P0筛选只改预警列表，不改原值和建议；跳转带真实K和日�
     </MemoryRouter>,
   );
   const alerts = document.getElementById("alerts")!;
-  fireEvent.click(within(alerts).getByRole("button", { name: "查看全部预警" }));
   const jump = within(alerts).getByRole("link", { name: "定位处理 →" });
   expect(jump.getAttribute("href")).toContain("main_shop=source-shop&main_listing=listing-id#risk");
   expect(within(alerts).getByText(/商品数据 · P0/)).toBeTruthy();
@@ -367,7 +372,6 @@ it("预警每页六条，翻页保留定位参数，切换等级回到首页且�
     </MemoryRouter>,
   );
   const alerts = document.getElementById("alerts")!;
-  fireEvent.click(within(alerts).getByRole("button", { name: "查看全部预警" }));
   expect(within(alerts).getAllByRole("link", { name: "定位处理 →" })).toHaveLength(6);
   expect(within(alerts).queryByText("经营提示7", { exact: true })).toBeNull();
   fireEvent.click(within(alerts).getByTitle("2"));
@@ -403,7 +407,6 @@ it("预警六条以内不显示分页，动态缩页不落到空白页", () => {
   );
   const { rerender } = render(view());
   const alerts = document.getElementById("alerts")!;
-  fireEvent.click(within(alerts).getByRole("button", { name: "查看全部预警" }));
   expect(within(alerts).queryByRole("navigation", { name: "预警分页" })).toBeNull();
   data[1].data!.observations = items;
   rerender(view());
@@ -447,7 +450,6 @@ it("本日动作每页六条，保留八列及定位参数，翻页不改变全�
     </MemoryRouter>,
   );
   const actions = document.getElementById("actions")!;
-  fireEvent.click(within(actions).getByRole("button", { name: "查看全部建议" }));
   const table = within(actions).getByRole("table");
   expect(within(table).getAllByRole("row")).toHaveLength(7);
   expect(within(table).getAllByRole("columnheader")).toHaveLength(8);
@@ -466,7 +468,7 @@ it("本日动作每页六条，保留八列及定位参数，翻页不改变全�
   expect(within(actions).getByRole("navigation", { name: "动作分页" }).textContent).toContain(
     "共 13 条",
   );
-  expect(within(document.getElementById("overview")!).queryByText("13 项")).toBeNull();
+  expect(within(document.getElementById("overview")!).getByText("13 项")).toBeTruthy();
   expect(within(document.getElementById("alerts")!).getByText(obs.title)).toBeTruthy();
 });
 it("本日动作六条以内不分页，动态缩页再增长不回跳，空结果不补经营行", () => {
@@ -493,7 +495,6 @@ it("本日动作六条以内不分页，动态缩页再增长不回跳，空结�
   );
   const { rerender } = render(view());
   const actions = document.getElementById("actions")!;
-  fireEvent.click(within(actions).getByRole("button", { name: "查看全部建议" }));
   expect(within(actions).queryByRole("navigation", { name: "动作分页" })).toBeNull();
   data[1].data!.actions = items;
   rerender(view());

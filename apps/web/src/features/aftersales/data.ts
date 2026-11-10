@@ -4,6 +4,7 @@ import { usePublishedDomainRefresh } from "../../shared/api/usePublishedDomainRe
 import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
+import { useSearchRestoreKey } from "../../shared/components/useSearchRestoreKey";
 import { z } from "zod";
 import { get, params, AftersalesError } from "./api";
 import { metadata, overview, options, analysis } from "./contracts";
@@ -12,6 +13,7 @@ import { readScope, patchScope, resetScope, type Scope } from "./state";
 export function useAftersales() {
   const client = useQueryClient();
   const [search, setSearch] = useSearchParams();
+  const searchRestoreKey = useSearchRestoreKey();
   const selectedReport = search.get("report_id") || "";
   const meta = useQuery({
     queryKey: ["m5", "meta", selectedReport],
@@ -54,6 +56,7 @@ export function useAftersales() {
   const reset = () => setSearch((current) => resetScope(current), { replace: true });
   return {
     scope,
+    searchRestoreKey,
     change,
     reset,
     version,

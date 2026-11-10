@@ -24,7 +24,7 @@ def publish(engine, path, levels=("A级", "B级"), growth=False):
             time_granularity="day",
             spu_name="平台组合标题",
             transaction_amount="10" if growth and i >= 7 else "23.17",
-            product_uv=100,
+            product_uv=101,
             transaction_users=2,
             transaction_orders=0 if i == 0 else 10,
         )

@@ -1,9 +1,10 @@
 import { memo, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "antd";
 import { dayPage, type DayPage } from "./contracts";
-import { useDebounced, useResource, type ProductsState } from "./data";
+import { useResource, type ProductsState } from "./data";
 import { format, percent } from "./format";
 import { Filters } from "./Filters";
+import { ProductSelectionSummary } from "./ProductSelectionSummary";
 import { scopeError, type Scope } from "./scope";
 import { formatProductLevel } from "../../shared/products/levels";
 import "./Days.css";
@@ -22,8 +23,7 @@ const headings = [
 
 /** 独立商品日明细；仅同版本、同筛选的翻页/换容量保留旧页，失败可重试。 */
 export const Days = memo(function Days({ state, scope }: { state: ProductsState; scope: Scope }) {
-  const keyword = useDebounced(scope.keyword);
-  const result = useResource("days", dayPage, { ...scope, keyword }, state);
+  const result = useResource("days", dayPage, scope, state);
   const key = JSON.stringify([
     state.version,
     scope.from,
@@ -39,16 +39,16 @@ export const Days = memo(function Days({ state, scope }: { state: ProductsState;
     key,
     data: undefined,
   });
-  const currentData = keyword === scope.keyword ? result.data : undefined;
+  const currentData = result.data;
   if (snapshot.key !== key || (currentData && snapshot.data !== currentData)) {
     setSnapshot({ key, data: currentData });
   }
   const data = currentData ?? (snapshot.key === key ? snapshot.data : undefined);
-  const busy = !!state.version && (result.isFetching || keyword !== scope.keyword);
+  const busy = !!state.version && result.isFetching;
   const current = data?.page ?? scope.page;
   const size = data?.size ?? scope.size;
   const pages = Math.max(1, Math.ceil((data?.total ?? 0) / size));
-  const error = keyword === scope.keyword ? result.error : null;
+  const error = result.error;
   const invalid = scopeError(scope, state.metadata.data?.date_from, state.metadata.data?.date_to);
   const failedPage = !!error && !!data && (current !== scope.page || size !== scope.size);
   const wrap = useRef<HTMLDivElement>(null);
@@ -65,6 +65,9 @@ export const Days = memo(function Days({ state, scope }: { state: ProductsState;
       </div>
       <div className="detail-body">
         <Filters name="detail" scope={scope} state={state} />
+        <div className="product-bar m1-detail-selection">
+          <ProductSelectionSummary scope={scope} state={state} name="detail" ready={!!data} />
+        </div>
         <div className="detail-status">
           <span>
             共 <b>{data?.total.toLocaleString("zh-CN") ?? "—"}</b> 条结果

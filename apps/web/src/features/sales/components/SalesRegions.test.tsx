@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SalesRegions } from "./SalesRegions";
 import { testFilters, testMeta, syntheticAllShops } from "../testFixtures";
 
@@ -22,6 +22,68 @@ const filters = {
   },
 };
 const onConflict = () => {};
+
+it("产品候选中文组词不查询，确认搜索保留已选产品及经营范围", async () => {
+  const calls: URL[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => {
+      const url = new URL(path, "http://localhost");
+      calls.push(url);
+      const result = url.pathname.endsWith("/filters")
+        ? {
+            meta: testMeta,
+            data: {
+              categories: ["帽子"],
+              products: url.searchParams.get("search")
+                ? []
+                : [{ key: "hat-1", name: "合成帽子", code: "H01", category: "帽子" }],
+              total: url.searchParams.get("search") ? 0 : 1,
+              offset: 0,
+              limit: 100,
+              source,
+            },
+          }
+        : response();
+      return { ok: true, json: async () => result };
+    }),
+  );
+  render(
+    <SalesRegions
+      filters={{
+        ...filters,
+        data: {
+          ...filters.data,
+          capabilities: { regions: true, product_regions: true },
+          sources: { shop_regions: source, product_regions: source },
+        },
+      }}
+      onConflict={onConflict}
+    />,
+  );
+  await waitFor(() => expect(calls.some((url) => url.pathname.endsWith("/filters"))).toBe(true));
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: "产品地区产品筛选" }));
+  fireEvent.click(await screen.findByText("合成帽子 · H01"));
+  await waitFor(() =>
+    expect(calls.some((url) => url.searchParams.get("product_key") === "hat-1")).toBe(true),
+  );
+  const before = calls.length;
+  const input = screen.getByRole("textbox", { name: "查找产品名称或编码" });
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: "shangpin" } });
+  await act(() => new Promise((resolve) => setTimeout(resolve, 650)));
+  expect(calls).toHaveLength(before);
+  fireEvent.change(input, { target: { value: "商品" } });
+  fireEvent.compositionEnd(input, { data: "商品" });
+  await waitFor(() =>
+    expect(calls.some((url) => url.searchParams.get("search") === "商品")).toBe(true),
+  );
+  expect(calls.slice(before).every((url) => url.pathname.endsWith("/filters"))).toBe(true);
+  expect(
+    screen.getByRole("combobox", { name: "产品地区产品筛选" }).closest(".product-select")
+      ?.textContent,
+  ).toContain("合成帽子 · H01");
+});
 function response(kind = "gaps") {
   return {
     meta: testMeta,

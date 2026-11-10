@@ -1,10 +1,10 @@
-/* 仅经营表现的本期推广异常；无异常时组件不渲染，不保留占位。 */
+/* 数据说明保持中性；实际检查失败才使用提醒色。 */
 .m3-sales-scope .sales-promotion-details {
   padding: 10px 14px;
-  border: 1px solid #ead6a4;
+  border: 1px solid #dce4ef;
   border-radius: 9px;
-  background: #fffbf0;
-  color: #805a1e;
+  background: #f8fafc;
+  color: #596b82;
 }
 .m3-sales-scope .sales-promotion-details > p {
   margin: 0 0 6px;
@@ -30,4 +30,9 @@
   .m3-sales-scope .sales-promotion-details {
     padding: 10px;
   }
+}
+
+.m3-sales-scope .sales-promotion-details.has-update-failure {
+  border-color: #ead6a4;
+  background: #fffbf0;
 }

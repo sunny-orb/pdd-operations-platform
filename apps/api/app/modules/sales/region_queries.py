@@ -1,10 +1,11 @@
 """地区原行只在PG分组；产品候选搜索与经营汇总分开。"""
 
 import json
-from datetime import timedelta
 from decimal import Decimal
 
 import sqlalchemy as sa
+
+from app.modules.record_coverage import missing_shop_days
 
 from .contracts import SalesError
 from .detail_queries import source_info
@@ -269,10 +270,8 @@ class RegionQueries:
                 identities = [q.shop_id] if q.shop_id else [r[0] for r in SHOPS.values()]
 
                 missing = [
-                    f"{shop}:{q.date_from + timedelta(days=i)}"
-                    for shop in identities
-                    for i in range((q.date_to - q.date_from).days + 1)
-                    if (shop, q.date_from + timedelta(days=i)) not in observed
+                    f"{shop}:{day}"
+                    for shop, day in missing_shop_days(observed, q.date_from, q.date_to, identities)
                 ]
                 totals = {
                     f: number(

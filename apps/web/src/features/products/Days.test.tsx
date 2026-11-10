@@ -158,9 +158,11 @@ it("改变每页数量回第一页，搜索和版本变化不显示其他范围�
   fireEvent.change(screen.getByRole("textbox", { name: "明细搜索商品" }), {
     target: { value: "不存在" },
   });
-  expect(screen.queryByText("第1页商品")).toBeNull();
+  // 草稿尚未提交时仍属于原筛选；提交后才撤下旧范围记录。
+  expect(screen.queryByText("第1页商品")).toBeTruthy();
   expect(screen.getByLabelText("总览范围").textContent).toBe("全部");
   await waitFor(() => expect(pending[2]?.url.searchParams.get("keyword")).toBe("不存在"));
+  expect(screen.queryByText("第1页商品")).toBeNull();
   await reply(2, { ...page(1, 50), items: [], total: 0 });
   await screen.findByText("当前筛选范围暂无记录");
   act(() =>

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.modules.record_coverage import missing_shop_days
+
 from . import source_policy
 from .contracts import SalesError
 from .repository import read_snapshot
@@ -57,10 +59,7 @@ def aggregate(rows, start, end, shop_ids):
     coverage = dict(
         observed_days=len({(r["shop_id"], r["business_date"]) for r in rows}),
         missing_dates=[
-            f"{shop}:{day}"
-            for shop in shop_ids
-            for day in days(start, end)
-            if (shop, day) not in observed
+            f"{shop}:{day}" for shop, day in missing_shop_days(observed, start, end, shop_ids)
         ],
         field_null_counts={
             field: sum(r[field] is None for r in rows) for field in METRICS.values()

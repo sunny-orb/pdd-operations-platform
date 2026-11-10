@@ -5,6 +5,7 @@ from datetime import datetime
 import sqlalchemy as sa
 
 from app.modules.data_status.catalog import SOURCES, WAREHOUSE_PAGES
+from app.modules.data_status.timeliness import merge_update_timing
 
 
 def record_web_updates(engine, rows, checked_at):
@@ -28,12 +29,25 @@ def record_web_updates(engine, rows, checked_at):
         ):
             raise ValueError("SOURCE_CHECK_IN_PROGRESS")
         for item in values:
+            prior = (
+                c.execute(
+                    sa.text("SELECT * FROM public.source_checkpoints WHERE source_id=:code"), item
+                )
+                .mappings()
+                .first()
+            )
+            if prior is None:
+                raise ValueError("WEB_CHECK_OLDER_OR_SOURCE_UNINITIALIZED")
+            snapshot = {
+                **prior["platform_snapshot"],
+                "update_timing": merge_update_timing(prior, item["updated"], checked_at),
+            }
             result = c.execute(
                 sa.text("""UPDATE public.source_checkpoints
-              SET web_updated_at=:updated,web_checked_at=:checked
+              SET web_updated_at=:updated,web_checked_at=:checked,platform_snapshot=:snapshot
               WHERE source_id=:code AND (web_checked_at IS NULL OR web_checked_at<=:checked)
-            """),
-                item,
+            """).bindparams(sa.bindparam("snapshot", type_=sa.JSON)),
+                {**item, "snapshot": snapshot},
             )
             if result.rowcount != 1:
                 raise ValueError("WEB_CHECK_OLDER_OR_SOURCE_UNINITIALIZED")

@@ -697,3 +697,101 @@ def test_first_activation_registers_future_sunday_and_manual_does_not_consume_cy
     run_scheduled_sources(sales_pg, probes, sync, now=sunday, force=True)
     run_scheduled_sources(sales_pg, probes, sync, now=sunday)
     assert calls == ["shop_daily"] * 3
+
+
+def test_first_weekly_attempt_preserves_legacy_failure_and_available_version(sales_pg):
+    from app.jobs.project_sync import Schedule
+    from app.jobs.source_monitor import run_monitor
+    from app.jobs.source_schedule import run_scheduled_sources
+    from app.modules.data_status.repository import read_status
+    from tests.test_published_versions import publish_pointer
+
+    sunday = at("17:00") + timedelta(days=4)
+    legacy_at = sunday - timedelta(hours=2)
+    probes = {"shop_daily": lambda: {"revision": "unchanged"}}
+    publish_pointer(sales_pg, "shop_daily", "available")
+    run_monitor(sales_pg, probes, lambda ids, c: dict.fromkeys(ids, True), now=legacy_at)
+    run_scheduled_sources(sales_pg, probes, lambda ids, c: {}, now=sunday - timedelta(minutes=50))
+
+    def task(c, task_id, stamp, state, finished, lease, error):
+        c.execute(
+            sa.text("""
+                INSERT INTO task_runs
+                  (id,job_code,request_ref,lock_key,status,queued_at,started_at,finished_at,
+                   worker_ref,lease_expires_at,error_code)
+                VALUES (:id,'sync_shop_daily','test','test',:state,:at,:at,
+                        :finished,'test',:lease,:error)
+            """),
+            dict(id=task_id, state=state, at=stamp, finished=finished, lease=lease, error=error),
+        )
+
+    with sales_pg.begin() as c:
+        task(c, "legacy", legacy_at, "running", None, legacy_at + timedelta(minutes=5), None)
+
+    def row():
+        data = read_status(sales_pg, source_schedule=Schedule(source_schedule_enabled=True))["data"]
+        return next(item for item in data["sources"] if item["id"] == "shop_daily")
+
+    def fail(ids, c):
+        with c.begin():
+            task(c, "weekly", sunday, "failed", sunday, None, "SYNTHETIC_WEEKLY_FAILURE")
+        return dict.fromkeys(ids, False)
+
+    assert row()["datasets"][0]["attempt_status"] == "abandoned"
+    run_scheduled_sources(sales_pg, probes, fail, now=sunday)
+    result = row()
+    assert result["platform_state"] == "failed"
+    assert result["datasets"][0]["attempt_status"] == "abandoned"
+    assert result["datasets"][0]["last_attempt_at"] == legacy_at
+    assert result["datasets"][0]["version_id"] == "shop_daily-available"
+    assert result["reconciliation"]["status"] == "failed"
+
+    run_scheduled_sources(
+        sales_pg,
+        probes,
+        lambda ids, c: {"_deferred": dict.fromkeys(ids, "MAINTENANCE_DEFERRED")},
+        now=sunday + timedelta(minutes=5),
+    )
+    assert row()["datasets"][0]["last_attempt_at"] == legacy_at
+    assert row()["reconciliation"]["status"] == "deferred"
+
+    monday = sunday + timedelta(hours=15, minutes=20)
+    run_scheduled_sources(sales_pg, probes, lambda ids, c: dict.fromkeys(ids, True), now=monday)
+    result = row()
+    assert result["platform_state"] == "available"
+    assert result["datasets"][0]["attempt_status"] == "succeeded"
+    assert result["datasets"][0]["last_attempt_at"] == monday
+    assert result["reconciliation"]["status"] == "succeeded"
+
+
+def test_unconfirmed_ordinary_receipt_retries_when_marker_reverts_and_probe_fails(sales_pg):
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    revision = "accepted"
+    downloads = []
+
+    def probe():
+        if revision is None:
+            raise ValueError("synthetic unavailable")
+        return {"revision": revision}
+
+    def sync(ids, c):
+        nonlocal revision
+        downloads.extend(ids)
+        if ids and revision == "new":
+            revision = "accepted"
+        return dict.fromkeys(ids, True)
+
+    def run(stamp):
+        return run_scheduled_sources(sales_pg, {"shop_daily": probe}, sync, now=at(stamp))
+
+    run("08:20")
+    revision = "new"
+    assert run("09:10")["pending"] == 1
+    revision = None
+    run("10:10")
+    revision = "accepted"
+    run("10:50")
+    assert downloads == ["shop_daily"] * 3
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT accepted_at FROM source_checkpoints")) == at("10:50")

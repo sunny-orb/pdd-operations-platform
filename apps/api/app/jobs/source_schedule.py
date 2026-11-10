@@ -4,8 +4,11 @@ import json
 import time
 from datetime import UTC, datetime, timedelta
 
+import sqlalchemy as sa
+
 from app.jobs.source_monitor import fingerprint
-from app.modules.data_status.checkpoint_store import CheckpointStore
+from app.modules.data_status.catalog import job_for
+from app.modules.data_status.checkpoint_store import CheckpointStore, read_legacy_tasks
 from app.modules.data_status.schedule_policy import (
     FEISHU_SOURCES,
     FEISHU_TIMES,
@@ -16,6 +19,7 @@ from app.modules.data_status.schedule_policy import (
     due_sources,
     first_reconciliation,
     next_reconciliation,
+    unconfirmed_receipt,
 )
 from app.modules.database_residency import deferred_reason
 
@@ -34,6 +38,23 @@ def _ordinary_slot(prior, slot, started):
         interrupted
         and started >= prior["checked_at"] + timedelta(minutes=20)
         and prior["scheduled_attempts"] < 2
+    )
+
+
+def _needs_receipt(prior, digest, legacy, now):
+    if not digest:
+        return False
+    if digest != prior.get("accepted_fingerprint") or unconfirmed_receipt(prior):
+        return True
+    if prior.get("sync_status"):
+        return prior["sync_status"] in ("failed", "running")
+    return bool(
+        legacy
+        and (
+            legacy["status"] in ("failed", "abandoned", "cancelled")
+            or legacy["status"] == "running"
+            and legacy["lease_expires_at"] <= now
+        )
     )
 
 
@@ -132,6 +153,8 @@ def run_scheduled_sources(
             return {"status": "already_running", "checked": 0}
         previous = store.read(c)
         cycles = store.read(c, store.reconciliations) if not force else {}
+        with c.begin():
+            legacy_tasks = read_legacy_tasks(c) if cycles else {}
         observed, selected, ordinary, weekly = {}, [], {}, {}
         regular_codes = set()
 
@@ -182,6 +205,15 @@ def run_scheduled_sources(
                     )
                 if weekly_slot is not None:
                     weekly[code] = (weekly_slot, clock())
+                    first_task = {}
+                    if not cycle or cycle["last_attempt_at"] is None:
+                        first_task["legacy_task_id"] = c.scalar(
+                            sa.text("""
+                                SELECT id FROM public.task_runs WHERE job_code=:job
+                                ORDER BY queued_at DESC,id DESC LIMIT 1
+                            """),
+                            {"job": job_for(code)},
+                        )
                     store.write_reconciliation(
                         c,
                         code,
@@ -189,17 +221,13 @@ def run_scheduled_sources(
                         status="running",
                         last_attempt_at=weekly[code][1],
                         last_finished_at=None,
+                        **first_task,
                     )
             before = observe(code, ordinary_check=regular)
             observed[code] = before
             digest = before.get("observed_fingerprint")
             if force or (
-                regular
-                and digest
-                and (
-                    digest != prior.get("accepted_fingerprint")
-                    or prior.get("sync_status") in ("failed", "running")
-                )
+                regular and _needs_receipt(prior, digest, legacy_tasks.get(code), started)
             ):
                 ordinary[code] = clock()
                 with c.begin():

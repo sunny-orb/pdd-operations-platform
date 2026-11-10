@@ -21,13 +21,14 @@ UPGRADE_SQL = (
       last_attempt_at TIMESTAMPTZ,
       last_finished_at TIMESTAMPTZ,
       last_success_at TIMESTAMPTZ,
+      legacy_task_id TEXT REFERENCES public.task_runs(id) ON DELETE SET NULL,
       error_code TEXT CHECK (error_code IN (
         'CHECK_FAILED','WAREHOUSE_WEB_LOGIN_REQUIRED','SYNC_FAILED','SOURCE_CHANGED_DURING_SYNC',
         'WORKER_LOST','MAINTENANCE_DEFERRED','DATASET_RESTORE_REQUIRED'
       )),
       CONSTRAINT source_reconciliation_state CHECK (
         (status='waiting' AND last_attempt_at IS NULL AND last_finished_at IS NULL
-          AND last_success_at IS NULL AND error_code IS NULL)
+          AND last_success_at IS NULL AND legacy_task_id IS NULL AND error_code IS NULL)
         OR (last_attempt_at IS NOT NULL AND last_attempt_at >= cycle_at AND (
           (status='running' AND last_finished_at IS NULL)
           OR (last_finished_at IS NOT NULL AND last_finished_at >= last_attempt_at AND (

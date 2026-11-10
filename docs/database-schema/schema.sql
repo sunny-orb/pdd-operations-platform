@@ -1,6 +1,6 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
 -- 迁移范围：base → 20261111_15；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：a03cd9daf4a76d15d0a3e93dfacd5f0ac8779002fbea229090ac8614b1c23977
+-- 迁移、冻结实现及生成器SHA-256：fc94a8f4c95f903c5992e9fb9dc520506892583d3bc732d9cc6fb7d8bcf04b2d
 -- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。
 -- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。
@@ -3653,13 +3653,14 @@ CREATE TABLE public.source_reconciliations (
       last_attempt_at TIMESTAMPTZ,
       last_finished_at TIMESTAMPTZ,
       last_success_at TIMESTAMPTZ,
+      legacy_task_id TEXT REFERENCES public.task_runs(id) ON DELETE SET NULL,
       error_code TEXT CHECK (error_code IN (
         'CHECK_FAILED','WAREHOUSE_WEB_LOGIN_REQUIRED','SYNC_FAILED','SOURCE_CHANGED_DURING_SYNC',
         'WORKER_LOST','MAINTENANCE_DEFERRED','DATASET_RESTORE_REQUIRED'
       )),
       CONSTRAINT source_reconciliation_state CHECK (
         (status='waiting' AND last_attempt_at IS NULL AND last_finished_at IS NULL
-          AND last_success_at IS NULL AND error_code IS NULL)
+          AND last_success_at IS NULL AND legacy_task_id IS NULL AND error_code IS NULL)
         OR (last_attempt_at IS NOT NULL AND last_attempt_at >= cycle_at AND (
           (status='running' AND last_finished_at IS NULL)
           OR (last_finished_at IS NOT NULL AND last_finished_at >= last_attempt_at AND (

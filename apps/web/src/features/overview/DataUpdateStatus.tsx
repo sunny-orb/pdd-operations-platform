@@ -327,7 +327,9 @@ function SourceDetail({ row }: { row: SourceStatus }) {
                     ? "已授权资料字段内容"
                     : observation.basis === "snapshot_date"
                       ? "货品资料快照日期"
-                      : "近7日记录数、业务日期及来源时间；历史修订由每日全量对账补查"}
+                      : row.reconciliation
+                        ? "近7日记录数、业务日期及来源时间；历史修订按每周对账核对"
+                        : "近7日记录数、业务日期及来源时间"}
           </dd>
         </div>
         <div>

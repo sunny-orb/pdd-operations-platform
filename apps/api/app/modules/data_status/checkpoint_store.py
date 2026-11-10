@@ -5,6 +5,20 @@ from contextlib import contextmanager
 import sqlalchemy as sa
 
 
+def read_legacy_tasks(c):
+    """读取首轮周对账前冻结的普通任务引用，调用方负责一致事务。"""
+    return {
+        row["source_id"]: dict(row)
+        for row in c.execute(
+            sa.text("""
+            SELECT r.source_id,t.status,t.queued_at,t.finished_at,t.error_code,t.lease_expires_at
+            FROM public.source_reconciliations r
+            JOIN public.task_runs t ON t.id=r.legacy_task_id
+        """)
+        ).mappings()
+    }
+
+
 class CheckpointStore:
     def __init__(self, engine):
         self.engine = engine

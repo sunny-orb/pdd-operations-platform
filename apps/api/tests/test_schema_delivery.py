@@ -79,9 +79,9 @@ def test_complete_sql_matches_migrations_on_real_pg():
                 if row[0] != "alembic_version_v2" and not row[0].startswith("read_")
             ]
             assert len({row[0] for row in domain_columns}) == 46
-            assert len(domain_columns) == 718
+            assert len(domain_columns) == 719
             assert len(actual["views"]) == 5
-            assert sum("FOREIGN KEY" in row[2] for row in actual["constraints"]) == 71
+            assert sum("FOREIGN KEY" in row[2] for row in actual["constraints"]) == 72
             head = ScriptDirectory.from_config(
                 Config(str(ROOT / "apps/api/alembic-v2.ini"))
             ).get_current_head()

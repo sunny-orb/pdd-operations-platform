@@ -96,3 +96,11 @@ def next_reconciliation(
         return finished + timedelta(seconds=retry_seconds)
     sunday = first_reconciliation(finished, time)
     return sunday if sunday > finished else sunday + timedelta(days=7)
+
+
+def unconfirmed_receipt(checkpoint):
+    """发布完成后前后标记未核对稳定，普通检查仍须复验这次接收。"""
+    if checkpoint.get("sync_status") != "succeeded":
+        return False
+    accepted = checkpoint.get("accepted_at")
+    return accepted is None or accepted < checkpoint["sync_finished_at"]

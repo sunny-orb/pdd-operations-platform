@@ -427,6 +427,7 @@ it("周对账失败单独提醒，保留数据可用状态和下一次重试时�
   expect(await dialog.findByText("数据可用")).toBeTruthy();
   expect(dialog.getByText("周对账未完成")).toBeTruthy();
   fireEvent.click(dialog.getByRole("button", { name: "查看1项来源异常" }));
+  expect(dialog.getByText("近7日记录数、业务日期及来源时间；历史修订按每周对账核对")).toBeTruthy();
   expect(dialog.getByText("下一次重试")).toBeTruthy();
   expect(dialog.getByText("2026/11/8 17:07:00")).toBeTruthy();
   expect(dialog.queryByText(/平台接收未成功/)).toBeNull();

@@ -6,6 +6,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.modules.data_status.catalog import DATASET_NAMES, SOURCES, job_for, source_identity
+from app.modules.data_status.checkpoint_store import read_legacy_tasks
 from app.modules.product_board.repository import BoardError
 
 DATE_TABLES = {
@@ -133,8 +134,13 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 )
                 weather = {item["url"]: item["issue_time"] for item in entries}
 
-            def dataset(code, checkpoint=None):
-                head, task = heads.get(code), jobs.get(job_for(code))
+            def dataset(code, checkpoint=None, *, source_id=None):
+                head = heads.get(code)
+                task = (
+                    legacy_tasks.get(source_id)
+                    if reconciliations.get(source_id, {}).get("last_attempt_at")
+                    else jobs.get(job_for(code))
+                )
                 expired = bool(
                     task and task["status"] == "running" and task["lease_expires_at"] <= now
                 )
@@ -162,6 +168,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 next_check,
                 next_reconciliation,
                 source_times,
+                unconfirmed_receipt,
             )
 
             scheduled = bool(
@@ -183,6 +190,8 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 if scheduled
                 else {}
             )
+
+            legacy_tasks = read_legacy_tasks(c) if reconciliations else {}
 
             def reconciliation(code):
                 if not scheduled or code not in WAREHOUSE_SOURCES:
@@ -212,13 +221,11 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
             rows = []
             for source in SOURCES:
                 p = checkpoints.get(source.id, {})
-                datasets = [dataset(code, p) for code in source.datasets]
+                datasets = [dataset(code, p, source_id=source.id) for code in source.datasets]
                 fixed_times = source_times(source.id, *schedule_args) if scheduled else ()
                 sync_status = p.get("sync_status")
-                if fixed_times and (
-                    sync_status or reconciliations.get(source.id, {}).get("last_attempt_at")
-                ):
-                    # 对账开始后底层发布任务已无法区分触发原因，普通状态只读自身检查点。
+                if fixed_times and sync_status:
+                    # 该来源已有独立普通接收结果，优先于首轮对账前的旧任务证据。
                     expired_sync = sync_status == "running" and now > p[
                         "sync_started_at"
                     ] + timedelta(minutes=20)
@@ -275,7 +282,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                     else "failed"
                     if failed
                     else "pending"
-                    if changed or deferred
+                    if changed or deferred or fixed_times and unconfirmed_receipt(p)
                     else "available"
                     if has_data
                     else "unavailable"

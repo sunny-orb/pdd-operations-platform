@@ -23,6 +23,7 @@ RECONCILIATION_COLUMNS = (
     "last_attempt_at",
     "last_finished_at",
     "last_success_at",
+    "legacy_task_id",
     "error_code",
 )
 POLICY = "db-retention-v1"
@@ -130,7 +131,7 @@ def validate_schema(c):
         )
     )
     if (
-        column_count != 719
+        column_count != 720
         or sum(len(v) for k, v in signature.items() if k.endswith(":fks")) != expected_fk_count
     ):
         raise ValueError("RETENTION_SCHEMA_RELATIONSHIPS")

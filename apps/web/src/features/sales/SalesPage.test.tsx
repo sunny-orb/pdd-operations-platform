@@ -1,7 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render as renderView, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+vi.mock("../../shared/api/publishedVersions", () => ({
+  waitForPublicationBaseline: async () => {},
+}));
+vi.mock("../../shared/api/usePublishedDomainRefresh", () => ({
+  usePublishedDomainRefresh: () => {},
+}));
 import { SalesCoverage } from "./components/SalesCoverage";
 import type { SalesResult } from "./api/contracts";
 import { testMeta, testMetrics } from "./testFixtures";
@@ -9,6 +16,14 @@ import { SalesPage } from "./SalesPage";
 import { syntheticResponse, testShops, syntheticAllShops } from "./testFixtures";
 import { _resetCacheForTesting } from "./api/queries";
 
+function render(ui: Parameters<typeof renderView>[0]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return renderView(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 beforeEach(() => {
   window.matchMedia = vi.fn().mockImplementation(() => ({
     matches: false,
@@ -44,9 +59,11 @@ it("接口失败仍保留八卡及其他折叠，不创建无依据的推广异�
     </MemoryRouter>,
   );
   expect(screen.getByRole("heading", { name: "店铺销售看板" })).toBeTruthy();
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "重新读取本地数据" })).toBeTruthy(),
+  await waitFor(
+    () => expect(screen.getByRole("button", { name: "重新读取本地数据" })).toBeTruthy(),
+    { timeout: 4000 },
   );
+  expect(fetch).toHaveBeenCalledTimes(3);
   for (const title of [
     "销售金额",
     "店铺访客",

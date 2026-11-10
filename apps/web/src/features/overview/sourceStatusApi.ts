@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { getJson } from "../../shared/api/client";
@@ -59,6 +60,7 @@ export const dataStatusSchema = z.object({
   }),
   meta: z.object({ generated_at: z.string() }),
 });
+export type DataStatus = z.infer<typeof dataStatusSchema>["data"];
 export type SourceStatus = z.infer<typeof source>;
 export type DatasetStatus = z.infer<typeof dataset>;
 export const pageNames: Record<string, string> = {
@@ -69,17 +71,44 @@ export const pageNames: Record<string, string> = {
   aftersales: "售后分析",
 };
 
-/** 弹窗卸载即取消；后台标签暂停轮询。缓存仅保留状态摘要，不触发任何来源请求。 */
-export function useDataUpdateStatus() {
-  return useQuery({
+/** 仅真实运行中的检查、接收或计算需要短时跟踪；排队/待重算不算运行。 */
+export function hasRunningUpdate(data: DataStatus | undefined) {
+  return Boolean(
+    data?.sources.some(
+      (source) =>
+        source.upstream.state === "checking" ||
+        source.platform_state === "syncing" ||
+        source.datasets.some((item) => item.attempt_status === "running"),
+    ) ||
+    data?.processing.some((item) => item.state === "syncing" || item.attempt_status === "running"),
+  );
+}
+
+/** 入口60秒查状态；弹窗打开立即读取，仅运行时15秒跟踪，空闲/读取失败停止轮询。 */
+export function useDataUpdateStatus(open = false) {
+  const query = useQuery({
     queryKey: ["data-update-status"],
     queryFn: async ({ signal }) =>
       dataStatusSchema.parse(await getJson("/api/v1/data-status", signal)),
     staleTime: 0,
-    refetchInterval: 15_000,
+    refetchInterval: (current) =>
+      !open
+        ? 60_000
+        : current.state.status !== "error" && hasRunningUpdate(current.state.data?.data)
+          ? 15_000
+          : false,
     refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: false,
   });
+  const wasOpen = useRef(false);
+  const refetch = query.refetch;
+  useEffect(() => {
+    if (open && !wasOpen.current) void refetch({ cancelRefetch: false });
+    wasOpen.current = open;
+  }, [open, refetch]);
+  return query;
 }
 export function upstreamLabel(row: SourceStatus) {
   if (row.upstream.state === "failed") return { text: "检查失败", color: "error" };

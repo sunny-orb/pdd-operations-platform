@@ -1,3 +1,4 @@
+import { mergeDiagnostics } from "./data";
 import { afterEach, expect, it, vi } from "vitest";
 import { productsSpec } from "./adapters";
 afterEach(() => vi.unstubAllGlobals());
@@ -118,7 +119,10 @@ it("中心从独立风险接口取完整31日名单，日GMV独立；风险跳�
   const { fetcher } = setup();
   const signal = new AbortController().signal;
   const meta = await productsSpec.meta(signal);
-  const d = await productsSpec.load(meta, signal);
+  const d = mergeDiagnostics(
+    await productsSpec.load(meta, signal),
+    await productsSpec.loadDiagnostics!(meta, signal),
+  );
   const urls = fetcher.mock.calls.map(([p]) => new URL(p, "http://local"));
   const risk = urls.find((u) => u.pathname.endsWith("/risks"))!;
   expect(risk.searchParams.get("date_from")).toBe("2026-10-02");
@@ -147,7 +151,10 @@ it("最新版本与日期推进重新取数，跨月/接入不足31日夹到真�
   const { fetcher, update } = setup();
   const signal = new AbortController().signal;
   const first = await productsSpec.meta(signal);
-  await productsSpec.load(first, signal);
+  mergeDiagnostics(
+    await productsSpec.load(first, signal),
+    await productsSpec.loadDiagnostics!(first, signal),
+  );
   update({
     version: "v2",
     date: "2027-01-05",
@@ -156,7 +163,10 @@ it("最新版本与日期推进重新取数，跨月/接入不足31日夹到真�
     total: 0,
   });
   const next = await productsSpec.meta(signal);
-  const d = await productsSpec.load(next, signal);
+  const d = mergeDiagnostics(
+    await productsSpec.load(next, signal),
+    await productsSpec.loadDiagnostics!(next, signal),
+  );
   const url = new URL(
     fetcher.mock.calls.filter(([u]) => u.includes("/risks"))[1][0],
     "http://local",
@@ -166,4 +176,15 @@ it("最新版本与日期推进重新取数，跨月/接入不足31日夹到真�
   expect(url.searchParams.get("data_version")).toBe("v2");
   expect(d.observationState).toBe("pending_validation");
   expect(d.card.pairs.find((p) => p.label === "观察异常对象")?.value).toBeNull();
+});
+
+it("商品基础指标请求不等待风险接口，未读取风险不能当零异常", async () => {
+  const { fetcher } = setup();
+  const signal = new AbortController().signal;
+  const meta = await productsSpec.meta(signal);
+  const data = await productsSpec.load(meta, signal);
+  expect(data.card.value).toBe("55");
+  expect(data.observationState).toBe("not_available");
+  expect(data.card.pairs.find((p) => p.label === "观察异常对象")?.value).toBeNull();
+  expect(fetcher.mock.calls.some(([path]) => path.includes("/risks"))).toBe(false);
 });

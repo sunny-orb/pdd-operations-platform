@@ -53,7 +53,7 @@ const object = (id: string): DiagnosisObject => ({
 
 it("诊断按需读取，分页后搜索全组、重开复用、晚响应隔离且失败可重试", async () => {
   const calls: URL[] = [];
-  let failOnce = true;
+  let failedAttempts = 0;
   let releaseSlow: (() => void) | undefined;
   let slowSignal: AbortSignal | undefined;
   const summary = {
@@ -84,8 +84,8 @@ it("诊断按需读取，分页后搜索全组、重开复用、晚响应隔离�
           releaseSlow = resolve;
         });
       }
-      if (search === "失败" && failOnce) {
-        failOnce = false;
+      if (search === "失败" && failedAttempts < 3) {
+        failedAttempts += 1;
         return {
           ok: false,
           status: 503,
@@ -181,7 +181,10 @@ it("诊断按需读取，分页后搜索全组、重开复用、晚响应隔离�
   await act(async () => releaseSlow?.());
   expect(within(details).queryByText("慢命中商品")).toBeNull();
   fireEvent.change(searchInput, { target: { value: "失败" } });
-  await waitFor(() => expect(within(details).getByText("清单暂时无法加载")).toBeTruthy());
+  await waitFor(() => expect(within(details).getByText("清单暂时无法加载")).toBeTruthy(), {
+    timeout: 4000,
+  });
+  expect(failedAttempts).toBe(3);
   fireEvent.click(within(details).getByRole("button", { name: /重\s*试/ }));
   await waitFor(() => expect(within(details).getByText("失败命中商品")).toBeTruthy());
   client.clear();

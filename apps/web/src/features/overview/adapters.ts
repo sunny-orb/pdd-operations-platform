@@ -118,20 +118,38 @@ export const productsSpec: DomainSpec<z.infer<typeof productMeta>> = {
       status: "观察",
     };
     if (!m.date) return empty(base);
+    const { data: d } = await request(
+      `products/overview?${query(m.version, m.date)}`,
+      board.pick({ metrics: true }),
+      signal,
+      m.version,
+    );
+    const metric = d.metrics.revenue;
+    return empty({
+      ...base,
+      value: metric?.value ?? null,
+      pairs: [
+        { label: "日环比", value: metric?.mom ?? null, type: "percent" },
+        { label: "同比", value: metric?.yoy ?? null, type: "percent" },
+        { label: "观察异常对象", value: null, type: "number" },
+        { label: "最近更新", value: m.date, type: "text" },
+      ],
+      note: `来源：数仓商品日报。${metric?.reason ?? dailyNote}`,
+    });
+  },
+  async loadDiagnostics(m, signal) {
+    if (!m.date) return { observations: [], actions: [], observationState: "not_available" };
+    const period = defaultProductPeriod(m.raw);
     const riskQuery = query(m.version, period.end);
     riskQuery.set("date_from", period.start);
-    const [{ data: d }, { data: riskData }] = await Promise.all([
-      request(
-        `products/overview?${query(m.version, m.date)}`,
-        board.pick({ metrics: true }),
-        signal,
-        m.version,
-      ),
-      request(`products/risks?${riskQuery}`, riskFeed, signal, m.version),
-    ]);
+    const { data: riskData } = await request(
+      `products/risks?${riskQuery}`,
+      riskFeed,
+      signal,
+      m.version,
+    );
     const observationState =
       riskData.status === "insufficient_data" ? "pending_validation" : "observed";
-    const metric = d.metrics.revenue;
     const observations: Observation[] = riskData.risks.map((r) => ({
       id: `products:${r.listing_id}:${r.alert.label}`,
       domain: "products",
@@ -150,16 +168,9 @@ export const productsSpec: DomainSpec<z.infer<typeof productMeta>> = {
       link: productRiskLink(riskData.period, r.listing_id),
     }));
     return {
-      card: {
-        ...base,
-        value: metric?.value ?? null,
-        pairs: [
-          { label: "日环比", value: metric?.mom ?? null, type: "percent" },
-          { label: "同比", value: metric?.yoy ?? null, type: "percent" },
-          observedCount("products", observations, observationState),
-          { label: "最近更新", value: m.date, type: "text" },
-        ],
-        note: `来源：数仓商品日报。${metric?.reason ?? dailyNote} 风险名单 ${riskData.period.start} 至 ${riskData.period.end}；观察日 ${riskData.evaluation_date}；比较期 ${riskData.baseline_period.start} 至 ${riskData.baseline_period.end}。规则 ${riskData.rule_version}；选中 ${riskData.counts.selected}，可评 ${riskData.counts.evaluated}，未评估 ${riskData.counts.unevaluated}，不适用 ${riskData.counts.excluded}。影响金额为规则估算，不是已实现损失。`,
+      cardPatch: {
+        pairs: [observedCount("products", observations, observationState)],
+        note: `风险名单 ${riskData.period.start} 至 ${riskData.period.end}；观察日 ${riskData.evaluation_date}；比较期 ${riskData.baseline_period.start} 至 ${riskData.baseline_period.end}。规则 ${riskData.rule_version}；选中 ${riskData.counts.selected}，可评 ${riskData.counts.evaluated}，未评估 ${riskData.counts.unevaluated}，不适用 ${riskData.counts.excluded}。影响金额为规则估算，不是已实现损失。`,
       },
       observations,
       observationState,
@@ -225,26 +236,44 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
     if (!m.date) return empty(base);
     const p = query(m.version, m.date);
     p.set("mode", "product");
-    const [{ data: d }, { data: di }] = await Promise.all([
-      request(
-        `promotion/overview?${p}`,
-        promotionOverview.pick({ metrics: true }),
-        signal,
-        m.version,
-      ),
-      request(
-        `promotion/diagnosis?${p}&detail=alerts`,
-        diagnosis.pick({
-          current_window: true,
-          previous_window: true,
-          flagged_products: true,
-          rule_version: true,
-          status: true,
-        }),
-        signal,
-        m.version,
-      ),
-    ]);
+    const { data: d } = await request(
+      `promotion/overview?${p}`,
+      promotionOverview.pick({ metrics: true }),
+      signal,
+      m.version,
+    );
+    return empty({
+      ...base,
+      value: d.metrics.roi?.value ?? null,
+      pairs: [
+        { label: "花费", value: d.metrics.spend?.value ?? null, type: "currency" },
+        { label: "交易额", value: d.metrics.revenue?.value ?? null, type: "currency" },
+        {
+          label: "CTR / CVR",
+          value: `${formatMetric(d.metrics.ctr?.value, "percent")} / ${formatMetric(d.metrics.cvr?.value, "percent")}`,
+          type: "text",
+        },
+        { label: "最近更新", value: m.date, type: "text" },
+      ],
+      note: "来源：数仓商品推广 · 最新观察单日。",
+    });
+  },
+  async loadDiagnostics(m, signal) {
+    if (!m.date) return { observations: [], actions: [], observationState: "not_available" };
+    const p = query(m.version, m.date);
+    p.set("mode", "product");
+    const { data: di } = await request(
+      `promotion/diagnosis?${p}&detail=alerts`,
+      diagnosis.pick({
+        current_window: true,
+        previous_window: true,
+        flagged_products: true,
+        rule_version: true,
+        status: true,
+      }),
+      signal,
+      m.version,
+    );
     const window = `${di.current_window.start ?? "未知"} 至 ${di.current_window.end ?? "未知"}`;
     const observations: Observation[] = di.flagged_products.map((r) => ({
       id: `promotion:${r.object_key}`,
@@ -266,21 +295,7 @@ export const promotionSpec: DomainSpec<PromotionMeta> = {
       link: promotionLink(m.date!, r),
     }));
     return {
-      card: {
-        ...base,
-        value: d.metrics.roi?.value ?? null,
-        pairs: [
-          { label: "花费", value: d.metrics.spend?.value ?? null, type: "currency" },
-          { label: "交易额", value: d.metrics.revenue?.value ?? null, type: "currency" },
-          {
-            label: "CTR / CVR",
-            value: `${formatMetric(d.metrics.ctr?.value, "percent")} / ${formatMetric(d.metrics.cvr?.value, "percent")}`,
-            type: "text",
-          },
-          { label: "最近更新", value: m.date, type: "text" },
-        ],
-        note: `来源：数仓商品推广 · 最新观察单日。诊断另按 ${window}，不等于当日结果；来源完整性及正式评级待核验。`,
-      },
+      cardPatch: { note: `诊断另按 ${window}，不等于当日结果；来源完整性及正式评级待核验。` },
       observations,
       observationState:
         !observations.length && di.status === "insufficient_evidence"

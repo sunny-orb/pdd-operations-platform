@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApiError as TransportError, getJson } from "../../shared/api/client";
 import type { Scope } from "./scope";
 export class ApiError extends Error {
   constructor(
@@ -14,11 +15,13 @@ export async function get<T>(
   params: URLSearchParams,
   signal?: AbortSignal,
 ): Promise<T> {
-  const response = await fetch(`/api/v1/products/${path}?${params}`, { signal });
-  const json: unknown = await response.json();
-  if (!response.ok) {
-    const error = z.object({ error: z.object({ code: z.string() }) }).safeParse(json);
-    throw new ApiError(response.status, error.success ? error.data.error.code : "REQUEST_FAILED");
+  let json: unknown;
+  try {
+    json = await getJson(`/api/v1/products/${path}?${params}`, signal);
+  } catch (error) {
+    if (error instanceof TransportError)
+      throw new ApiError(error.status, error.code ?? "REQUEST_FAILED");
+    throw error;
   }
   return z
     .object({ data: schema, meta: z.object({ data_version: z.string(), request_id: z.string() }) })

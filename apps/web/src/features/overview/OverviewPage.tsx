@@ -211,6 +211,7 @@ export function OverviewPage() {
           onShowAllChange={setAllAlerts}
         />
         <ActionsSection
+          coverage={coverage}
           actions={view.actions}
           preview={preview.actions}
           total={view.actionCount}

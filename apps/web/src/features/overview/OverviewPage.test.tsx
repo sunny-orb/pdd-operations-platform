@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render as renderView, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, beforeAll, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { OverviewPage } from "./OverviewPage";
 import { useOverview } from "./useOverview";
 import { actionFromObservation, productLink, type Observation } from "./model";
@@ -48,7 +50,29 @@ beforeAll(() => {
     }),
   });
 });
-afterEach(cleanup);
+beforeEach(() => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify({
+          data: { sources: [], processing: [], monitor: { enabled: true, interval_seconds: 900 } },
+          meta: { generated_at: "2026-11-10T00:00:00Z" },
+        }),
+      ),
+  );
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+function render(ui: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return renderView(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 const obs: Observation = {
   id: "x",
   domain: "products",
@@ -792,4 +816,46 @@ it("经营卡显示来源最高等级，更新时切换P0/P1/P2；空名单及�
   data[1].data!.observations = [];
   rerender(view());
   expect(badge().textContent).toBe("观察");
+});
+
+it("首次域读取失败明确失败而非暂无数据，保留值带原日期及失败说明", () => {
+  const data = states();
+  data[1].data = undefined;
+  data[1].error = "数据读取超时，请稍后重试。";
+  data[2].retained = true;
+  data[2].error = "服务暂时繁忙，请稍后重试。";
+  data[2].data!.card.value = "2.5";
+  vi.mocked(useOverview).mockReturnValue(data);
+  render(
+    <MemoryRouter>
+      <OverviewPage />
+    </MemoryRouter>,
+  );
+  const failed = document.querySelector("#domain-products")!;
+  expect(failed.textContent).toContain("读取失败");
+  expect(failed.textContent).not.toContain("暂无数据");
+  const retained = document.querySelector("#domain-promotion")!;
+  expect(retained.textContent).toContain("当前显示上次可用数据 · 2026-10-27");
+  expect(retained.textContent).toContain("服务暂时繁忙");
+});
+
+it("诊断失败的动作空态明确读取失败，不把未读取建议写成没有待办", () => {
+  const data = states();
+  for (const state of data) {
+    state.data!.observations = [];
+    state.data!.actions = [];
+    state.data!.observationState = "not_available";
+  }
+  data[1].error = "风险与建议读取失败：服务暂时繁忙";
+  data[1].observationError = "服务暂时繁忙";
+  vi.mocked(useOverview).mockReturnValue(data);
+  render(
+    <MemoryRouter>
+      <OverviewPage />
+    </MemoryRouter>,
+  );
+  const actions = document.querySelector("#actions")!;
+  expect(actions.textContent).toContain("来源建议读取失败");
+  expect(actions.textContent).not.toContain("首页关注对象暂无来源建议");
+  expect(actions.textContent).toContain("不代表没有待处理事项");
 });

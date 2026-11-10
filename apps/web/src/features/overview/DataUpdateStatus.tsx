@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useId, useState } from "react";
 import {
   DatabaseOutlined,
   CopyOutlined,
@@ -7,10 +7,11 @@ import {
   PlusSquareOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { Alert, Button, Modal, Radio, Table, Tabs, Tag, Tooltip } from "antd";
+import { Alert, Badge, Button, Modal, Radio, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { localTime } from "./model";
 import {
+  hasRunningUpdate,
   pageNames,
   platformLabels,
   upstreamLabel,
@@ -18,6 +19,7 @@ import {
   type DatasetStatus,
   type SourceStatus,
 } from "./sourceStatusApi";
+import { dataUpdateAlerts, sourceHasFailure } from "./dataUpdateAlerts";
 import "./data-update-status.css";
 
 const systems = { warehouse: "数仓", feishu: "飞书", nmc: "气象台" };
@@ -57,6 +59,16 @@ function DatasetDetail({ item }: { item: DatasetStatus }) {
       <span>最近尝试：{time(item.last_attempt_at)}</span>
       <span>完成时间：{time(item.last_finished_at)}</span>
       <span>尝试结果：{status}</span>
+      {["failed", "abandoned", "cancelled"].includes(item.attempt_status ?? "") && (
+        <span>
+          {item.error_code
+            ? `失败记录：${item.error_code}；具体原因待核实。`
+            : "失败原因尚未确认。"}
+          {item.version_id
+            ? "已有成功数据仍可使用，请以数据日期为准。"
+            : "当前没有可用的成功数据。"}
+        </span>
+      )}
     </div>
   );
 }
@@ -151,6 +163,16 @@ function SourceDetail({ row }: { row: SourceStatus }) {
   const observation = row.upstream.observation;
   return (
     <div className="m6-update-detail">
+      {sourceHasFailure(row) && (
+        <p>
+          异常影响：{row.pages.map((page) => pageNames[page]).join("、")}。
+          {row.upstream.state === "failed" ? "上游检查未成功；" : "平台接收未成功；"}
+          请以各用途的数据日期和最近成功时间确认当前可用范围。
+          {!row.upstream.error_code &&
+            !row.datasets.some((item) => item.error_code) &&
+            "具体失败原因尚未确认。"}
+        </p>
+      )}
       <dl>
         <div>
           <dt>上游原名</dt>
@@ -268,6 +290,14 @@ const columns: ColumnsType<SourceStatus> = [
     width: 300,
     render: (_, row) => (
       <div className="m6-update-name">
+        {sourceHasFailure(row) && (
+          <span
+            className="m6-update-row-dot"
+            role="img"
+            aria-label={`来源异常：${row.name}`}
+            title="此来源更新异常，展开明细查看"
+          />
+        )}
         <a
           className="m6-update-source-link"
           href={row.source_url}
@@ -326,11 +356,27 @@ const columns: ColumnsType<SourceStatus> = [
   },
 ];
 
-function StatusContent() {
-  const query = useDataUpdateStatus();
+function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus> }) {
   const [page, setPage] = useState("all");
+  const [activeTab, setActiveTab] = useState<string>();
+  const [onlyFailed, setOnlyFailed] = useState(false);
+  const [sourceKeys, setSourceKeys] = useState<React.Key[]>([]);
+  const [processingKeys, setProcessingKeys] = useState<React.Key[]>([]);
   const data = query.data?.data;
-  const rows = (data?.sources ?? []).filter((row) => page === "all" || row.pages.includes(page));
+  const alerts = dataUpdateAlerts(data);
+  const rows = (data?.sources ?? []).filter(
+    (row) => (page === "all" || row.pages.includes(page)) && (!onlyFailed || sourceHasFailure(row)),
+  );
+  const processingRows = (data?.processing ?? []).filter(
+    (item) => !onlyFailed || item.state === "failed",
+  );
+  const locateFailures = (tab: "sources" | "processing") => {
+    setActiveTab(tab);
+    setPage("all");
+    setOnlyFailed(true);
+    if (tab === "sources") setSourceKeys(alerts.sources.map((row) => row.id));
+    else setProcessingKeys(alerts.processing.map((item) => item.code));
+  };
   return (
     <>
       <div className="m6-update-intro">
@@ -351,7 +397,12 @@ function StatusContent() {
             </small>
           )}
           <small className="m6-update-subtext">
-            页面状态每15秒刷新 · 更新于 {time(query.data?.meta.generated_at)}
+            {query.isError
+              ? "状态读取失败，自动跟踪已暂停"
+              : hasRunningUpdate(data)
+                ? "任务运行中，每15秒跟踪状态"
+                : "打开时读取状态，可手动刷新"}{" "}
+            · 更新于 {time(query.data?.meta.generated_at)}
           </small>
         </span>
         <Button
@@ -370,7 +421,35 @@ function StatusContent() {
           description={data ? "保留上次状态，请稍后刷新。" : "暂时无法读取更新状态，请稍后刷新。"}
         />
       )}
+      {(alerts.failed || onlyFailed) && (
+        <div className="m6-update-alert-summary">
+          <span>共 {alerts.sources.length + alerts.processing.length} 项异常</span>
+          {alerts.sources.length > 0 && (
+            <Button type="link" onClick={() => locateFailures("sources")}>
+              查看{alerts.sources.length}项来源异常
+            </Button>
+          )}
+          {alerts.processing.length > 0 && (
+            <Button type="link" onClick={() => locateFailures("processing")}>
+              查看{alerts.processing.length}项处理异常
+            </Button>
+          )}
+          {onlyFailed && (
+            <>
+              <span>仅显示异常</span>
+              <Button type="link" onClick={() => setOnlyFailed(false)}>
+                显示全部
+              </Button>
+            </>
+          )}
+        </div>
+      )}
       <Tabs
+        activeKey={
+          activeTab ??
+          (alerts.processing.length && !alerts.sources.length ? "processing" : "sources")
+        }
+        onChange={setActiveTab}
         className="m6-update-tabs"
         items={[
           {
@@ -406,8 +485,10 @@ function StatusContent() {
                   pagination={false}
                   size="middle"
                   scroll={{ x: 1171, y: "var(--m6-update-body-height)" }}
-                  locale={{ emptyText: "暂无来源状态" }}
+                  locale={{ emptyText: onlyFailed ? "当前没有异常来源" : "暂无来源状态" }}
                   expandable={{
+                    expandedRowKeys: sourceKeys,
+                    onExpandedRowsChange: (keys) => setSourceKeys([...keys]),
                     columnTitle: "明细",
                     columnWidth: 46,
                     expandIcon: ({ expanded, onExpand, record }) => (
@@ -443,12 +524,52 @@ function StatusContent() {
               <Table
                 className="m6-update-table"
                 rowKey="code"
-                dataSource={data?.processing ?? []}
+                dataSource={processingRows}
+                locale={{ emptyText: onlyFailed ? "当前没有处理异常" : "暂无处理状态" }}
+                expandable={{
+                  columnTitle: "明细",
+                  columnWidth: 46,
+                  expandedRowKeys: processingKeys,
+                  onExpandedRowsChange: (keys) => setProcessingKeys([...keys]),
+                  expandedRowRender: (item) => (
+                    <div className="m6-update-detail">
+                      <p>
+                        影响页面：{item.pages.map((page) => pageNames[page]).join("、") || "未提供"}
+                      </p>
+                      {item.state === "failed" && (
+                        <p>
+                          最近计算未成功；
+                          {item.error_code
+                            ? `失败记录：${item.error_code}，具体原因待核实。`
+                            : "失败原因尚未确认。"}
+                          {item.version_id
+                            ? "已有结果仍保留，请以生成时间和输入日期为准。"
+                            : "当前没有可用的成功结果。"}
+                        </p>
+                      )}
+                      <DatasetDetail item={item} />
+                    </div>
+                  ),
+                }}
                 pagination={false}
                 size="middle"
                 scroll={{ x: 700, y: "var(--m6-update-body-height)" }}
                 columns={[
-                  { title: "处理项目", dataIndex: "name" },
+                  {
+                    title: "处理项目",
+                    render: (_, item) => (
+                      <span>
+                        {item.state === "failed" && (
+                          <span
+                            className="m6-update-row-dot"
+                            role="img"
+                            aria-label={`处理异常：${item.name}`}
+                          />
+                        )}
+                        {item.name}
+                      </span>
+                    ),
+                  },
                   {
                     title: "输入数据截至",
                     render: (_, item) =>
@@ -493,18 +614,51 @@ function StatusContent() {
   );
 }
 
-/** 只在打开时挂载状态查询；关闭即停止轮询及取消未完成请求。 */
+/** 入口与弹窗共享一次状态查询；全来源失败持续提醒，只有实际恢复后才清除。 */
 export const DataUpdateStatus = memo(function DataUpdateStatus() {
   const [open, setOpen] = useState(false);
+  const query = useDataUpdateStatus(open);
+  const alerts = dataUpdateAlerts(query.data?.data);
+  const statusId = useId();
+  const summary = [
+    alerts.failed ? `数据更新异常：${alerts.description}` : "",
+    query.isError ? "状态读取失败，暂时无法确认最新状态" : "",
+    !query.isError && alerts.stale ? "部分来源检查已过期" : "",
+  ]
+    .filter(Boolean)
+    .join("；");
   return (
     <>
-      <Button
-        className="m6-update-entry"
-        icon={<DatabaseOutlined aria-hidden="true" />}
-        onClick={() => setOpen(true)}
+      <Tooltip title={summary || (query.isPending ? "正在读取更新状态" : undefined)}>
+        <Badge className="m6-update-badge" dot={alerts.failed} title="" offset={[-2, 2]}>
+          <Button
+            aria-describedby={statusId}
+            className="m6-update-entry"
+            icon={<DatabaseOutlined aria-hidden="true" />}
+            onClick={() => setOpen(true)}
+          >
+            数据更新状态
+            {(query.isError || (!alerts.failed && alerts.stale)) && (
+              <span
+                className="m6-update-warning"
+                aria-label={query.isError ? "状态读取失败" : "检查已过期"}
+              >
+                {query.isError ? " · 读取失败" : " · 检查已过期"}
+              </span>
+            )}
+          </Button>
+        </Badge>
+      </Tooltip>
+      <span
+        id={statusId}
+        className="m6-update-sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
       >
-        数据更新状态
-      </Button>
+        {alerts.failed && <span aria-label="数据更新异常">{summary}</span>}
+        {!alerts.failed && summary}
+      </span>
       <Modal
         title="数据更新状态"
         open={open}
@@ -514,7 +668,7 @@ export const DataUpdateStatus = memo(function DataUpdateStatus() {
         width={1360}
         className="m6-update-modal"
       >
-        {open && <StatusContent />}
+        {open && <StatusContent query={query} />}
       </Modal>
     </>
   );

@@ -1,5 +1,8 @@
+import { waitForPublicationBaseline } from "../../shared/api/publishedVersions";
+import { shouldRetryRequest } from "../../shared/api/client";
+import { usePublishedDomainRefresh } from "../../shared/api/usePublishedDomainRefresh";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { defaultProductPeriod } from "../../shared/products/period";
@@ -9,13 +12,21 @@ import { catalogOptions } from "./catalog";
 import { patchScope, readScope, scopeError, type Scope, type ScopeName } from "./scope";
 
 export function useProducts() {
+  const client = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const metadata = useQuery({
     queryKey: ["m1", "meta"],
-    queryFn: ({ signal }) => get("meta", meta, new URLSearchParams(), signal),
-    retry: false,
-    refetchInterval: 45000,
-    refetchOnWindowFocus: "always",
+    queryFn: async ({ signal }) => {
+      await waitForPublicationBaseline(client, signal);
+      return get("meta", meta, new URLSearchParams(), signal);
+    },
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  });
+  usePublishedDomainRefresh("products", () => {
+    void metadata.refetch();
   });
   const retried = useRef(new Set<string>());
   const version = metadata.data?.data_version ?? "";
@@ -57,7 +68,8 @@ export function useResource<T>(
       if (invalid) throw new ApiError(422, invalid);
       return get(path, schema, params(scope, state.version), signal);
     },
-    retry: false,
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
     // 只在同一版本、同一筛选的评分翻页期间保留旧页，避免列表塌陷造成滚动跳动。
     // 换筛选、日期、版本或接口时立即撤下旧结果，不让旧商品冒充新范围的数据。
     placeholderData: (previousData, previousQuery) => {
@@ -113,7 +125,8 @@ export function useOptions(scope: Scope, state: ProductsState, needle: string, n
     },
     // 发布版本不变时目录不会变；新版本进入独立缓存键。
     staleTime: Infinity,
-    retry: false,
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2] === directory && previousQuery.queryKey[3] === state.version
         ? previous

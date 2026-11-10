@@ -38,13 +38,29 @@ beforeEach(() => {
     },
   );
 });
+function publicationResponse() {
+  return new Response(
+    JSON.stringify({
+      data: {
+        products: "publication-1",
+        promotion: "publication-1",
+        sales: "publication-1",
+        aftersales: "publication-1",
+      },
+    }),
+  );
+}
 it("retains all six sections and available risk fields when upstream is unavailable", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: { code: "PRODUCTS_NOT_CONNECTED" } }), {
-        status: 503,
-      }),
+    vi.fn().mockImplementation((url: string) =>
+      Promise.resolve(
+        url.includes("/published-versions")
+          ? publicationResponse()
+          : new Response(JSON.stringify({ error: { code: "PRODUCTS_NOT_CONNECTED" } }), {
+              status: 503,
+            }),
+      ),
     ),
   );
   render(
@@ -56,7 +72,10 @@ it("retains all six sections and available risk fields when upstream is unavaila
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  expect(await screen.findByText("商品数据尚未接通")).toBeTruthy();
+  expect(await screen.findByText("商品数据尚未接通", {}, { timeout: 4000 })).toBeTruthy();
+  expect(
+    vi.mocked(fetch).mock.calls.filter(([url]) => String(url).includes("/products/meta")),
+  ).toHaveLength(3);
   for (const id of [
     "product-brief",
     "product-scores",
@@ -77,29 +96,31 @@ it("keeps the business cutoff concise and explains the later sync time in detail
     "fetch",
     vi.fn().mockImplementation((url: string) =>
       Promise.resolve(
-        new Response(
-          JSON.stringify(
-            url.includes("/meta")
-              ? {
-                  data: {
-                    data_version: "header-test",
-                    date_from: "2026-08-30",
-                    date_to: "2026-10-28",
-                    observed_rows: "122414",
-                    product_count: "2816",
-                    success_at: "2026-10-29T10:13:29+08:00",
-                    complete_through: null,
-                    completeness: "unknown",
-                    profile_basis: "按当前资料归属",
-                    latest_attempt: { status: "succeeded" },
-                    sources: [],
-                  },
-                  meta: { data_version: "header-test", request_id: "test" },
-                }
-              : { error: { code: "PRODUCTS_NOT_CONNECTED" } },
-          ),
-          { status: url.includes("/meta") ? 200 : 503 },
-        ),
+        url.includes("/published-versions")
+          ? publicationResponse()
+          : new Response(
+              JSON.stringify(
+                url.includes("/meta")
+                  ? {
+                      data: {
+                        data_version: "header-test",
+                        date_from: "2026-08-30",
+                        date_to: "2026-10-28",
+                        observed_rows: "122414",
+                        product_count: "2816",
+                        success_at: "2026-10-29T10:13:29+08:00",
+                        complete_through: null,
+                        completeness: "unknown",
+                        profile_basis: "按当前资料归属",
+                        latest_attempt: { status: "succeeded" },
+                        sources: [],
+                      },
+                      meta: { data_version: "header-test", request_id: "test" },
+                    }
+                  : { error: { code: "PRODUCTS_NOT_CONNECTED" } },
+              ),
+              { status: url.includes("/meta") ? 200 : 503 },
+            ),
       ),
     ),
   );

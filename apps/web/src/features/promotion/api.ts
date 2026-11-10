@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApiError as TransportError, getJson } from "../../shared/api/client";
 import type { Mode, Scope } from "./state";
 export class PromotionError extends Error {
   constructor(
@@ -14,16 +15,12 @@ export async function get<T>(
   params: URLSearchParams,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(`/api/v1/promotion/${path}?${params}`, { signal });
-  const json: unknown = await response.json();
-  if (!response.ok) {
-    const error = z
-      .object({ error: z.object({ code: z.string(), message: z.string().optional() }) })
-      .safeParse(json);
-    throw new PromotionError(
-      response.status,
-      error.success ? error.data.error.message || error.data.error.code : "推广查询失败",
-    );
+  let json: unknown;
+  try {
+    json = await getJson(`/api/v1/promotion/${path}?${params}`, signal);
+  } catch (error) {
+    if (error instanceof TransportError) throw new PromotionError(error.status, error.message);
+    throw error;
   }
   return z
     .object({ data: schema, meta: z.object({ data_version: z.string(), request_id: z.string() }) })

@@ -3,6 +3,13 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
+// 发布信号本身在shared及overview组合测试验证，本文件只控制领域响应顺序。
+vi.mock("../../shared/api/publishedVersions", () => ({
+  waitForPublicationBaseline: async () => {},
+}));
+vi.mock("../../shared/api/usePublishedDomainRefresh", () => ({
+  usePublishedDomainRefresh: () => {},
+}));
 import { z } from "zod";
 import { useOptions, useProducts, useResource, type ProductsState } from "./data";
 import { readScope } from "./scope";

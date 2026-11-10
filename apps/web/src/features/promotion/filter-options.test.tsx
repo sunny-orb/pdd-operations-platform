@@ -3,6 +3,13 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
+// 发布信号本身在shared及overview组合测试验证，本文件只控制领域响应顺序。
+vi.mock("../../shared/api/publishedVersions", () => ({
+  waitForPublicationBaseline: async () => {},
+}));
+vi.mock("../../shared/api/usePublishedDomainRefresh", () => ({
+  usePublishedDomainRefresh: () => {},
+}));
 import { usePromotion } from "./data";
 
 afterEach(() => {
@@ -171,7 +178,7 @@ it("补名称失败不清空商品或目录，可单独重试且不重复读取�
         ? { ok: false, status: 503, json: async () => ({ error: { code: "UNAVAILABLE" } }) }
         : selectedResponse("恢复名称"),
   });
-  await waitFor(() => expect(result.current.selectedOptions.error).toBeTruthy());
+  await waitFor(() => expect(result.current.selectedOptions.error).toBeTruthy(), { timeout: 4000 });
   expect(result.current.scope.products).toEqual(["listing-outside"]);
   expect(result.current.options.data?.data.total).toBe(125);
   fail = false;
@@ -180,7 +187,7 @@ it("补名称失败不清空商品或目录，可单独重试且不重复读取�
   });
   await waitFor(() => expect(result.current.selectedProducts[0]?.label).toBe("恢复名称"));
   expect(fetch.mock.calls.filter(([url]) => url.includes("/options?"))).toHaveLength(1);
-  expect(fetch.mock.calls.filter(([url]) => url.includes("/options/selected?"))).toHaveLength(2);
+  expect(fetch.mock.calls.filter(([url]) => url.includes("/options/selected?"))).toHaveLength(4);
 });
 
 it("完整日期目录只取一次，切换条件保留全部选项，搜索只缩小商品候选", async () => {
@@ -217,7 +224,7 @@ it("首次进入先加载筛选目录，经营查询不抢占选项请求，目�
   await act(async () =>
     release({ ok: false, status: 503, json: async () => ({ error: { code: "UNAVAILABLE" } }) }),
   );
-  await waitFor(() => expect(result.current.options.error).toBeTruthy());
+  await waitFor(() => expect(result.current.options.error).toBeTruthy(), { timeout: 4000 });
   await waitFor(() =>
     expect(fetch.mock.calls.some(([url]) => url.includes("/overview?"))).toBe(true),
   );
@@ -341,7 +348,7 @@ it("日期改变重新读取目录，回到已看日期复用缓存，失败可�
   });
   await waitFor(() => expect(result.current.options.data?.data.products).toHaveLength(125));
   act(() => result.current.change({ from: "2026-10-01" }));
-  await waitFor(() => expect(result.current.options.error).toBeTruthy());
+  await waitFor(() => expect(result.current.options.error).toBeTruthy(), { timeout: 4000 });
   expect(result.current.options.data).toBeUndefined();
   fail = false;
   await act(async () => {
@@ -410,7 +417,7 @@ it("快速切换日期时，晚到的旧目录不会覆盖当前候选", async (
 });
 
 it("目录被截断时明确失败，不把前100项当作完整选项", async () => {
-  const { result } = setup({
+  const { result, fetch } = setup({
     optionsReply: async () => ({
       ok: true,
       status: 200,
@@ -429,6 +436,7 @@ it("目录被截断时明确失败，不把前100项当作完整选项", async (
       }),
     }),
   });
-  await waitFor(() => expect(result.current.options.error).toBeTruthy());
+  await waitFor(() => expect(result.current.options.error).toBeTruthy(), { timeout: 4000 });
   expect(result.current.options.data).toBeUndefined();
+  expect(fetch.mock.calls.filter(([url]) => url.includes("/options?"))).toHaveLength(3);
 });

@@ -114,20 +114,23 @@ it("翻页失败保留上一页，提示失败且重试成功，不显示无记�
   const { pending } = setup();
   await screen.findByText("共 80 条记录");
   fireEvent.click(screen.getByRole("button", { name: "下一页" }));
-  await waitFor(() => expect(pending).toHaveLength(1));
-  await act(async () =>
-    pending[0]({
-      ok: false,
-      status: 503,
-      json: async () => ({ error: { code: "FAILED" } }),
-    } as unknown as ReturnType<typeof response>),
-  );
+  // 首次请求及1秒、2秒后的两次自动重试均失败，才显示最终失败态。
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await waitFor(() => expect(pending).toHaveLength(attempt + 1), { timeout: 3500 });
+    await act(async () =>
+      pending[attempt]({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: { code: "FAILED" } }),
+      } as unknown as ReturnType<typeof response>),
+    );
+  }
   await screen.findByText("第2页加载失败，仍显示第1页。");
   expect(screen.getAllByText("测试店1")).toHaveLength(3);
   expect(screen.queryByText(/暂无记录/)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "重试" }));
-  await waitFor(() => expect(pending).toHaveLength(2));
-  await act(async () => pending[1](response(2)));
+  await waitFor(() => expect(pending).toHaveLength(4));
+  await act(async () => pending[3](response(2)));
   await screen.findByText("第 2 / 4 页");
   expect(screen.queryByText(/加载失败/)).toBeNull();
 });
@@ -154,14 +157,17 @@ it("新筛选读取失败不显示无记录，也不保留上个店铺的明细"
   const { pending } = setup();
   await screen.findByText("共 80 条记录");
   fireEvent.click(screen.getByRole("button", { name: "换店" }));
-  await waitFor(() => expect(pending).toHaveLength(1));
-  await act(async () =>
-    pending[0]({
-      ok: false,
-      status: 503,
-      json: async () => ({ error: { code: "FAILED" } }),
-    } as unknown as ReturnType<typeof response>),
-  );
+  // 首次请求及1秒、2秒后的两次自动重试均失败，才显示最终失败态。
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await waitFor(() => expect(pending).toHaveLength(attempt + 1), { timeout: 3500 });
+    await act(async () =>
+      pending[attempt]({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: { code: "FAILED" } }),
+      } as unknown as ReturnType<typeof response>),
+    );
+  }
   await screen.findByText("明细暂时无法加载，请重试。");
   expect(screen.queryByText("测试店1")).toBeNull();
   expect(screen.queryByText(/暂无记录/)).toBeNull();

@@ -48,7 +48,7 @@ def initialize(root: Path) -> None:
             "# 本地Docker应用只读账号；由db-local.py生成，不提交。\n"
             f"DATABASE_URL=postgresql+psycopg://pdd_app:{config['APP_PASSWORD']}"
             f"@127.0.0.1:{config['POSTGRES_PORT']}/pdd_operations\n"
-            "APP_ENV=development\nDB_POOL_SIZE=3\nDB_MAX_OVERFLOW=0\n",
+            "APP_ENV=development\nDB_POOL_SIZE=4\nDB_MAX_OVERFLOW=0\n",
         )
 
 

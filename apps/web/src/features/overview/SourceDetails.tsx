@@ -25,7 +25,7 @@ export const SourceDetails = memo(function SourceDetails({
   return (
     <>
       <div className="m6-source-tools">
-        <p>页面每45秒或切回窗口检查本地版本，手动刷新不触发上游同步。</p>
+        <p>页面每5分钟检查已发布更新，仅刷新有变化的数据；手动刷新不触发上游同步。</p>
         <Button
           aria-label="刷新本地查询"
           icon={<ReloadOutlined />}

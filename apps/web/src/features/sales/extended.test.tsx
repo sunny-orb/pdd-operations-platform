@@ -1,10 +1,25 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
+vi.mock("../../shared/api/publishedVersions", () => ({
+  waitForPublicationBaseline: async () => {},
+}));
+vi.mock("../../shared/api/usePublishedDomainRefresh", () => ({
+  usePublishedDomainRefresh: () => {},
+}));
+import { cleanup, render as renderView, screen, waitFor, fireEvent } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { SalesMeta } from "./api/contracts";
 import { SalesPage } from "./SalesPage";
 import { syntheticResponse } from "./testFixtures";
+function render(ui: Parameters<typeof renderView>[0]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  return renderView(ui, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    ),
+  });
+}
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();

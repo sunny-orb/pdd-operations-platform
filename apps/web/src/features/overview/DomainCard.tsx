@@ -56,7 +56,7 @@ export function DomainCard({ state }: { state: DomainState }) {
         >
           {priority
             ? `${priority} 风险`
-            : (card?.status ?? (state.loading ? "读取中" : "暂无数据"))}
+            : (card?.status ?? (state.loading ? "读取中" : state.error ? "读取失败" : "暂无数据"))}
         </Tag>
       </div>
       <h3>{card?.heading ?? `${domain.label}看板`}</h3>
@@ -66,7 +66,10 @@ export function DomainCard({ state }: { state: DomainState }) {
             ? `${state.id === "promotion" ? "ROI " : ""}${formatMetric(card.value, card.valueType)}`
             : "—"}
         </strong>
-        <span>{card?.valueLabel ?? "暂无数据"}</span>
+        <span>
+          {card?.valueLabel ??
+            (state.loading ? "正在读取" : state.error ? "数据暂不可用" : "暂无数据")}
+        </span>
       </div>
       <div className="m6-metric-pairs">
         {pairs.map((field) => {
@@ -87,6 +90,7 @@ export function DomainCard({ state }: { state: DomainState }) {
           <Spin size="small" /> 正在读取数据
         </div>
       )}
+      {state.retained && <small>当前显示上次可用数据 · {state.meta?.date ?? "日期未知"}</small>}
       {state.error && (
         <Alert
           type="error"

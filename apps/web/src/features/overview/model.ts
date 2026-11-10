@@ -127,18 +127,21 @@ export function observationCoverage(
     data: DomainPayload | undefined;
     error: string | null;
     loading: boolean;
+    observationLoading?: boolean;
+    observationError?: string | null;
+    retained?: boolean;
   }[],
 ): ObservationCoverage[] {
   return states.map((state) => ({
     domain: state.id,
     status:
       state.data?.observationState === "observed"
-        ? state.error
+        ? state.error || state.retained
           ? "retained"
           : "observed"
-        : state.loading
+        : state.loading || state.observationLoading
           ? "loading"
-          : state.error
+          : state.error || state.observationError
             ? "failed"
             : state.data?.observationState === "pending_validation"
               ? "pending_validation"

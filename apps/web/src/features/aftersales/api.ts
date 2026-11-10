@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ApiError as TransportError, getJson } from "../../shared/api/client";
 import { metadata } from "./contracts";
 import type { Scope } from "./state";
 export class AftersalesError extends Error {
@@ -16,16 +17,12 @@ export async function get<T>(
   query: URLSearchParams,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(`/api/v1/aftersales/${path}?${query}`, { signal });
-  const json: unknown = await response.json();
-  if (!response.ok) {
-    const error = z
-      .object({ error: z.object({ code: z.string(), message: z.string().optional() }) })
-      .safeParse(json);
-    throw new AftersalesError(
-      response.status,
-      error.success ? error.data.error.message || error.data.error.code : "售后查询失败",
-    );
+  let json: unknown;
+  try {
+    json = await getJson(`/api/v1/aftersales/${path}?${query}`, signal);
+  } catch (error) {
+    if (error instanceof TransportError) throw new AftersalesError(error.status, error.message);
+    throw error;
   }
   return z.object({ data: schema, meta: metadata }).parse(json);
 }

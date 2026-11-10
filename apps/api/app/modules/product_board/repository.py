@@ -315,6 +315,10 @@ class Repository:
         "source_product_id,source_product_name,"
         "views,visitors,favorites,buyers,orders,units,product_revenue"
     )
+    _RISK_COLS = (
+        "listing_id,business_date,source_shop_id,source_shop_name,"
+        "source_product_id,source_product_name,visitors,orders,product_revenue"
+    )
     _ADS_COLS = (
         "id,source_row_key,listing_id,period_start,source_shop_id,source_shop_name,"
         "source_product_id,source_product_name,"
@@ -325,13 +329,14 @@ class Repository:
         "source_grouping,promotion_name,promotion_type,bidding_method,source_deleted_label"
     )
 
-    def rows(self, start, end, *, ads=False, listing_ids=None):
+    def rows(self, start, end, *, ads=False, listing_ids=None, risk_only=False):
+        """固定版本/日期读取必要度量；风险投影保留身份和三项规则输入。"""
         if listing_ids is not None and not listing_ids:
             return []
         table = "product_promotion_records" if ads else "product_daily_facts"
         code = "product_promotion" if ads else "product_daily"
         day = "period_start" if ads else "business_date"
-        cols = self._ADS_COLS if ads else self._DAILY_COLS
+        cols = self._ADS_COLS if ads else self._RISK_COLS if risk_only else self._DAILY_COLS
         condition = ""
         params = dict(v=self.params[code], start=start, end=end)
         if listing_ids is not None:

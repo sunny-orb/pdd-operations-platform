@@ -124,7 +124,7 @@ it("打开后只读专用状态，物理来源一行并可查看不同用途日�
     .spyOn(globalThis, "fetch")
     .mockImplementation(async () => new Response(JSON.stringify(payload())));
   mount();
-  expect(fetcher).not.toHaveBeenCalled();
+  await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
   fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
   const dialog = within(screen.getByRole("dialog"));
   await dialog.findByText("聚水潭销售 · 已发货 / 已取消");
@@ -169,7 +169,7 @@ it("刷新失败保留上次状态并提示，不能把读取失败显示为正�
   await screen.findByText("聚水潭销售 · 已发货 / 已取消");
   fails = true;
   fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
-  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("状态读取失败"));
+  await screen.findByText("状态读取失败", { selector: ".ant-alert-title" });
   expect(screen.getByText("聚水潭销售 · 已发货 / 已取消")).toBeTruthy();
 });
 
@@ -254,4 +254,119 @@ it("网页自动读取与登录失效保留旧数据分别说明", async () => {
   expect(
     screen.getByText("数仓网页登录已失效，保留上次更新时间和可用数据。重新登录后按计划继续检查。"),
   ).toBeTruthy();
+});
+
+it("未打开弹窗也提示全局同步失败，查看和关闭不会清除未恢复的提醒", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () => new Response(JSON.stringify(payload())),
+  );
+  mount();
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await screen.findByLabelText("数据更新异常");
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await screen.findByText("最近同步失败");
+  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(screen.getByLabelText("数据更新异常")).toBeTruthy();
+});
+
+it.each([
+  ["数仓检查失败", { ...row, upstream: { ...row.upstream, state: "failed" } }],
+  ["飞书同步失败", { ...row, system: "feishu", platform_state: "failed" }],
+  ["天气同步失败", { ...row, system: "nmc", platform_state: "failed" }],
+  [
+    "同来源其他用途运行不能遮住失败",
+    {
+      ...row,
+      platform_state: "syncing",
+      datasets: [
+        { ...dataset, attempt_status: "running" },
+        { ...dataset, code: "other", attempt_status: "abandoned" },
+      ],
+    },
+  ],
+])("%s在入口统一提醒", async (_name, source) => {
+  const data = payload();
+  const response = { ...data, data: { ...data.data, sources: [source] } };
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () => new Response(JSON.stringify(response)),
+  );
+  mount();
+  await screen.findByLabelText("数据更新异常");
+});
+
+it("平台计算单独失败也提醒，恢复后自动清除", async () => {
+  const data = payload();
+  data.data.sources = [row];
+  data.data.processing[0].state = "failed";
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  const { client } = mount();
+  await screen.findByLabelText("数据更新异常");
+  data.data.processing[0].state = "available";
+  await client.invalidateQueries({ queryKey: ["data-update-status"] });
+  await waitFor(() => expect(screen.queryByLabelText("数据更新异常")).toBeNull());
+});
+
+it("等待、运行、无记录不冒充失败，状态读取失败单独提醒且保留已知异常", async () => {
+  const data = payload();
+  data.data.sources = [
+    row,
+    { ...row, id: "pending", platform_state: "pending" },
+    { ...row, id: "syncing", platform_state: "syncing" },
+    { ...row, id: "empty", platform_state: "unavailable", datasets: [] },
+  ];
+  let fails = false;
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    fails ? new Response("", { status: 503 }) : new Response(JSON.stringify(data)),
+  );
+  const { client } = mount();
+  await waitFor(() => expect(client.getQueryState(["data-update-status"])?.status).toBe("success"));
+  expect(screen.queryByLabelText("数据更新异常")).toBeNull();
+  fails = true;
+  await client.invalidateQueries({ queryKey: ["data-update-status"] });
+  await screen.findByLabelText("状态读取失败");
+  expect(screen.queryByLabelText("数据更新异常")).toBeNull();
+  fails = false;
+  data.data.sources = [{ ...row, platform_state: "failed" }];
+  await client.invalidateQueries({ queryKey: ["data-update-status"] });
+  await screen.findByLabelText("数据更新异常");
+  fails = true;
+  await client.invalidateQueries({ queryKey: ["data-update-status"] });
+  await screen.findByLabelText("状态读取失败");
+  expect(screen.getByLabelText("数据更新异常")).toBeTruthy();
+});
+
+it("异常标在对应行，顶部轻量定位能越过筛选并展开明细，恢复后标记消失", async () => {
+  const data = payload();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  await screen.findByLabelText("数据更新异常");
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  const dialog = within(screen.getByRole("dialog"));
+  await dialog.findByLabelText("来源异常：店铺日经营");
+  expect(dialog.queryByLabelText("来源异常：聚水潭销售 · 已发货 / 已取消")).toBeNull();
+  expect(dialog.queryByText(/个来源更新异常/)).toBeNull();
+  fireEvent.click(dialog.getByRole("radio", { name: "售后分析" }));
+  fireEvent.click(dialog.getByRole("button", { name: "查看1项来源异常" }));
+  expect(dialog.getByLabelText("来源异常：店铺日经营")).toBeTruthy();
+  expect(
+    dialog.getByText("失败原因尚未确认。已有成功数据仍可使用，请以数据日期为准。"),
+  ).toBeTruthy();
+  expect(dialog.getByRole("button", { name: "收起来源详情" })).toBeTruthy();
+  data.data.sources = [row];
+  fireEvent.click(dialog.getByRole("button", { name: "刷新状态" }));
+  await waitFor(() => expect(dialog.queryByLabelText("来源异常：店铺日经营")).toBeNull());
+  expect(screen.queryByLabelText("数据更新异常")).toBeNull();
+});
+it("平台处理异常同样标行并可定位解释，不改变等待重算的判断", async () => {
+  const data = payload();
+  data.data.sources = [row];
+  data.data.processing[0].state = "failed";
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await screen.findByRole("button", { name: "查看1项处理异常" });
+  fireEvent.click(screen.getByRole("button", { name: "查看1项处理异常" }));
+  expect(screen.getByLabelText("处理异常：商品评分")).toBeTruthy();
+  expect(screen.getByText(/影响页面：商品数据/)).toBeTruthy();
 });

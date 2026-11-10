@@ -1,7 +1,7 @@
 import { memo, useState } from "react";
 import { Button, Drawer, Pagination, Table, Tag, Tooltip, type TableColumnsType } from "antd";
 import { Link } from "react-router-dom";
-import { formatMetric, sourceLabel, type ActionObject } from "./model";
+import { formatMetric, sourceLabel, type ActionObject, type ObservationCoverage } from "./model";
 import { SourceLinks } from "./SourceLinks";
 import { OVERVIEW_PAGE_SIZE as PAGE_SIZE } from "./presentation";
 
@@ -109,13 +109,25 @@ export const ActionsSection = memo(function ActionsSection({
   total,
   showAll,
   onShowAllChange,
+  coverage,
 }: {
+  coverage: readonly ObservationCoverage[];
   actions: readonly ActionObject[];
   preview: readonly ActionObject[];
   total: number | null;
   showAll: boolean;
   onShowAllChange: (value: boolean) => void;
 }) {
+  const failed = coverage.filter((item) => item.status === "failed");
+  const retained = coverage.filter((item) => item.status === "retained");
+  const loading = coverage.some((item) => item.status === "loading");
+  const emptyText = failed.length
+    ? "来源建议读取失败，当前清单不代表没有待处理事项"
+    : loading
+      ? "正在读取来源建议"
+      : showAll
+        ? "尚未取得可核来源建议"
+        : "首页关注对象暂无来源建议";
   const [detailId, setDetailId] = useState<string | null>(null);
   const visible = showAll ? actions : preview;
   const detail = actions.find((item) => item.id === detailId);
@@ -144,6 +156,10 @@ export const ActionsSection = memo(function ActionsSection({
       <p className="m6-alert-note">
         {showAll ? `当前清单 ${total ?? "—"} 条归并建议；` : "仅展示首页关注对象的建议；"}
         核查后安排执行，未指定负责人及日期显示待分配。
+        {failed.length > 0 &&
+          ` ${failed.map((item) => sourceLabel(item.domain)).join("、")}来源建议读取失败。`}
+        {retained.length > 0 &&
+          ` ${retained.map((item) => sourceLabel(item.domain)).join("、")}建议保留上次可用结果。`}
       </p>
       <Table
         className="m6-action-table"
@@ -171,7 +187,7 @@ export const ActionsSection = memo(function ActionsSection({
         tableLayout="fixed"
         pagination={false}
         scroll={{ x: 1000 }}
-        locale={{ emptyText: showAll ? "尚未取得可核来源建议" : "首页关注对象暂无来源建议" }}
+        locale={{ emptyText }}
       />
       <div className="m6-action-pagination">
         {showAll && visible.length > PAGE_SIZE && (

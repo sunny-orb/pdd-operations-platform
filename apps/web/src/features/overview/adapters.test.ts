@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { mergeDiagnostics } from "./data";
 import { aftersalesSpec, promotionSpec, salesSpec } from "./adapters";
 import { aftersalesObjectKey, centerCounts, observationCoverage } from "./model";
 import { testFilters } from "../sales/testFixtures";
@@ -313,10 +314,16 @@ it("推广未完成证据校验的空清单为待核，已有真实观察不会�
       sources: [],
     },
   };
-  const pending = await promotionSpec.load(meta, new AbortController().signal);
+  const pending = mergeDiagnostics(
+    await promotionSpec.load(meta, new AbortController().signal),
+    await promotionSpec.loadDiagnostics!(meta, new AbortController().signal),
+  );
   expect(pending.observationState).toBe("pending_validation");
   hasObservation = true;
-  const observed = await promotionSpec.load(meta, new AbortController().signal);
+  const observed = mergeDiagnostics(
+    await promotionSpec.load(meta, new AbortController().signal),
+    await promotionSpec.loadDiagnostics!(meta, new AbortController().signal),
+  );
   expect(observed.observationState).toBe("observed");
   expect(observed.observations).toHaveLength(1);
   expect(observed.observations[0].level).toBe("observation");

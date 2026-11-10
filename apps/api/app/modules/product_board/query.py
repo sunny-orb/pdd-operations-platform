@@ -196,7 +196,19 @@ def collect_risks(info, groups, top, q):
 
 def risk_feed(repo, q):
     """轻量只读风险出口，日期/筛选与商品页一致，不计算七卡、同比或评分。"""
-    info, groups, _, rows, period_info = scope(repo, q, with_members=True)
+    q.validate(repo)
+    # 风险只依赖所选期间的排名/金额和截至日8日观察；不能扩大到总览60日比较窗。
+    # 保留原可选范围下界，历史选择也不读结束日以后的经营行。
+    start = max(repo.start, min(q.start, q.end - timedelta(days=7)))
+    rows = repo.rows(start, q.end, risk_only=True)
+    period_info, _ = labels(
+        [r for r in rows if q.start <= r["business_date"] <= q.end], repo.profiles()
+    )
+    info = {lid: item for lid, item in period_info.items() if matches(item, q)}
+    groups = defaultdict(list)
+    for row in rows:
+        if row["listing_id"] in info:
+            groups[row["listing_id"]].append(row)
     risks, counts = collect_risks(info, groups, risk_top_products(period_info, rows, q), q)
     status = (
         "empty"
@@ -728,11 +740,13 @@ def days(repo, q):
     info, _ = labels(repo.identity_rows(q.start, q.end), profiles)
     info = {lid: item for lid, item in info.items() if matches(item, q)}
     rows, count = repo.page_rows(q.start, q.end, list(info), q.page, q.size)
-    older = repo.rows_at([
-        (r["listing_id"], day)
-        for r in rows
-        if (day := previous_year(r["business_date"])) is not None
-    ])
+    older = repo.rows_at(
+        [
+            (r["listing_id"], day)
+            for r in rows
+            if (day := previous_year(r["business_date"])) is not None
+        ]
+    )
     old = {(r["listing_id"], r["business_date"]): r for r in older}
     items = []
     for r in rows:

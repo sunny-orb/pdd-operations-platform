@@ -1,26 +1,36 @@
+import { waitForPublicationBaseline } from "../../shared/api/publishedVersions";
+import { shouldRetryRequest } from "../../shared/api/client";
+import { usePublishedDomainRefresh } from "../../shared/api/usePublishedDomainRefresh";
 import { useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { get, params, AftersalesError } from "./api";
 import { metadata, overview, options, analysis } from "./contracts";
 import { readScope, patchScope, resetScope, type Scope } from "./state";
-/** 默认报告跟随当前目录；自选报告保留。轮询/聚焦只查本地，旧请求使用AbortSignal取消。 */
+/** 默认报告跟随当前目录；自选报告保留。发布变化只查本地，旧请求使用AbortSignal取消。 */
 export function useAftersales() {
+  const client = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const selectedReport = search.get("report_id") || "";
   const meta = useQuery({
     queryKey: ["m5", "meta", selectedReport],
-    queryFn: ({ signal }) =>
-      get(
+    queryFn: async ({ signal }) => {
+      await waitForPublicationBaseline(client, signal);
+      return get(
         "meta",
         metadata,
         new URLSearchParams(selectedReport ? { report_id: selectedReport } : {}),
         signal,
-      ),
-    retry: false,
-    refetchInterval: 45000,
-    refetchOnWindowFocus: "always",
+      );
+    },
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  });
+  usePublishedDomainRefresh("aftersales", () => {
+    void meta.refetch();
   });
   const version = meta.data?.meta.data_version ?? null;
   const scope = readScope(search, meta.data?.data.default_report_id ?? "");
@@ -72,7 +82,8 @@ function useResource<T>(
     queryKey: ["m5", path, version, requestScope],
     enabled,
     queryFn: ({ signal }) => get(path, schema, params(requestScope, version), signal),
-    retry: false,
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
     refetchOnWindowFocus: false,
   });
 }

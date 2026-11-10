@@ -1,6 +1,9 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { waitForPublicationBaseline } from "../../../shared/api/publishedVersions";
+import { usePublishedDomainRefresh } from "../../../shared/api/usePublishedDomainRefresh";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ApiError } from "../../../shared/api/client";
+import { ApiError, withRequestRetry } from "../../../shared/api/client";
 import type { FiltersResponse, SalesResult, Scope } from "./contracts";
 import { getSalesFilters, getSalesResult } from "./salesApi";
 
@@ -59,6 +62,7 @@ export function _resetCacheForTesting() {
 
 /** 取消旧组请求；仅展示当前筛选同版本结果，连续409只自动恢复一次。 */
 export function useSalesData() {
+  const client = useQueryClient();
   const location = useLocation();
   const navigate = useNavigate();
   const [filters, setFilters] = useState<FiltersResponse | null>(null);
@@ -74,6 +78,12 @@ export function useSalesData() {
   const [error, setError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
   const recovered = useRef(false);
+  const [versionCheck, setVersionCheck] = useState(0);
+  const checkedVersion = useRef(0);
+  usePublishedDomainRefresh("sales", () => {
+    if (filters) setVersionCheck((value) => value + 1);
+    else setRefresh((value) => value + 1);
+  });
   const key = JSON.stringify([filters?.meta.data_version, scope.from, scope.to, scope.shop]);
   useEffect(() => {
     recovered.current = false;
@@ -84,7 +94,8 @@ export function useSalesData() {
     async function load() {
       try {
         if (!filters) {
-          const next = await getSalesFilters(signal);
+          await waitForPublicationBaseline(client, signal);
+          const next = await withRequestRetry(() => getSalesFilters(signal), signal);
           if (signal.aborted) return;
           setFilters(next);
           setLatestStatus(next);
@@ -97,7 +108,10 @@ export function useSalesData() {
           setError(null);
           return;
         }
-        const next = await getSalesResult(scope, filters.meta.data_version, signal);
+        const next = await withRequestRetry(
+          () => getSalesResult(scope, filters.meta.data_version, signal),
+          signal,
+        );
         if (signal.aborted) return;
         const entry = { ...next, key };
         if (resultCache.size >= MAX_CACHE) resultCache.delete(resultCache.keys().next().value!);
@@ -120,7 +134,7 @@ export function useSalesData() {
     }
     void load();
     return () => controller.abort();
-  }, [filters, scope, scopeError, key, refresh]);
+  }, [filters, scope, scopeError, key, refresh, client]);
   const changeScope = useCallback(
     (next: Partial<Scope>) => {
       recovered.current = false;
@@ -157,18 +171,31 @@ export function useSalesData() {
     });
   }, [location, navigate]);
   useEffect(() => {
-    if (!filters) return;
+    if (!filters || versionCheck === checkedVersion.current) return;
+    checkedVersion.current = versionCheck;
     const controller = new AbortController();
     const checkVersion = async () => {
       try {
-        const next = await getSalesFilters(controller.signal);
+        const next = await withRequestRetry(
+          () => getSalesFilters(controller.signal),
+          controller.signal,
+        );
         if (controller.signal.aborted) return;
         // 失败保旧或无变化成功不换版，来源尝试/成功时间仍须刷新。
         setLatestStatus(next);
         setError((previous) =>
           previous === "自动检查最新版本失败，保留上次成功数据，请重试。" ? null : previous,
         );
-        if (next.meta.data_version === filters.meta.data_version) return;
+        // 经营日历可在无新数据发布时跨日/月推进；显式URL仍由readScope保留。
+        const sameCalendar = (
+          [
+            "calendar_through",
+            "default_month",
+            "recommended_date_from",
+            "recommended_date_to",
+          ] as const
+        ).every((field) => next.data[field] === filters.data[field]);
+        if (next.meta.data_version === filters.meta.data_version && sameCalendar) return;
         recovered.current = false;
         setFilters(next);
       } catch {
@@ -176,15 +203,9 @@ export function useSalesData() {
           setError("自动检查最新版本失败，保留上次成功数据，请重试。");
       }
     };
-    const timer = window.setInterval(() => void checkVersion(), 45000);
-    const focus = () => void checkVersion();
-    window.addEventListener("focus", focus);
-    return () => {
-      controller.abort();
-      window.clearInterval(timer);
-      window.removeEventListener("focus", focus);
-    };
-  }, [filters]);
+    void checkVersion();
+    return () => controller.abort();
+  }, [filters, versionCheck]);
   const retry = useCallback(() => {
     recovered.current = false;
     setError(null);

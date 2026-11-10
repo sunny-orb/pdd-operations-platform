@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
@@ -8,9 +9,20 @@ import { getSalesFilters, getSalesResult } from "./salesApi";
 import { testFilters, testMeta, testMetrics, testShops } from "../testFixtures";
 import { metricsSchema } from "./contracts";
 
+const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+const publication = vi.hoisted(() => ({ refresh: () => {} }));
+vi.mock("../../../shared/api/publishedVersions", () => ({
+  waitForPublicationBaseline: async () => {},
+}));
+vi.mock("../../../shared/api/usePublishedDomainRefresh", () => ({
+  usePublishedDomainRefresh: (_domain: string, refresh: () => void) => {
+    publication.refresh = refresh;
+  },
+}));
 vi.mock("./salesApi", () => ({ getSalesFilters: vi.fn(), getSalesResult: vi.fn() }));
 afterEach(() => {
   cleanup();
+  client.clear();
   vi.resetAllMocks();
   _resetCacheForTesting();
 });
@@ -38,7 +50,7 @@ it("渠道DTO保留来源支付日汇总状态，完整性仍由覆盖字段表�
   expect(parsed.promotion_channels?.[0]).toMatchObject(basis);
   expect(parsed.coverage).toEqual(testMetrics.coverage);
 });
-it("updates same-version source status and clears recovered polling errors without fetching facts", async () => {
+it("updates source status after a publication signal and retains facts during metadata failure", async () => {
   const initial = {
     ...testFilters,
     data: {
@@ -64,12 +76,16 @@ it("updates same-version source status and clears recovered polling errors witho
     meta: testMeta,
   });
   const { result } = renderHook(() => useSalesData(), {
-    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    ),
   });
   await waitFor(() => expect(result.current.result).not.toBeNull());
   vi.mocked(getSalesFilters).mockRejectedValueOnce(new Error("offline"));
   await act(async () => {
-    window.dispatchEvent(new Event("focus"));
+    publication.refresh();
   });
   await waitFor(() => expect(result.current.error).toContain("自动检查"));
   const failed = {
@@ -88,7 +104,7 @@ it("updates same-version source status and clears recovered polling errors witho
   };
   vi.mocked(getSalesFilters).mockResolvedValue(failed);
   await act(async () => {
-    window.dispatchEvent(new Event("focus"));
+    publication.refresh();
   });
   await waitFor(() => expect(result.current.result?.meta.last_attempt_status).toBe("failed"));
   expect(result.current.filters?.data.sources?.shop_ratings.last_attempt_status).toBe("failed");
@@ -117,7 +133,9 @@ function renderSales(entry = "/sales", initial = testFilters) {
     () => ({ data: useSalesData(), navigate: useNavigate(), location: useLocation() }),
     {
       wrapper: ({ children }: { children: ReactNode }) => (
-        <MemoryRouter initialEntries={[entry]}>{children}</MemoryRouter>
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[entry]}>{children}</MemoryRouter>
+        </QueryClientProvider>
       ),
     },
   );
@@ -225,7 +243,7 @@ it.each(["", "?shop=spigf", "?month=2026-09&from=2026-09-15&to=2026-09-15"])(
     );
     const next = { ...testFilters, meta: { ...testMeta, data_version: "synthetic-v2" } };
     vi.mocked(getSalesFilters).mockResolvedValue(next);
-    await act(async () => window.dispatchEvent(new Event("focus")));
+    await act(async () => publication.refresh());
     await waitFor(() =>
       expect(result.current.data.filters?.meta.data_version).toBe("synthetic-v2"),
     );
@@ -246,3 +264,46 @@ it("only clears an invalid URL after an explicit reset and preserves its anchor"
   expect(result.current.location.hash).toBe("#performance");
   expect(result.current.data.scope.month).toBe("2026-10");
 });
+
+it.each(["", "?shop=spigf", "?month=2026-09&from=2026-09-15&to=2026-09-15"])(
+  "同发布版跨日及跨月推进默认经营范围，显式URL保持：%s",
+  async (query) => {
+    const initial = {
+      ...testFilters,
+      data: {
+        ...testFilters.data,
+        default_month: "2026-09",
+        calendar_through: "2026-09-29",
+        recommended_date_from: "2026-09-01",
+        recommended_date_to: "2026-09-29",
+      },
+    };
+    const { result } = renderSales(`/sales${query}`, initial);
+    await waitFor(() => expect(result.current.data.result).not.toBeNull());
+    const explicit = query.includes("from=");
+    const nextDay = {
+      ...initial,
+      data: { ...initial.data, calendar_through: "2026-09-30", recommended_date_to: "2026-09-30" },
+    };
+    vi.mocked(getSalesFilters).mockResolvedValue(nextDay);
+    await act(async () => publication.refresh());
+    await waitFor(() =>
+      expect(result.current.data.filters?.data.calendar_through).toBe("2026-09-30"),
+    );
+    expect(result.current.data.scope.to).toBe(explicit ? "2026-09-15" : "2026-09-30");
+    await waitFor(() => expect(result.current.data.result).not.toBeNull());
+    vi.mocked(getSalesFilters).mockResolvedValue(testFilters);
+    await act(async () => publication.refresh());
+    await waitFor(() => expect(result.current.data.filters?.data.default_month).toBe("2026-10"));
+    expect(result.current.data.filters?.meta.data_version).toBe("synthetic-v1");
+    expect(result.current.data.scope).toEqual({
+      month: explicit ? "2026-09" : "2026-10",
+      from: explicit ? "2026-09-15" : "2026-10-01",
+      to: explicit ? "2026-09-15" : "2026-10-27",
+      shop: query.includes("shop=") ? "spigf" : "",
+    });
+    await waitFor(() => expect(result.current.data.result).not.toBeNull());
+    expect(getSalesResult).toHaveBeenCalledTimes(explicit ? 1 : 3);
+    expect(result.current.location.search).toBe(query);
+  },
+);

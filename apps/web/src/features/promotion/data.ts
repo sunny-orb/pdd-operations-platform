@@ -1,5 +1,8 @@
+import { waitForPublicationBaseline } from "../../shared/api/publishedVersions";
+import { shouldRetryRequest } from "../../shared/api/client";
+import { usePublishedDomainRefresh } from "../../shared/api/usePublishedDomainRefresh";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { get, params, PromotionError } from "./api";
@@ -15,18 +18,26 @@ const shanghaiDay = new Intl.DateTimeFormat("en-CA", {
 });
 const selectedProductOptions = options.pick({ products: true });
 
-/** 45秒及窗口聚焦仅重读本地元信息；发布变化后整组查询固定新版本。 */
+/** 共享轻量版本检查变化后重读元信息，再整组查询固定新版本。 */
 export function usePromotion() {
+  const client = useQueryClient();
   const [search, setSearch] = useSearchParams();
   const mode: Mode = search.get("mode") === "product" ? "product" : "store";
   const meta = useQuery({
     queryKey: ["m2", "meta", mode],
-    queryFn: ({ signal }) => get("meta", metadata, new URLSearchParams({ mode }), signal),
-    retry: false,
-    refetchInterval: 45000,
-    refetchOnWindowFocus: "always",
-    // 同版元信息检查也通知，诊断中依赖“今日”的状态才能随上海业务日更新。
+    queryFn: async ({ signal }) => {
+      await waitForPublicationBaseline(client, signal);
+      return get("meta", metadata, new URLSearchParams({ mode }), signal);
+    },
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+    // 业务日已纳入轻量版本信号；元信息重读通知诊断重新核对今日。
     notifyOnChangeProps: "all",
+  });
+  usePublishedDomainRefresh("promotion", () => {
+    void meta.refetch();
   });
   const data = meta.data?.data;
   const version = meta.data?.meta.data_version ?? "";
@@ -131,7 +142,8 @@ export function usePromotion() {
       missingNames.forEach((id) => query.append("selected_ids", id));
       return get("options/selected", selectedProductOptions, query, signal);
     },
-    retry: false,
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
@@ -277,7 +289,8 @@ export function useResource<T>(
       }
       return result;
     },
-    retry: false,
+    retry: (count, error: Error) => shouldRetryRequest(count, error),
+    retryDelay: (attempt) => (attempt + 1) * 1000,
     refetchOnWindowFocus: false,
     // 固定版本同范围复用；诊断的“今日”状态另按上海业务日隔离。
     staleTime: Infinity,

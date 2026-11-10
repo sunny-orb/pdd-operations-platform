@@ -1,13 +1,25 @@
 import type { DataStatus, SourceStatus } from "./sourceStatusApi";
 
 /** 汇总已知失败，不把等待、无记录或旧可用版本当成异常；同来源多个用途只计一次。 */
-export function sourceHasFailure(source: SourceStatus) {
+export function sourceUpdateFailed(source: SourceStatus) {
   return (
     source.upstream.state === "failed" ||
     source.platform_state === "failed" ||
     source.datasets.some((dataset) =>
       ["failed", "abandoned", "cancelled"].includes(dataset.attempt_status ?? ""),
     )
+  );
+}
+
+export function sourceHasFailure(source: SourceStatus) {
+  const reconciliation = source.reconciliation;
+  return (
+    sourceUpdateFailed(source) ||
+    reconciliation?.status === "failed" ||
+    (reconciliation?.status === "running" &&
+      Boolean(reconciliation.error_code) &&
+      reconciliation.error_code !== "MAINTENANCE_DEFERRED" &&
+      reconciliation.error_code !== "DATASET_RESTORE_REQUIRED")
   );
 }
 

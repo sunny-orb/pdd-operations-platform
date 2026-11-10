@@ -399,3 +399,35 @@ it("历史输入待恢复时保留可用数据，不误报上游检查失败", a
   ).toBeTruthy();
   expect(screen.queryByText("本轮上游检查失败，保留上次观测。")).toBeNull();
 });
+
+it("周对账失败单独提醒，保留数据可用状态和下一次重试时间", async () => {
+  const data = payload();
+  data.data.sources = [
+    {
+      ...row,
+      id: "shop_daily",
+      name: "店铺日经营",
+      reconciliation: {
+        status: "failed",
+        cycle_at: "2026-11-08T09:00:00Z",
+        last_attempt_at: "2026-11-08T09:00:00Z",
+        last_finished_at: "2026-11-08T09:02:00Z",
+        last_success_at: null,
+        next_retry_at: "2026-11-08T09:07:00Z",
+        next_scheduled_at: null,
+        error_code: "SYNC_FAILED",
+      },
+    } as (typeof data.data.sources)[number],
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  await screen.findByLabelText("数据更新异常");
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  const dialog = within(screen.getByRole("dialog"));
+  expect(await dialog.findByText("数据可用")).toBeTruthy();
+  expect(dialog.getByText("周对账未完成")).toBeTruthy();
+  fireEvent.click(dialog.getByRole("button", { name: "查看1项来源异常" }));
+  expect(dialog.getByText("下一次重试")).toBeTruthy();
+  expect(dialog.getByText("2026/11/8 17:07:00")).toBeTruthy();
+  expect(dialog.queryByText(/平台接收未成功/)).toBeNull();
+});

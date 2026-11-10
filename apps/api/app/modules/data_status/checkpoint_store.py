@@ -8,8 +8,10 @@ import sqlalchemy as sa
 class CheckpointStore:
     def __init__(self, engine):
         self.engine = engine
-        self.table = sa.Table(
-            "source_checkpoints", sa.MetaData(), schema="public", autoload_with=engine
+        metadata = sa.MetaData()
+        self.table = sa.Table("source_checkpoints", metadata, schema="public", autoload_with=engine)
+        self.reconciliations = sa.Table(
+            "source_reconciliations", metadata, schema="public", autoload_with=engine
         )
 
     @contextmanager
@@ -28,14 +30,21 @@ class CheckpointStore:
                     c.execute(sa.text("SELECT pg_advisory_unlock(hashtext('project-source-sync'))"))
                     c.commit()
 
-    def read(self, c):
+    def read(self, c, table=None):
+        if table is None:
+            table = self.table
         with c.begin():
-            return {r["source_id"]: dict(r) for r in c.execute(sa.select(self.table)).mappings()}
+            return {r["source_id"]: dict(r) for r in c.execute(sa.select(table)).mappings()}
 
     def write(self, c, code, **values):
-        with c.begin():
-            result = c.execute(
-                self.table.update().where(self.table.c.source_id == code).values(**values)
-            )
-            if not result.rowcount:
-                c.execute(self.table.insert().values(source_id=code, **values))
+        self.upsert(c, self.table, code, **values)
+
+    def write_reconciliation(self, c, code, **values):
+        self.upsert(c, self.reconciliations, code, **values)
+
+    @staticmethod
+    def upsert(c, table, code, **values):
+        """调用方持会话锁及短事务；需要时与同源接受状态原子结算。"""
+        result = c.execute(table.update().where(table.c.source_id == code).values(**values))
+        if not result.rowcount:
+            c.execute(table.insert().values(source_id=code, **values))

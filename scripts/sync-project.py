@@ -74,6 +74,8 @@ def main():
                 f"source_schedule_enabled = {str(config.source_schedule_enabled).lower()}\n"
                 f"warehouse_times = {json.dumps(list(config.warehouse_times))}\n"
                 f"feishu_times = {json.dumps(list(config.feishu_times))}\n"
+                f"reconciliation_time = {json.dumps(config.reconciliation_time)}\n"
+                f"reconciliation_retry_seconds = {config.reconciliation_retry_seconds}\n"
             )
             tmp = path.with_suffix(".tmp")
             tmp.write_text(content)
@@ -183,6 +185,8 @@ def main():
                     warehouse_reader=reader,
                     warehouse_times=config.warehouse_times,
                     feishu_times=config.feishu_times,
+                    reconciliation_time=config.reconciliation_time,
+                    reconciliation_retry_seconds=config.reconciliation_retry_seconds,
                     **(
                         {
                             "source_ids": manual_sources,

@@ -4,6 +4,8 @@
 
 ## 验证记录索引
 
+[每周数仓对账与失败隔离（2026-11-11）](validation/weekly-reconciliation.md)。
+
 [数据库保留第一阶段本地验证（2026-11-10）](validation/database-retention.md)；[内容复用第二阶段本地验证](validation/content-reuse.md)。
 
 本轮采集归档治理：[去重、容量与历史离线保留验证](validation/2026-11-09.md)。

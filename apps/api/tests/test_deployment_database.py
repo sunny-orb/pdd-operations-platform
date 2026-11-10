@@ -86,7 +86,7 @@ def test_single_account_initializes_without_database_ownership_and_preserves_mon
         )
         assert (
             c.exec_driver_sql("SELECT version_num FROM public.alembic_version_v2").scalar_one()
-            == "20261110_14"
+            == "20261111_15"
         )
         assert (
             c.exec_driver_sql(
@@ -94,7 +94,7 @@ def test_single_account_initializes_without_database_ownership_and_preserves_mon
                 "WHERE table_schema='public' AND table_name <> 'alembic_version_v2' "
                 "AND table_name NOT LIKE 'read_%%'"
             ).scalar_one()
-            == 711
+            == 718
         )
         assert (
             c.exec_driver_sql(

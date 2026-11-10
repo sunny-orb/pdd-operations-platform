@@ -1820,9 +1820,11 @@ Meta逐源显示实际窗内MIN/MAX、完整日未知、本输入版最近成功
 | 天气公报                | [中央气象台天气公报](https://www.nmc.cn/publish/weather-bulletin/index.htm) | 运营中心             |
 | 中期预报                | [中央气象台中期预报](https://www.nmc.cn/publish/bulletin/mid-range.htm)     | 运营中心             |
 
-固定时点策略启用后，8张非聚水潭数仓来源按北京时间08:20/09:10/10:10/10:50/13:10/15:10/16:10全部检查，飞书退款和GMV目标按08:20/10:10检查；当天已成功的表仍参与后续检查。具体来源映射见[调度范围](implementation/project-sync-implementation.md#source-daily-schedule-proposal-20261104)。数仓读取已验证表身份的可见网页“数据更新时间”（observation.basis=warehouse_web_page），飞书使用单行manifest表修订；与最后成功接收并复查稳定的摘要比较，变化、无接收标记或接收失败才下载。16:10对未证明能捕获全部历史修订的数仓来源做一次获准范围稳定快照对账，同轮去重。资料、目标不要求昨日经营行；元信息失败保留旧观测，不伪造最新时间。聚水潭4来源（含product_regions）、天气2来源及售后派生保留原路径。新旧调度按来源排除；来源状态、接收状态和评分/报告状态独立。
+固定时点策略启用后，8张非聚水潭数仓来源按北京时间08:20/09:10/10:10/10:50/13:10/15:10/16:10全部检查，飞书退款和GMV目标按08:20/10:10检查；当天已成功的表仍参与后续检查。具体来源映射见[调度范围](implementation/project-sync-implementation.md#source-daily-schedule-proposal-20261104)。数仓读取已验证表身份的可见网页“数据更新时间”（observation.basis=warehouse_web_page），飞书使用单行manifest表修订；与最后成功接收并复查稳定的摘要比较，变化、无接收标记或接收失败才下载。16:10作为普通变化检查。每周对账按[对账方案](implementation/weekly-reconciliation.md)独立安排，同轮与变化接收共用读取。资料、目标不要求昨日经营行；元信息失败保留旧观测，不伪造最新时间。聚水潭4来源（含product_regions）、天气2来源及售后派生保留原路径。新旧调度按来源排除；来源状态、接收状态和评分/报告状态独立。
 
-手动补跑和固定检查共用来源状态与稳定接收标记；手动不消耗固定逻辑槽。已有商品输入时各变化来源独立接收并复用其他已发布版本；首次缺输入时，仅本轮全部必需输入可用才原子建立基线，不扩大指定下载。派生失败后重算已有输入。上游时间不是完整交付标记，故保留16:10范围对账。API只读平台状态，包含每源计划与下一检查时刻；固定来源按到期槽判断过期，夜间不因超过15分钟误报。启用须先验证后台元数据认证，浏览器可访问不能推定服务凭据可用。
+手动补跑和固定检查共用来源状态与稳定接收标记；手动不消耗固定逻辑槽。已有商品输入时各变化来源独立接收并复用其他已发布版本；首次缺输入时，仅本轮全部必需输入可用才原子建立基线，不扩大指定下载。派生失败后重算已有输入。上游时间不是完整交付标记。API只读平台状态，包含每源计划与下一检查时刻；固定来源按到期槽判断过期，夜间不因超过15分钟误报。启用须先验证后台元数据认证，浏览器可访问不能推定服务凭据可用。
+
+启用固定策略的八张数仓来源在 `GET /api/v1/data-status` 的来源项另有 `reconciliation` 对象。它返回已登记周期 `cycle_at`、`status`（waiting/running/failed/deferred/succeeded）、`last_attempt_at`、`last_finished_at`、`last_success_at`、`next_retry_at`、`next_scheduled_at` 及固定 `error_code`。时间带时区，未发生的时间留空；重试时刻是最早可再次开始的时间，实际取决于后台轮询和互斥。未纳入对账的来源该对象为空。监测配置另含 `reconciliation_time` 及 `reconciliation_retry_seconds`。普通检查与 `platform_state` 按自身证据计算，附加对账失败单独告警，保留已有数据日期和可用状态。
 
 中心不新增`/overview/*`业务计算接口，直接复用以下已发布域结果。每域独立meta→固定data_version查询；中心和四子页共享`GET /api/v1/published-versions`轻量发布指纹，页面可见时每5分钟检查，后台暂停，恢复可见时检查。响应data含products/promotion/sales/aftersales四个字符串token，由实际发布输入头、定义指纹、售后已发布报告目录身份及推广/销售上海业务日生成，不查经营事实。首次进入正常读取；随后token变化才重读对应域meta，手动刷新保留，取消45秒完整meta及聚焦重复刷新。事实键还包括观察日，M3包括default_month及calendar_through，M5包括default_report_id。变版/范围变化取消旧请求、拒绝晚到覆盖，409每版/范围最多自动重读一次。GET不启动上游、模型或业务消息。
 

@@ -14,7 +14,17 @@ from psycopg import sql
 
 from migrations_v2.baseline_20261028.schema import build_metadata
 
-HEAD = "20261110_14"
+HEAD = "20261111_15"
+RECONCILIATIONS = "source_reconciliations"
+RECONCILIATION_COLUMNS = (
+    "source_id",
+    "cycle_at",
+    "status",
+    "last_attempt_at",
+    "last_finished_at",
+    "last_success_at",
+    "error_code",
+)
 POLICY = "db-retention-v1"
 TARGETS = {
     "product_daily": "product_daily_facts",
@@ -79,6 +89,7 @@ def validate_schema(c):
     expected = {t.name for t in build_metadata().tables.values()} | {
         "weather_publications",
         "source_checkpoints",
+        RECONCILIATIONS,
         "alembic_version_v2",
         *MIGRATION.TABLES,
         *CONTENT.TABLES,
@@ -103,6 +114,8 @@ def validate_schema(c):
         if table in TARGETS.values():
             if [v["name"] for v in columns] != list(baseline["public." + table].c.keys()):
                 raise ValueError("RETENTION_SCHEMA_COLUMNS")
+        if table == RECONCILIATIONS and tuple(v["name"] for v in columns) != RECONCILIATION_COLUMNS:
+            raise ValueError("RETENTION_SCHEMA_COLUMNS")
         # 所有业务指向版本的关系已有固定清单；未知关系不能随schema头未变绕过检查。
         signature[table + ":fks"] = inspector.get_foreign_keys(table, schema="public")
     column_count = sum(
@@ -117,7 +130,7 @@ def validate_schema(c):
         )
     )
     if (
-        column_count != 712
+        column_count != 719
         or sum(len(v) for k, v in signature.items() if k.endswith(":fks")) != expected_fk_count
     ):
         raise ValueError("RETENTION_SCHEMA_RELATIONSHIPS")
@@ -183,7 +196,7 @@ def copy_rows(c, table, version_id=None):
         {t.name for t in build_metadata().tables.values()}
         | set(MIGRATION.TABLES)
         | set(CONTENT.TABLES)
-        | {"weather_publications", "source_checkpoints", "alembic_version_v2"}
+        | {"weather_publications", "source_checkpoints", RECONCILIATIONS, "alembic_version_v2"}
     )
     if table not in allowed:
         raise ValueError("RETENTION_TABLE")

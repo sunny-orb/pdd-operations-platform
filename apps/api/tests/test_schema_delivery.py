@@ -27,6 +27,7 @@ def test_delivery_is_current_and_offline():
     assert sql == (ROOT / "docs/database-schema/schema.sql").read_text()
     assert "CREATE TABLE public.weather_publications" in sql
     assert "scheduled_slot_at" in sql
+    assert "CREATE TABLE public.source_reconciliations" in sql
     assert "alembic_version_v2" in sql
     assert "CREATE ROLE" not in sql
 
@@ -77,8 +78,8 @@ def test_complete_sql_matches_migrations_on_real_pg():
                 for row in actual["columns"]
                 if row[0] != "alembic_version_v2" and not row[0].startswith("read_")
             ]
-            assert len({row[0] for row in domain_columns}) == 45
-            assert len(domain_columns) == 711
+            assert len({row[0] for row in domain_columns}) == 46
+            assert len(domain_columns) == 718
             assert len(actual["views"]) == 5
             assert sum("FOREIGN KEY" in row[2] for row in actual["constraints"]) == 71
             head = ScriptDirectory.from_config(

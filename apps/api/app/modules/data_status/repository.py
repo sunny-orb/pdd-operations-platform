@@ -156,8 +156,11 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 )
 
             from app.modules.data_status.schedule_policy import (
+                WAREHOUSE_SOURCES,
                 due_sources,
+                first_reconciliation,
                 next_check,
+                next_reconciliation,
                 source_times,
             )
 
@@ -172,30 +175,72 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 else ()
             )
             due = due_sources(now, *schedule_args) if scheduled else {}
+            reconciliations = (
+                {
+                    r["source_id"]: dict(r)
+                    for r in c.execute(sa.text("SELECT * FROM source_reconciliations")).mappings()
+                }
+                if scheduled
+                else {}
+            )
+
+            def reconciliation(code):
+                if not scheduled or code not in WAREHOUSE_SOURCES:
+                    return None
+                row = reconciliations.get(code, {"status": "waiting"})
+                next_at = (
+                    next_reconciliation(
+                        row,
+                        source_schedule.reconciliation_time,
+                        source_schedule.reconciliation_retry_seconds,
+                    )
+                    if code in reconciliations
+                    else first_reconciliation(now, source_schedule.reconciliation_time)
+                )
+                retrying = row["status"] in ("failed", "deferred")
+                return dict(
+                    cycle_at=row.get("cycle_at"),
+                    status=row["status"],
+                    last_attempt_at=row.get("last_attempt_at"),
+                    last_finished_at=row.get("last_finished_at"),
+                    last_success_at=row.get("last_success_at"),
+                    error_code=row.get("error_code"),
+                    next_retry_at=next_at if retrying else None,
+                    next_scheduled_at=None if retrying else next_at,
+                )
+
             rows = []
             for source in SOURCES:
                 p = checkpoints.get(source.id, {})
                 datasets = [dataset(code, p) for code in source.datasets]
                 fixed_times = source_times(source.id, *schedule_args) if scheduled else ()
-                if fixed_times and p.get("sync_status"):
-                    expired_sync = p["sync_status"] == "running" and now > p[
+                sync_status = p.get("sync_status")
+                if fixed_times and (
+                    sync_status or reconciliations.get(source.id, {}).get("last_attempt_at")
+                ):
+                    # 对账开始后底层发布任务已无法区分触发原因，普通状态只读自身检查点。
+                    expired_sync = sync_status == "running" and now > p[
                         "sync_started_at"
                     ] + timedelta(minutes=20)
                     for item in datasets:
                         item.update(
-                            last_attempt_at=p["sync_started_at"],
-                            last_finished_at=p["sync_finished_at"],
-                            attempt_status="abandoned" if expired_sync else p["sync_status"],
+                            last_attempt_at=p.get("sync_started_at"),
+                            last_finished_at=p.get("sync_finished_at"),
+                            attempt_status="abandoned" if expired_sync else sync_status,
                             error_code="WORKER_LOST"
                             if expired_sync
                             else "SYNC_FAILED"
-                            if p["sync_status"] == "failed"
+                            if sync_status == "failed"
                             else None,
                         )
-                        if p["sync_status"] == "succeeded":
-                            item["last_success_at"] = p["sync_finished_at"]
-                        elif p.get("accepted_at"):
-                            item["last_success_at"] = p["accepted_at"]
+                        successes_at = (
+                            item["last_success_at"],
+                            p.get("accepted_at"),
+                            p.get("sync_finished_at") if sync_status == "succeeded" else None,
+                        )
+                        item["last_success_at"] = max(
+                            (stamp for stamp in successes_at if stamp is not None), default=None
+                        )
                 for item in datasets:
                     reason = p.get("error_code") or item.get("error_code")
                     if reason in ("DATASET_RESTORE_REQUIRED", "MAINTENANCE_DEFERRED"):
@@ -253,6 +298,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                         kind=source.kind,
                         datasets=datasets,
                         platform_state=platform_state,
+                        reconciliation=reconciliation(source.id),
                         upstream=dict(
                             state=upstream_state,
                             checked_at=p.get("checked_at"),
@@ -351,6 +397,12 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                         if source_schedule
                         else [],
                         feishu_times=list(source_schedule.feishu_times) if source_schedule else [],
+                        reconciliation_time=source_schedule.reconciliation_time
+                        if scheduled
+                        else None,
+                        reconciliation_retry_seconds=source_schedule.reconciliation_retry_seconds
+                        if scheduled
+                        else None,
                     ),
                 ),
                 "meta": {"generated_at": now},

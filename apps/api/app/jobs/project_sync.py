@@ -14,7 +14,12 @@ from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 
-from app.modules.data_status.schedule_policy import FEISHU_TIMES, WAREHOUSE_TIMES
+from app.modules.data_status.schedule_policy import (
+    FEISHU_TIMES,
+    RECONCILIATION_RETRY_SECONDS,
+    RECONCILIATION_TIME,
+    WAREHOUSE_TIMES,
+)
 from app.modules.database_residency import deferred_reason
 
 
@@ -29,6 +34,8 @@ class Schedule:
     source_schedule_enabled: bool = False
     warehouse_times: tuple[str, ...] = WAREHOUSE_TIMES
     feishu_times: tuple[str, ...] = FEISHU_TIMES
+    reconciliation_time: str = RECONCILIATION_TIME
+    reconciliation_retry_seconds: int = RECONCILIATION_RETRY_SECONDS
 
     def __post_init__(self):
         if (
@@ -47,8 +54,12 @@ class Schedule:
                 or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in times)
             ):
                 raise ValueError("INVALID_SOURCE_SCHEDULE")
-        if "16:10" not in self.warehouse_times:
-            raise ValueError("RECONCILIATION_SLOT_REQUIRED")
+        if (
+            not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", self.reconciliation_time)
+            or not isinstance(self.reconciliation_retry_seconds, int)
+            or self.reconciliation_retry_seconds < RECONCILIATION_RETRY_SECONDS
+        ):
+            raise ValueError("INVALID_RECONCILIATION_SCHEDULE")
 
 
 def read_schedule(path):
@@ -154,12 +165,15 @@ def run_project(
                     )
                     results[name] = dict(status="succeeded", result=result)
                 except Exception as exc:
-                    # 类型/模块/错误码足以定位连接层，不记录查询参数和完整业务行。
+                    from app.connectors.retry import safe_diagnostic
+
+                    # 错误诊断仅保留白名单字段，不记录查询参数和完整业务行。
                     results[name] = dict(
                         status="failed",
                         error=type(exc).__name__,
                         error_code=deferred_reason(exc),
                         error_module=type(exc).__module__,
+                        diagnostic=safe_diagnostic(exc),
                         source_code=exc.args[0]
                         if exc.args and isinstance(exc.args[0], int)
                         else None,

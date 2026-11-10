@@ -19,6 +19,7 @@ from app.modules.database_retention import (
     CONTENT,
     HEAD,
     MIGRATION,
+    RECONCILIATIONS,
     TARGETS,
     code_revision,
     content,
@@ -167,7 +168,12 @@ def export(engine, selected, destination, key, *, version_id=None):
                 {t.name for t in build_metadata().tables.values() if t.name not in omitted}
                 | set(MIGRATION.TABLES)
                 | {n for n in CONTENT.TABLES if not n.startswith("shared_")}
-                | {"weather_publications", "source_checkpoints", "alembic_version_v2"}
+                | {
+                    "weather_publications",
+                    "source_checkpoints",
+                    RECONCILIATIONS,
+                    "alembic_version_v2",
+                }
             )
             for table in [*tables, record["table_name"]]:
                 filename = table + ".enc"
@@ -264,7 +270,7 @@ def verify(bundle, key):
         {t.name for t in build_metadata().tables.values()}
         | set(MIGRATION.TABLES)
         | {n for n in CONTENT.TABLES if not n.startswith("shared_")}
-        | {"weather_publications", "source_checkpoints", "alembic_version_v2"}
+        | {"weather_publications", "source_checkpoints", RECONCILIATIONS, "alembic_version_v2"}
     )
     for name, entry in manifest["files"].items():
         if Path(name).name != name or name in (".", "..") or not name.endswith(".enc"):

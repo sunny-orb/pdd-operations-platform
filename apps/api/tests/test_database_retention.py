@@ -44,6 +44,15 @@ def test_unknown_schema_or_running_task_blocks(sales_pg):
         plan(sales_pg)
 
 
+def test_reconciliation_schema_column_drift_blocks_retention(sales_pg):
+    from app.modules.database_retention import plan
+
+    with sales_pg.begin() as c:
+        c.exec_driver_sql("ALTER TABLE source_reconciliations RENAME COLUMN status TO unexpected")
+    with pytest.raises(ValueError, match="RETENTION_SCHEMA_COLUMNS"):
+        plan(sales_pg)
+
+
 def test_pinned_version_retained(sales_pg):
     from app.modules.database_retention import plan
 

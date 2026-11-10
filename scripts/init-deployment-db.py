@@ -57,7 +57,7 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
                 "AND NOT EXISTS (SELECT 1 FROM extension_members e "
                 "WHERE e.classid='pg_catalog.pg_class'::regclass AND e.objid=c.oid AND e.objsubid=0)"
             ).fetchone()
-            if (tables, columns, owned) != (45, 711, True):
+            if (tables, columns, owned) != (46, 718, True):
                 raise ValueError("DEPLOY_SCHEMA_MISMATCH")
             views = connection.execute(
                 "SELECT c.relname,count(a.attnum),bool_and(c.relowner=current_user::regrole) "

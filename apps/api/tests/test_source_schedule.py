@@ -56,9 +56,9 @@ def test_success_does_not_stop_later_checks_and_same_slot_deduplicates(sales_pg)
     revision[0] = "v2"
     run("10:10")
     assert calls == ["shop_daily", "shop_daily"]
-    run("16:10")  # 弱信号来源每日一次获准范围对账，同轮只接收一次
+    run("16:10")  # 普通检查不重读未变化来源
     run("16:11")
-    assert calls == ["shop_daily"] * 3
+    assert calls == ["shop_daily"] * 2
 
 
 def test_failed_reception_retries_next_slot_and_processing_failure_does_not_redownload(sales_pg):
@@ -409,3 +409,291 @@ def test_injected_page_reader_is_used_without_backend_auth(sales_pg, tmp_path, m
         source_ids=("shop_daily",),
     )
     assert result["checked"] == 1
+
+
+def test_weekly_reconciliation_uses_sunday_shanghai_and_retries_only_failures(sales_pg):
+    from datetime import UTC
+
+    from app.jobs.source_schedule import run_scheduled_sources
+    from app.modules.data_status.schedule_policy import WAREHOUSE_SOURCES
+
+    sunday = at("17:00") + timedelta(days=4)
+    failure = WAREHOUSE_SOURCES[0]
+    bad = {failure}
+    downloads = []
+
+    def sync(ids, c):
+        downloads.extend(ids)
+        return {code: code not in bad for code in ids}
+
+    def run(stamp):
+        codes = (*WAREHOUSE_SOURCES, "shop_refunds")
+        return run_scheduled_sources(
+            sales_pg,
+            {code: lambda: {"revision": "unchanged"} for code in codes},
+            sync,
+            now=stamp.astimezone(UTC),
+        )
+
+    bad.clear()
+    run(sunday - timedelta(minutes=50))
+    assert set(downloads) == {*WAREHOUSE_SOURCES, "shop_refunds"}
+    downloads.clear()
+    run(sunday - timedelta(seconds=1))
+    assert not downloads
+    bad.add(failure)
+    assert run(sunday)["status"] == "partial"
+    assert downloads == list(WAREHOUSE_SOURCES)
+    downloads.clear()
+    run(sunday + timedelta(seconds=299))
+    assert not downloads
+    for retry in range(1, 5):
+        run(sunday + timedelta(minutes=5 * retry))
+        assert downloads == [failure] * retry
+    bad.clear()
+    run(sunday + timedelta(minutes=25))
+    run(sunday + timedelta(minutes=30))
+    assert downloads == [failure] * 5
+
+
+def test_weekly_state_survives_restart_missed_sunday_and_cross_week(sales_pg):
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    downloads = []
+    successful = False
+
+    def sync(ids, c):
+        downloads.extend(ids)
+        return dict.fromkeys(ids, successful)
+
+    def run(stamp):
+        return run_scheduled_sources(
+            sales_pg, {"shop_daily": lambda: {"revision": "one"}}, sync, now=stamp
+        )
+
+    successful = True
+    run(sunday - timedelta(hours=2))
+    downloads.clear()
+    successful = False
+    sales_pg.dispose()
+    run(sunday + timedelta(days=1, hours=6))
+    sales_pg.dispose()
+    successful = True
+    run(sunday + timedelta(days=7))
+    run(sunday + timedelta(days=7, minutes=5))
+    assert downloads == ["shop_daily"] * 2
+    with sales_pg.connect() as c:
+        row = c.execute(sa.text("SELECT * FROM source_reconciliations")).mappings().one()
+        assert row["cycle_at"] == sunday
+        assert row["last_success_at"] == sunday + timedelta(days=7)
+    run(sunday + timedelta(days=14))
+    assert downloads == ["shop_daily"] * 3
+
+
+def test_weekly_retry_waits_from_slow_finish_and_recovers_interrupted_worker(sales_pg):
+    import pytest
+
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    current = sunday - timedelta(minutes=50)
+    outcome = "success"
+    runs = []
+
+    def sync(ids, c):
+        nonlocal current
+        runs.extend(ids)
+        if outcome == "slow":
+            current += timedelta(minutes=12)
+            assert run()["status"] == "already_running"
+        if outcome == "crash":
+            raise KeyboardInterrupt
+        return dict.fromkeys(ids, outcome == "success")
+
+    def run():
+        return run_scheduled_sources(
+            sales_pg, {"shop_daily": lambda: {"revision": "one"}}, sync, clock=lambda: current
+        )
+
+    run()
+    runs.clear()
+    current = sunday
+    outcome = "slow"
+    run()
+    assert runs == ["shop_daily"]
+    current += timedelta(seconds=299)
+    run()
+    assert runs == ["shop_daily"]
+    current += timedelta(seconds=1)
+    outcome = "crash"
+    with pytest.raises(KeyboardInterrupt):
+        run()
+    current += timedelta(minutes=1)
+    outcome = "success"
+    run()
+    assert runs == ["shop_daily"] * 2
+    current += timedelta(minutes=5)
+    run()
+    assert runs == ["shop_daily"] * 3
+
+
+def test_weekly_outcomes_do_not_advance_unstable_watermark_or_hide_available_data(
+    sales_pg, tmp_path
+):
+    from app.jobs.project_sync import Schedule
+    from app.jobs.source_schedule import run_scheduled_sources
+    from app.modules.data_status.repository import read_status
+    from app.modules.product_board.storage import ProductBoardStore
+    from tests.test_product_board_storage import candidate
+
+    seed = ProductBoardStore(sales_pg, tmp_path / "seed").run(lambda hb: candidate())
+    sunday = at("17:00") + timedelta(days=4)
+    revision = "first"
+    outcome = "stable"
+
+    def probe():
+        if revision is None:
+            raise ValueError("private source information")
+        return {"revision": revision}
+
+    def sync(ids, c):
+        nonlocal revision
+        if ids:
+            if outcome == "deferred":
+                return {"_deferred": dict.fromkeys(ids, "MAINTENANCE_DEFERRED")}
+            if outcome == "changed":
+                revision = "second"
+            if outcome == "unreadable":
+                revision = None
+        return dict.fromkeys(ids, True)
+
+    def run(stamp):
+        return run_scheduled_sources(sales_pg, {"product_daily": probe}, sync, now=stamp)
+
+    run(sunday - timedelta(minutes=50))
+    outcome = "deferred"
+    assert run(sunday)["status"] == "deferred"
+    outcome = "changed"
+    assert run(sunday + timedelta(minutes=5))["status"] == "partial"
+    outcome = "unreadable"
+    assert run(sunday + timedelta(minutes=10))["status"] == "partial"
+    data = read_status(sales_pg, source_schedule=Schedule(source_schedule_enabled=True))["data"]
+    row = next(r for r in data["sources"] if r["id"] == "product_daily")
+    assert row["platform_state"] == "available"
+    assert row["upstream"]["state"] == "unchanged"
+    assert row["datasets"][0]["version_id"] == seed["versions"]["product_daily"]
+    assert row["reconciliation"]["status"] == "failed"
+    assert row["reconciliation"]["error_code"] == "CHECK_FAILED"
+    assert row["reconciliation"]["last_success_at"] is None
+    assert row["reconciliation"]["next_retry_at"] == sunday + timedelta(minutes=15)
+    with sales_pg.connect() as c:
+        checkpoint = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert checkpoint["accepted_fingerprint"] == checkpoint["observed_fingerprint"]
+        assert checkpoint["accepted_at"] == sunday - timedelta(minutes=50)
+
+
+def test_weekly_success_closes_matching_pending_change_and_reuses_same_round_download(sales_pg):
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    downloads = []
+    revision = "one"
+    accepted = False
+
+    def sync(ids, c):
+        downloads.extend(ids)
+        return dict.fromkeys(ids, accepted)
+
+    def run(stamp):
+        return run_scheduled_sources(
+            sales_pg, {"shop_daily": lambda: {"revision": revision}}, sync, now=stamp
+        )
+
+    run(sunday - timedelta(minutes=50))
+    accepted = True
+    run(sunday)
+    assert downloads == ["shop_daily"] * 2
+    with sales_pg.connect() as c:
+        row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert row["sync_status"] == "succeeded"
+        assert row["accepted_fingerprint"] == row["observed_fingerprint"]
+    revision = "two"
+    run(sunday + timedelta(days=7))
+    assert downloads == ["shop_daily"] * 3  # 普通检查和对账都需要读取，但共用一次
+
+
+def test_reconciliation_schema_permissions_and_guarded_downgrade(sales_pg):
+    import pytest
+    from alembic import command
+    from alembic.config import Config
+
+    from migrations_v2.local import ROOT, migrate
+
+    def downgrade(c):
+        config = Config(str(ROOT / "apps/api/alembic-v2.ini"))
+        config.attributes["connection"] = c
+        config.attributes["v2_expected_database"] = c.engine.url.database
+        command.downgrade(config, "20261110_14")
+
+    with sales_pg.begin() as c:
+        downgrade(c)
+        assert c.scalar(sa.text("SELECT to_regclass('public.source_reconciliations')")) is None
+        migrate(c)
+        assert c.scalar(sa.text("SELECT count(*) FROM source_reconciliations")) == 0
+        assert c.scalar(
+            sa.text("SELECT has_table_privilege('pdd_app','source_reconciliations','SELECT')")
+        )
+        assert not c.scalar(
+            sa.text("SELECT has_table_privilege('pdd_app','source_reconciliations','UPDATE')")
+        )
+        assert c.scalar(
+            sa.text("SELECT has_table_privilege('pdd_ingest','source_reconciliations','UPDATE')")
+        )
+        assert not c.scalar(
+            sa.text("SELECT has_table_privilege('pdd_ingest','source_reconciliations','DELETE')")
+        )
+    with pytest.raises(sa.exc.IntegrityError), sales_pg.begin() as c:
+        c.execute(
+            sa.text("""
+            INSERT INTO source_reconciliations(source_id,cycle_at,status)
+            VALUES ('shop_daily','2026-11-08 17:00:00+08','succeeded')
+        """)
+        )
+    with sales_pg.begin() as c:
+        c.execute(
+            sa.text("""
+            INSERT INTO source_reconciliations(source_id,cycle_at,status)
+            VALUES ('shop_daily','2026-11-08 17:00:00+08','waiting')
+        """)
+        )
+    with pytest.raises(sa.exc.DBAPIError, match="保留每周对账证据"), sales_pg.begin() as c:
+        downgrade(c)
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT status FROM source_reconciliations")) == "waiting"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261111_15"
+
+
+def test_first_activation_registers_future_sunday_and_manual_does_not_consume_cycle(sales_pg):
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    probes = {"shop_daily": lambda: {"revision": "one"}}
+    calls = []
+
+    def sync(ids, c):
+        calls.extend(ids)
+        return dict.fromkeys(ids, True)
+
+    sunday = at("17:00") + timedelta(days=4)
+    run_scheduled_sources(sales_pg, probes, sync, now=at("08:00"), force=True)
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT count(*) FROM source_reconciliations")) == 0
+    run_scheduled_sources(sales_pg, probes, sync, now=at("08:01"))
+    with sales_pg.connect() as c:
+        assert c.execute(sa.text("SELECT cycle_at,status FROM source_reconciliations")).one() == (
+            sunday,
+            "waiting",
+        )
+    run_scheduled_sources(sales_pg, probes, sync, now=sunday, force=True)
+    run_scheduled_sources(sales_pg, probes, sync, now=sunday)
+    assert calls == ["shop_daily"] * 3

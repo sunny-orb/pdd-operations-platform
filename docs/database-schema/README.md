@@ -2,7 +2,7 @@
 
 **经营基线维护用户已选定的30张表方案，原01共494个显式字段、50处正式外键；08为退款金额区间追加4列，现经营30表共498字段，外键数不变。** 天气独立扩展`weather_publications`（8字段/1FK）通过Alembic07追加，退款目标08范围扩展见[target-ranges.sql](target-ranges.sql)及[M5专用设计](../implementation/m5-aftersales-implementation.md)，原01迁移保持不变，schema.sql统一包含现行完整迁移链；唯一字段/事务/权限设计见[M6专用方案](../implementation/m6-overview-implementation.md#天气对象数据库与发布专用设计)，派生审阅稿为[weather-publications.sql](weather-publications.sql)。 本轮已修正六处审查问题，删除7个逐行常量，并统一资料重放、标准/计分解耦及报告期间/修订选择，并补齐公共时间/金额/状态和查询索引设计。每张表列出含义、类型、主外键、可空、唯一约束和发布/删除边界；旧72表不再作为现行方案。结构由独立Alembic基线及派生审阅SQL维护；实际创建和验证状态见[TODO](../../TODO.md#当前任务与范围)及[执行记录](../validation/2026-10-28.md#database-v2-local-created)，不将空结构视为业务接入验收。
 
-现行代码head为`20261110_14`：经营30表（498字段）＋天气发布1表（8字段）＋来源检查1表（18字段）＋保留维护5表（35字段）＋内容复用8表（152字段），共45张应用表／711字段／71处正式外键，另有1张Alembic技术版本表及5张只读兼容视图（142列投影，无额外事实副本）。运维字段见[离线保留设计](database-retention.md)，内容块、成员及类型化共享事实见[内容复用设计](content-reuse.md)。该head仅随机本机隔离库验证，不代表生产升级。来源检查10—12的字段与约束见[source-checkpoints.md](source-checkpoints.md)。天气内容修订没有新增数据库列。
+现行代码head为`20261111_15`：经营30表（498字段）＋天气发布1表（8字段）＋来源检查1表（18字段）＋保留维护5表（35字段）＋内容复用8表（152字段）＋[每周对账状态](weekly-reconciliation.md)1表（7字段），共46张应用表／718字段／71处正式外键，另有1张Alembic技术版本表及5张只读兼容视图（142列投影，无额外事实副本）。运维字段见[离线保留设计](database-retention.md)，内容块、成员及类型化共享事实见[内容复用设计](content-reuse.md)。该head仅随机本机隔离库验证，不代表生产升级。来源检查10—12的字段与约束见[source-checkpoints.md](source-checkpoints.md)。天气内容修订没有新增数据库列。
 
 数据库确定为PostgreSQL，前期无Redis。输入以[数据契约3.5中文展示字段](../data-contract.md#page-display-contracts)和指定新版`sites-current`五页原型为准；旧M1前后端/迁移不作为设计依据。来源仍是数仓、聚水潭、飞书表；天气按既定范围单独设计。业务答复、剩余参数和真实来源技术待验继续遵守契约，不因字段设计完成而变成已实现或验收。
 

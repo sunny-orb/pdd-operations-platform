@@ -19,7 +19,7 @@ import {
   type DatasetStatus,
   type SourceStatus,
 } from "./sourceStatusApi";
-import { dataUpdateAlerts, sourceHasFailure } from "./dataUpdateAlerts";
+import { dataUpdateAlerts, sourceHasFailure, sourceUpdateFailed } from "./dataUpdateAlerts";
 import "./data-update-status.css";
 
 const systems = { warehouse: "数仓", feishu: "飞书", nmc: "气象台" };
@@ -130,8 +130,83 @@ function UpstreamUpdate({ row }: { row: SourceStatus }) {
   );
 }
 
+const reconciliationLabels = {
+  waiting: { text: "等待周对账", color: "default" },
+  running: { text: "周对账进行中", color: "processing" },
+  failed: { text: "周对账未完成", color: "warning" },
+  deferred: { text: "周对账已暂缓", color: "warning" },
+  succeeded: { text: "周对账完成", color: "success" },
+};
+
+function ReconciliationDetail({ row }: { row: SourceStatus }) {
+  const check = row.reconciliation;
+  if (!check) return null;
+  const hasData = row.datasets.length > 0 && row.datasets.every((item) => item.version_id);
+  const messages: Record<string, string> = {
+    CHECK_FAILED: "对账未能确认来源更新标记。",
+    WAREHOUSE_WEB_LOGIN_REQUIRED: "对账未能读取数仓网页更新时间。",
+    SYNC_FAILED: "本次对账未完成数据接收或校验。",
+    SOURCE_CHANGED_DURING_SYNC: "对账期间来源再次变化。",
+    WORKER_LOST: "上次对账中断。",
+    MAINTENANCE_DEFERRED: "项目维护期间暂缓对账。",
+    DATASET_RESTORE_REQUIRED: "对账需恢复历史输入后继续。",
+  };
+  return (
+    <>
+      <div>
+        <dt>每周对账</dt>
+        <dd>
+          {reconciliationLabels[check.status].text}
+          {check.error_code && (
+            <>
+              {" · "}
+              {messages[check.error_code] ?? "本次对账仍待完成。"}
+              {hasData && "已有数据可用，请以平台数据日期为准。"}
+            </>
+          )}
+        </dd>
+      </div>
+      {check.cycle_at && (
+        <div>
+          <dt>本轮计划时间</dt>
+          <dd>{time(check.cycle_at)}</dd>
+        </div>
+      )}
+      {check.last_attempt_at && (
+        <div>
+          <dt>最近对账尝试</dt>
+          <dd>{time(check.last_attempt_at)}</dd>
+        </div>
+      )}
+      {check.last_finished_at && (
+        <div>
+          <dt>最近对账结束</dt>
+          <dd>{time(check.last_finished_at)}</dd>
+        </div>
+      )}
+      <div>
+        <dt>最近对账成功</dt>
+        <dd>{time(check.last_success_at)}</dd>
+      </div>
+      {check.next_retry_at && (
+        <div>
+          <dt>下一次重试</dt>
+          <dd>{time(check.next_retry_at)}</dd>
+        </div>
+      )}
+      {check.next_scheduled_at && (
+        <div>
+          <dt>下一次对账</dt>
+          <dd>{time(check.next_scheduled_at)}</dd>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SyncStatus({ row }: { row: SourceStatus }) {
   const state = platformLabels[row.platform_state];
+  const reconciliation = row.reconciliation && reconciliationLabels[row.reconciliation.status];
   // 来源失败可能只涉及一个用途，摘要时间必须绑定该失败，不能取另一成功用途。
   const relevant = row.datasets.filter((d) =>
     row.platform_state === "failed"
@@ -145,6 +220,7 @@ function SyncStatus({ row }: { row: SourceStatus }) {
   return (
     <div className="m6-update-cell-stack">
       <Tag color={state.color}>{state.text}</Tag>
+      {reconciliation && <Tag color={reconciliation.color}>{reconciliation.text}</Tag>}
       <small className="m6-update-subtext">
         {groupFailure ? "失败记录：" : "本次尝试："}
         {time(groupFailure ? row.upstream.checked_at : attempt)}
@@ -164,7 +240,7 @@ function SourceDetail({ row }: { row: SourceStatus }) {
   const observation = row.upstream.observation;
   return (
     <div className="m6-update-detail">
-      {sourceHasFailure(row) && (
+      {sourceUpdateFailed(row) && (
         <p>
           异常影响：{row.pages.map((page) => pageNames[page]).join("、")}。
           {row.upstream.state === "failed" ? "上游检查未成功；" : "平台接收未成功；"}
@@ -242,7 +318,7 @@ function SourceDetail({ row }: { row: SourceStatus }) {
           <dd>
             {observation.basis === "warehouse_web_metadata" ||
             observation.basis === "warehouse_web_page"
-              ? "数仓表更新时间；16:10补查获准范围内的历史修订"
+              ? "数仓表更新时间"
               : observation.basis === "table_revision"
                 ? "飞书表修订号"
                 : observation.basis === "publication_content"
@@ -278,6 +354,7 @@ function SourceDetail({ row }: { row: SourceStatus }) {
             </dd>
           </div>
         )}
+        <ReconciliationDetail row={row} />
       </dl>
       <div className="m6-update-platform-details">
         <h4>平台接收明细</h4>
@@ -398,7 +475,11 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
               数仓 {data.monitor.warehouse_times?.join(" / ")} · 飞书{" "}
               {data.monitor.feishu_times?.join(" / ")}（北京时间）
               <br />
-              16:10 数仓对账；聚水潭、天气沿用原计划。
+              {data.monitor.reconciliation_time &&
+                `数仓每周日 ${data.monitor.reconciliation_time} 对账。`}
+              {data.monitor.reconciliation_retry_seconds &&
+                `失败结束后 ${data.monitor.reconciliation_retry_seconds / 60} 分钟重试。`}
+              聚水潭、天气沿用原计划。
             </small>
           )}
           <small className="m6-update-subtext">

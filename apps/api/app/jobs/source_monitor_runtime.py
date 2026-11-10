@@ -7,6 +7,10 @@ import sqlalchemy as sa
 from app.connectors.source_probes import SourceProbes
 from app.jobs.project_runtime import execute_project
 from app.jobs.source_monitor import run_monitor
+from app.modules.data_status.schedule_policy import (
+    RECONCILIATION_RETRY_SECONDS,
+    RECONCILIATION_TIME,
+)
 
 GROUP_STEPS = {
     "products": ("products", "product_scores"),
@@ -136,6 +140,8 @@ def execute_source_schedule(
     now=None,
     warehouse_times=None,
     feishu_times=None,
+    reconciliation_time=RECONCILIATION_TIME,
+    reconciliation_retry_seconds=RECONCILIATION_RETRY_SECONDS,
     source_ids=None,
     force=False,
     process_products=True,
@@ -231,6 +237,8 @@ def execute_source_schedule(
             force=force,
             warehouse_times=warehouse_times or WAREHOUSE_TIMES,
             feishu_times=feishu_times or FEISHU_TIMES,
+            reconciliation_time=reconciliation_time,
+            reconciliation_retry_seconds=reconciliation_retry_seconds,
         )
     finally:
         feishu.close()

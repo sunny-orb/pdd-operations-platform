@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 WAREHOUSE_TIMES = ("08:20", "09:10", "10:10", "10:50", "13:10", "15:10", "16:10")
 FEISHU_TIMES = ("08:20", "10:10")
+RECONCILIATION_TIME = "17:00"
+RECONCILIATION_RETRY_SECONDS = 300
 WAREHOUSE_SOURCES = (
     "shop_daily",
     "product_daily",
@@ -70,3 +72,27 @@ def next_check(code, now, warehouse_times=WAREHOUSE_TIMES, feishu_times=FEISHU_T
     later = [t for t in times if t > local.strftime("%H:%M")]
     day = local.date() if later else local.date() + timedelta(days=1)
     return datetime.fromisoformat(f"{day}T{min(later or times)}+08:00")
+
+
+def first_reconciliation(now, time=RECONCILIATION_TIME):
+    """首次启用只安排本地当天周日或最近未来的周日，不补部署前的日期。"""
+    if now.utcoffset() is None:
+        raise ValueError("TIMEZONE_REQUIRED")
+    day = now.astimezone(ZoneInfo("Asia/Shanghai")).date()
+    sunday = day + timedelta(days=(6 - day.weekday()) % 7)
+    return datetime.fromisoformat(f"{sunday}T{time}+08:00")
+
+
+def next_reconciliation(
+    cycle, time=RECONCILIATION_TIME, retry_seconds=RECONCILIATION_RETRY_SECONDS
+):
+    """由持久状态推导下一次到期。运行中由持锁执行者结算或由接手者恢复。"""
+    if cycle["status"] == "running":
+        return None
+    if cycle["status"] == "waiting":
+        return cycle["cycle_at"]
+    finished = cycle["last_finished_at"]
+    if cycle["status"] in ("failed", "deferred"):
+        return finished + timedelta(seconds=retry_seconds)
+    sunday = first_reconciliation(finished, time)
+    return sunday if sunday > finished else sunday + timedelta(days=7)

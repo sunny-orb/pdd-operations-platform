@@ -19,7 +19,7 @@
 
 来源更新监测追加对象“一个物理来源最近检查和接收标记”，按本流程的专用设计见[同步监测](implementation/project-sync-implementation.md#source-update-monitor)，字段与范式见[检查状态字典](database-schema/source-checkpoints.md)。经营事实、版本、报告关系不变。
 
-当前应用物理范围包括原30张经营表、天气发布、来源检查、保留维护及内容复用对象；完整数量与字段统一见[字段字典](database-schema/README.md)。`schema.sql`从base到当前head整体生成，已有库必须按Alembic升级，不能重放空库初始化SQL。新增内容复用对象关系、存储表示和事务约束见[专用设计](database-schema/content-reuse.md)，不改变经营对象和指标。
+当前应用物理范围包括原30张经营表、天气发布、来源检查、保留维护、内容复用及[每周对账状态](database-schema/weekly-reconciliation.md)对象；完整数量与字段统一见[字段字典](database-schema/README.md)。`schema.sql`从base到当前head整体生成，已有库必须按Alembic升级，不能重放空库初始化SQL。新增内容复用对象关系、存储表示和事务约束见[专用设计](database-schema/content-reuse.md)，不改变经营对象和指标。
 
 ## 设计目标
 

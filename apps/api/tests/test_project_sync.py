@@ -175,3 +175,40 @@ def test_connection_failure_is_recorded_in_each_source_task(
             ).scalar_one()
             == "failed"
         )
+
+
+def test_project_failure_diagnostic_is_saved_without_driver_text(sales_pg, tmp_path, capsys):
+    import json
+
+    from pymysql.err import ProgrammingError
+
+    from app.connectors.retry import RetryBudget, execute_read
+
+    secret = "secret-SQL-parameter-and-connection"
+
+    class Cursor:
+        def execute(self, *_):
+            raise ProgrammingError(1064, "Exceed concurrency limit:3backend " + secret)
+
+    def read():
+        execute_read(
+            Cursor(),
+            "SELECT " + secret,
+            (secret,),
+            RetryBudget(sleeper=lambda _: None),
+            stage="projection",
+            source="product_daily",
+        )
+
+    result = run_project(sales_pg, "source-slot:test", {"product_daily": read}, tmp_path)
+    stdout = capsys.readouterr().out
+    archive = (tmp_path / (result["run_id"] + ".json")).read_text()
+    assert secret not in stdout and secret not in archive
+    expected = {
+        "category": "warehouse_concurrency_limit",
+        "source": "product_daily",
+        "stage": "projection",
+        "retries_consumed": 3,
+    }
+    assert json.loads(stdout)["diagnostic"] == expected
+    assert json.loads(archive)["datasets"]["product_daily"]["diagnostic"] == expected

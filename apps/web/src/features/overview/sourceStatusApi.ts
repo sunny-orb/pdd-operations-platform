@@ -29,6 +29,18 @@ const source = z.object({
   kind: z.string(),
   datasets: z.array(dataset),
   platform_state: z.enum(["syncing", "failed", "pending", "available", "unavailable"]),
+  reconciliation: z
+    .object({
+      status: z.enum(["waiting", "running", "failed", "deferred", "succeeded"]),
+      cycle_at: text,
+      last_attempt_at: text,
+      last_finished_at: text,
+      last_success_at: text,
+      next_retry_at: text,
+      next_scheduled_at: text,
+      error_code: text,
+    })
+    .nullish(),
   upstream: z.object({
     state: z.enum(["unchecked", "checking", "failed", "changed", "unchanged"]),
     checked_at: text,
@@ -56,6 +68,8 @@ export const dataStatusSchema = z.object({
       source_schedule_enabled: z.boolean().optional(),
       warehouse_times: z.array(z.string()).optional(),
       feishu_times: z.array(z.string()).optional(),
+      reconciliation_time: text.optional(),
+      reconciliation_retry_seconds: z.number().nullable().optional(),
     }),
   }),
   meta: z.object({ generated_at: z.string() }),
@@ -78,6 +92,7 @@ export function hasRunningUpdate(data: DataStatus | undefined) {
       (source) =>
         source.upstream.state === "checking" ||
         source.platform_state === "syncing" ||
+        source.reconciliation?.status === "running" ||
         source.datasets.some((item) => item.attempt_status === "running"),
     ) ||
     data?.processing.some((item) => item.state === "syncing" || item.attempt_status === "running"),

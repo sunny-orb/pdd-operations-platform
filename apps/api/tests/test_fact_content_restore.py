@@ -225,4 +225,4 @@ def test_nonempty_shared_downgrade_refuses_without_deleting_data(sales_pg):
             downgrade_to_13(c)
     with sales_pg.connect() as c:
         assert c.scalar(sa.text("SELECT count(*) FROM read_product_sales_records")) == 2
-        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261110_14"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261111_15"

@@ -6,6 +6,7 @@ import json
 import sys
 
 from app.connectors.product_board import ProductBoardReader
+from app.connectors.retry import safe_diagnostic
 from app.jobs.sync_shop_daily import ROOT, runtime_engine
 from app.modules.product_board.storage import ProductBoardStore
 
@@ -43,10 +44,7 @@ def _main():
                     error=type(exc).__name__,
                     module=type(exc).__module__,
                     source_code=exc.args[0] if exc.args and isinstance(exc.args[0], int) else None,
-                    sqlstate=getattr(getattr(exc, "orig", None), "sqlstate", None),
-                    diagnostic=str(exc)[:350]
-                    if type(exc).__module__.startswith("pymysql")
-                    else None,
+                    diagnostic=safe_diagnostic(exc),
                 ),
                 ensure_ascii=False,
             )

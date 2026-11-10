@@ -1,4 +1,4 @@
-"""M1三表有限只读连接；单连接、两遍完整必要投影，最多一次重试。"""
+"""M1三表有限只读连接，单连接两遍完整必要投影，变化时再核对一次。"""
 
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -55,6 +55,8 @@ class ProductBoardReader:
                     ("day", *SHOPS),
                     getattr(self, "retry_budget", None),
                     self.heartbeat,
+                    stage="latest",
+                    source=code,
                 )
                 value = c.fetchone()["latest"]
                 if not value:
@@ -96,6 +98,8 @@ class ProductBoardReader:
                         (*params, 1000, offset),
                         self.retry_budget,
                         self.heartbeat,
+                        stage="projection",
+                        source=code,
                     )
                     batch = c.fetchall()
                 result.extend(batch)

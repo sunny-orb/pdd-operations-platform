@@ -78,6 +78,12 @@ class MonthOption(BaseModel):
     date_to: str
 
 
+class LatestSalesDay(BaseModel):
+    date: str
+    shop_revenue: Numeric | None
+    observed_shop_count: int
+
+
 class SalesFilters(BaseModel):
     sources: dict[str, dict[str, Any]] = Field(default_factory=dict)
     shops: list[ShopOption]
@@ -88,6 +94,7 @@ class SalesFilters(BaseModel):
     calendar_through: str
     observed_from: str | None
     observed_through: str | None
+    latest_day: LatestSalesDay | None = None
     capabilities: dict[str, bool]
 
 

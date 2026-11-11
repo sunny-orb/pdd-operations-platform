@@ -145,6 +145,9 @@ export const filtersSchema = z.object({
     calendar_through: date,
     observed_from: date.nullable(),
     observed_through: date.nullable(),
+    latest_day: z
+      .object({ date, shop_revenue: numeric, observed_shop_count: z.number().int().nonnegative() })
+      .nullish(),
     capabilities: z.record(z.string(), z.boolean()),
   }),
   meta: metaSchema,

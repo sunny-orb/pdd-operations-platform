@@ -367,7 +367,7 @@ export const salesSpec: DomainSpec<SalesRaw> = {
     };
   },
   async load(m, signal) {
-    const month = m.raw.data.default_month;
+    const { default_month: month, latest_day: latestDay, shops: shopOptions } = m.raw.data;
     const base: DomainCard = {
       title: "店铺销售 GMV",
       heading: `${Number(month.slice(5))} 月累计 GMV`,
@@ -380,28 +380,40 @@ export const salesSpec: DomainSpec<SalesRaw> = {
       link: salesLink(month, m.date),
       status: "目标跟踪",
     };
-    const t = targetsSchema.parse(
-      await getJson(
+    const summary = latestDay?.date === m.date ? latestDay : null;
+    // 兼容还未提供同日摘要的API，回退时同样并行请求。
+    const dailyQuery = m.date && !summary ? query(m.version, m.date) : null;
+    const [t, dailyResults] = await Promise.all([
+      getJson(
         `/api/v1/sales/targets?${new URLSearchParams({ month, data_version: m.version })}`,
         signal,
-      ),
-    );
-    if (t.meta.data_version !== m.version) throw new ApiError("店铺发布版本变化", 409);
-    let daily: string | null = null,
-      shopsText = "尚无最新观察日";
-    if (m.date) {
-      const p = query(m.version, m.date);
-      const [performance, shops] = await Promise.all([
-        getJson(`/api/v1/sales/performance?${p}`, signal).then((v) => performanceSchema.parse(v)),
-        getJson(`/api/v1/sales/shops?${p}`, signal).then((v) => shopsSchema.parse(v)),
-      ]);
+      ).then((value) => {
+        const targets = targetsSchema.parse(value);
+        if (targets.meta.data_version !== m.version) throw new ApiError("店铺发布版本变化", 409);
+        return targets;
+      }),
+      dailyQuery
+        ? Promise.all([
+            getJson(`/api/v1/sales/performance?${dailyQuery}`, signal).then((v) =>
+              performanceSchema.parse(v),
+            ),
+            getJson(`/api/v1/sales/shops?${dailyQuery}`, signal).then((v) => shopsSchema.parse(v)),
+          ])
+        : null,
+    ]);
+    let daily = summary?.shop_revenue ?? null;
+    let shopsText = summary
+      ? `最新日含 ${summary.observed_shop_count}/${shopOptions.length} 店铺`
+      : "尚无最新观察日";
+    if (dailyResults) {
+      const [performance, shops] = dailyResults;
       if (performance.meta.data_version !== m.version || shops.meta.data_version !== m.version)
         throw new ApiError("店铺发布版本变化", 409);
       daily = performance.data.shop_revenue;
       const observed = shops.data.items.filter(
         (s) => s.coverage.observed_days > 0 && s.coverage.latest_observed_date === m.date,
       ).length;
-      shopsText = `最新日含 ${observed}/${m.raw.data.shops.length} 店铺`;
+      shopsText = `最新日含 ${observed}/${shopOptions.length} 店铺`;
     }
     return empty(
       {

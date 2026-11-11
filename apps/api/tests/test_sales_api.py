@@ -75,6 +75,12 @@ def test_query_contract_weighted_ratios_zero_and_version_conflict(sales_pg, tmp_
         == "2026-10-25"
     )
     assert shops[-1]["rank"] is None and shops[-1]["shop_revenue"] is None
+    latest_day = filters.json()["data"]["latest_day"]
+    assert latest_day == {
+        "date": "2026-10-26",
+        "shop_revenue": "20.30",
+        "observed_shop_count": 1,
+    }
     assert (
         client.get(
             "/api/v1/sales/performance", params={**params, "data_version": "old"}
@@ -123,6 +129,7 @@ def test_stale_publication_keeps_current_calendar_and_exposes_missing_days(
     assert filters["data"]["calendar_through"] == "2026-11-01"
     assert filters["data"]["default_month"] == "2026-11"
     assert filters["data"]["observed_through"] == "2026-10-26"
+    assert filters["data"]["latest_day"]["date"] == "2026-10-26"
     params = dict(
         date_from="2026-11-01", date_to="2026-11-01", data_version=filters["meta"]["data_version"]
     )

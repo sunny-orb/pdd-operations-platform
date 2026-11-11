@@ -2,8 +2,89 @@ import { afterEach, expect, it, vi } from "vitest";
 import { mergeDiagnostics } from "./data";
 import { aftersalesSpec, promotionSpec, salesSpec } from "./adapters";
 import { aftersalesObjectKey, centerCounts, observationCoverage } from "./model";
-import { testFilters } from "../sales/testFixtures";
+import { syntheticResponse, testFilters, testMeta } from "../sales/testFixtures";
 afterEach(() => vi.unstubAllGlobals());
+const centerTargets = {
+  meta: testMeta,
+  data: {
+    month_actual: "100",
+    annual_actual: "1000",
+    month_target: "200",
+    annual_target: null,
+    month_ratio: "0.5",
+    annual_ratio: null,
+    gap: "100",
+    state: "observed",
+  },
+};
+
+it("运营中心用同版本筛选响应的单日摘要展示零成交与覆盖店数", async () => {
+  const fetchSales = vi.fn(async (url: string) => ({
+    ok: true,
+    json: async () =>
+      url.includes("/filters")
+        ? {
+            ...testFilters,
+            data: {
+              ...testFilters.data,
+              latest_day: { date: "2026-10-26", shop_revenue: "0.00", observed_shop_count: 1 },
+            },
+          }
+        : url.includes("/targets?")
+          ? centerTargets
+          : syntheticResponse(url),
+  }));
+  vi.stubGlobal("fetch", fetchSales);
+  const signal = new AbortController().signal;
+  const meta = await salesSpec.meta(signal);
+  const { card } = await salesSpec.load(meta, signal);
+  expect(card.value).toBe("100");
+  expect(card.pairs).toContainEqual({ label: "最新入仓日 GMV", value: "0.00", type: "currency" });
+  expect(card.sourceNote).toContain("最新日含 1/2 店铺");
+  expect(fetchSales.mock.calls.map(([url]) => url.split("?")[0])).toEqual([
+    "/api/v1/sales/filters",
+    "/api/v1/sales/targets",
+  ]);
+});
+
+it("运营中心目标尚未返回时已经请求同版本的单日销售和店铺汇总", async () => {
+  let finishTargets!: () => void;
+  const pendingTargets = new Promise<void>((resolve) => {
+    finishTargets = resolve;
+  });
+  const fetchSales = vi.fn(async (url: string) => {
+    if (url.includes("/targets?")) {
+      await pendingTargets;
+      return { ok: true, json: async () => centerTargets };
+    }
+    return { ok: true, json: async () => syntheticResponse(url) };
+  });
+  vi.stubGlobal("fetch", fetchSales);
+  const signal = new AbortController().signal;
+  const meta = await salesSpec.meta(signal);
+  const card = salesSpec.load(meta, signal);
+  try {
+    const requests = fetchSales.mock.calls.map(([url]) => url);
+    expect(requests).toContain("/api/v1/sales/targets?month=2026-10&data_version=synthetic-v1");
+    for (const path of ["performance", "shops"]) {
+      expect(requests).toContain(
+        `/api/v1/sales/${path}?data_version=synthetic-v1&date_from=2026-10-26&date_to=2026-10-26`,
+      );
+    }
+  } finally {
+    finishTargets();
+    await card;
+  }
+  const { card: result } = await card;
+  expect(result.value).toBe("100");
+  expect(result.pairs).toContainEqual({
+    label: "最新入仓日 GMV",
+    value: "30.50",
+    type: "currency",
+  });
+  expect(result.sourceNote).toContain("最新日含 2/2 店铺");
+});
+
 it("GMV目标同版本失败与恢复改变中心查询状态，避免保留旧成功说明", async () => {
   let status = "failed";
   vi.stubGlobal(

@@ -141,6 +141,22 @@ class SalesService:
             from .datasets import SPECS
             from .detail_queries import source_info
 
+            metadata = meta(snapshot)
+            observed_through = metadata["observed_through"]
+            observed_date = date.fromisoformat(observed_through) if observed_through else None
+            latest_day = None
+            if observed_date is not None and start <= observed_date <= end:
+                identities = {shop[0] for shop in SHOPS.values()}
+                rows = [
+                    row
+                    for row in snapshot["rows"]
+                    if row["business_date"] == observed_date and row["shop_id"] in identities
+                ]
+                latest_day = dict(
+                    date=observed_through,
+                    shop_revenue=number(total(rows, "shop_revenue"), money=True),
+                    observed_shop_count=len({row["shop_id"] for row in rows}),
+                )
             return dict(
                 data=dict(
                     sources={
@@ -157,8 +173,9 @@ class SalesService:
                     recommended_date_from=months[-1]["date_from"],
                     recommended_date_to=months[-1]["date_to"],
                     calendar_through=str(end),
-                    observed_from=meta(snapshot)["observed_from"],
-                    observed_through=meta(snapshot)["observed_through"],
+                    observed_from=metadata["observed_from"],
+                    observed_through=observed_through,
+                    latest_day=latest_day,
                     capabilities=dict(
                         shop_daily=True,
                         targets="sales_targets" in snapshot["versions"],
@@ -172,7 +189,7 @@ class SalesService:
                         product_regions="product_regions" in snapshot["versions"],
                     ),
                 ),
-                meta=meta(snapshot),
+                meta=metadata,
             )
 
     def read(self, query, *, scope):

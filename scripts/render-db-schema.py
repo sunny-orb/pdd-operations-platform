@@ -26,8 +26,11 @@ from migrations_v2.company_db_objects import (
 )
 
 DEPLOY_DATABASE = "pdd_dashboard"
-# 审定的离线12:15原始事务体，包含待剥离的47条本机授权。
-UPGRADE_SQL_SHA256 = "a72bca41c2053e7f980074f4540647f8cc9f2f163dd81797dd899e4dc1266d5a"
+# 两个精确离线增量；公司CLI只执行12→16，15→16仅用于已升级隔离副本对照。
+UPGRADE_SQL_SHA256 = {
+    START_REVISION: "ba48de7dd93ee9b000a1815d4d1003cb4c2c8ae12ac6a9c4482c6e8a88ec1723",
+    "20261111_15": "efbf56bdd332379a0a7fac3527c883569af8cdbc13a2c683ac557647ea95b612",
+}
 
 
 def transaction_body(sql: str) -> str:
@@ -37,15 +40,17 @@ def transaction_body(sql: str) -> str:
     return sql[len("BEGIN;") : -len("COMMIT;")]
 
 
-def render_upgrade_sql() -> str:
-    """固定生成12→15增量，仅剥离已审定的本机角色授权。"""
+def render_upgrade_sql(start_revision: str = START_REVISION) -> str:
+    """只生成已审定12/15→16增量；不扩展公司CLI的实际起点许可。"""
+    if start_revision not in UPGRADE_SQL_SHA256:
+        raise RuntimeError("DEPLOY_MIGRATION_START_INVALID")
     output = io.StringIO()
     config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
     if ScriptDirectory.from_config(config).get_current_head() != TARGET_REVISION:
         raise RuntimeError("DEPLOY_MIGRATION_HEAD_CHANGED")
-    command.upgrade(config, f"{START_REVISION}:{TARGET_REVISION}", sql=True)
+    command.upgrade(config, f"{start_revision}:{TARGET_REVISION}", sql=True)
     body = transaction_body(output.getvalue().strip())
-    if hashlib.sha256(body.encode()).hexdigest() != UPGRADE_SQL_SHA256:
+    if hashlib.sha256(body.encode()).hexdigest() != UPGRADE_SQL_SHA256[start_revision]:
         raise RuntimeError("DEPLOY_MIGRATION_SQL_CHANGED")
     body, count = re.subn(
         r"(?m)^GRANT (?:SELECT|INSERT|UPDATE\(state\)|SELECT,INSERT,UPDATE) "
@@ -53,7 +58,8 @@ def render_upgrade_sql() -> str:
         "",
         body,
     )
-    if count != 47 or re.search(r"\bpdd_(?:app|ingest)\b", body):
+    expected_grants = 47 if start_revision == START_REVISION else 0
+    if count != expected_grants or re.search(r"\bpdd_(?:app|ingest)\b", body):
         raise RuntimeError("DEPLOY_MIGRATION_PERMISSIONS_CHANGED")
     return body
 

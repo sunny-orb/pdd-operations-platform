@@ -1,6 +1,6 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
--- 迁移范围：base → 20261111_15；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：b8053646d564debeef52250ef1dd5d13544ed867d40ba315c4d63e4d45e7c8fd
+-- 迁移范围：base → 20261111_16；包含Alembic版本表。
+-- 迁移、冻结实现及生成器SHA-256：239dfdbbfa7e1e72f2414d4e36a98810d86412d07891bec0f22a95754a30a073
 -- 公司单账号：songbing/pdd_dashboard；应用结构须空；保留monitor及登记的扩展成员。
 -- 不创建角色、不修改数据库或monitor权限；应用对象由执行账号拥有。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。
@@ -3710,6 +3710,97 @@ WITH RECURSIVE roots(id) AS (
 $pdd_v2$;
 
 UPDATE public.alembic_version_v2 SET version_num='20261111_15' WHERE public.alembic_version_v2.version_num = '20261110_14';
+
+-- Running upgrade 20261111_15 -> 20261111_16
+
+DO $$ BEGIN
+      IF NOT pg_try_advisory_xact_lock(hashtext('project-source-sync')) THEN
+        RAISE EXCEPTION 'SUMMARY_INDEX_MIGRATION_BUSY';
+      END IF;
+    END $$;
+
+DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM public.dataset_storage WHERE state='offline') THEN
+        RAISE EXCEPTION 'SUMMARY_INDEX_UPGRADE_RESTORE_REQUIRED';
+      END IF;
+    END $$;
+
+CREATE OR REPLACE FUNCTION public.pdd_retention_context(version_key text, table_key text, action text) RETURNS boolean
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $pdd_v2$
+BEGIN
+ RETURN EXISTS(SELECT 1 FROM public.retention_operations o
+ JOIN public.retention_operation_items i ON i.operation_id=o.id
+ JOIN public.retention_archives a ON a.id=o.archive_id
+ WHERE o.id=current_setting('pdd.retention_operation',true)
+ AND o.transaction_id=txid_current() AND o.status='running' AND o.kind=action
+ AND i.version_id=version_key AND i.table_name=table_key
+ AND a.database_name=current_database() AND a.schema_head='20261111_16');
+END;
+$pdd_v2$;
+
+CREATE OR REPLACE FUNCTION public.pdd_retention_item_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY INVOKER
+SET search_path = pg_catalog, public
+AS $pdd_v2$
+DECLARE action text; archive text; ver_code text; expected_table text; exit_at timestamptz;
+    BEGIN
+      IF TG_OP<>'INSERT' THEN RAISE EXCEPTION 'RETENTION_AUDIT_IMMUTABLE'; END IF;
+      IF NOT pg_try_advisory_xact_lock(hashtext('pdd-database-maintenance')) THEN
+        RAISE EXCEPTION 'RETENTION_BUSY'; END IF;
+      IF current_database() !~ '^pdd_operations_v2_test_[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'RETENTION_PRODUCTION_DISABLED'; END IF;
+      SELECT o.kind,o.archive_id INTO action,archive FROM public.retention_operations o
+      JOIN public.retention_archives a ON a.id=o.archive_id
+      WHERE o.id=NEW.operation_id AND o.transaction_id=txid_current() AND o.status='running'
+        AND a.database_name=current_database() AND a.schema_head='20261111_16'
+        AND jsonb_array_length(a.locations)>=2;
+      IF action IS NULL THEN RAISE EXCEPTION 'RETENTION_RECEIPT_REQUIRED'; END IF;
+      SELECT dataset_code INTO ver_code FROM public.dataset_versions WHERE id=NEW.version_id
+        AND state='published' FOR UPDATE;
+      expected_table := CASE ver_code WHEN 'product_daily' THEN 'product_daily_facts'
+        WHEN 'product_promotion' THEN 'product_promotion_records'
+        WHEN 'product_regions' THEN 'product_region_records' END;
+      IF expected_table IS DISTINCT FROM NEW.table_name THEN
+        RAISE EXCEPTION 'RETENTION_SCOPE'; END IF;
+      IF action='offline' THEN
+        IF EXISTS(SELECT 1 FROM (
+WITH RECURSIVE roots(id) AS (
+ SELECT id FROM public.dataset_versions
+ WHERE dataset_code NOT IN ('product_daily','product_promotion','product_regions')
+    OR state <> 'published'
+ UNION SELECT version_id FROM public.fact_content_manifests UNION SELECT version_id FROM public.current_datasets
+ UNION SELECT s.version_id FROM public.dataset_storage s WHERE keep_online
+ UNION SELECT p.previous_version_id FROM public.dataset_publications p
+ JOIN public.current_datasets c ON c.dataset_code=p.dataset_code AND c.revision=p.revision
+ WHERE p.previous_version_id IS NOT NULL
+), protected(id) AS (
+ SELECT id FROM roots UNION
+ SELECT i.input_version_id FROM public.version_inputs i JOIN protected p ON p.id=i.output_version_id
+) SELECT id FROM protected
+) p WHERE p.id=NEW.version_id)
+          OR EXISTS(SELECT 1 FROM public.task_runs WHERE status='running') THEN
+          RAISE EXCEPTION 'RETENTION_PROTECTED'; END IF;
+        SELECT max(occurred_at) INTO exit_at FROM public.dataset_publications
+          WHERE previous_version_id=NEW.version_id;
+        IF exit_at IS NULL OR exit_at > statement_timestamp()-interval '24 hours' THEN
+          RAISE EXCEPTION 'RETENTION_GRACE'; END IF;
+        IF NOT EXISTS(SELECT 1 FROM public.dataset_storage WHERE version_id=NEW.version_id
+                      AND state='online') THEN
+        RAISE EXCEPTION 'RETENTION_STATE'; END IF;
+      ELSE
+        IF NOT EXISTS(SELECT 1 FROM public.dataset_storage WHERE version_id=NEW.version_id
+          AND state='offline' AND archive_id=archive) THEN
+        RAISE EXCEPTION 'RETENTION_STATE'; END IF;
+      END IF;
+      RETURN NEW;
+    END;
+$pdd_v2$;
+
+CREATE INDEX ix_return_records_summary_window ON public.return_records (dataset_version_id, period_start, period_end) WHERE row_kind = 'detail' AND period_start IS NOT NULL AND period_end IS NOT NULL;
+
+UPDATE public.alembic_version_v2 SET version_num='20261111_16' WHERE public.alembic_version_v2.version_num = '20261111_15';
 
 
 COMMIT;

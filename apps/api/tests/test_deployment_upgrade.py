@@ -87,6 +87,12 @@ def test_upgrade_preserves_data_and_owned_company_objects(deployed12):
             "20261104_12"
         )
         assert upgrade.upgrade(raw, apply=True) == "upgraded"
+        assert (
+            c.exec_driver_sql(
+                "SELECT to_regclass('public.ix_return_records_summary_window')"
+            ).scalar()
+            is not None
+        )
         writer.exec_driver_sql("SELECT pg_advisory_lock(hashtext('project-source-sync'))")
         try:
             assert upgrade.upgrade(raw, apply=True) == "already_upgraded"
@@ -116,6 +122,7 @@ def test_upgrade_preserves_data_and_owned_company_objects(deployed12):
     ("statement", "error"),
     [
         ("UPDATE alembic_version_v2 SET version_num='20261110_13'", "REVISION_MISMATCH"),
+        ("UPDATE alembic_version_v2 SET version_num='20261111_15'", "REVISION_MISMATCH"),
         ("CREATE TABLE unknown_data (id text)", "SCHEMA_MISMATCH"),
         ("CREATE SEQUENCE public.unknown_seq", "SCHEMA_MISMATCH"),
         ("CREATE COLLATION public.unknown_collation (provider=libc,locale='C')", "SCHEMA_MISMATCH"),
@@ -260,7 +267,7 @@ def test_upgrade_rolls_back_versions_tables_and_data_after_late_ddl_failure(
         DO $$ BEGIN
           IF to_regclass('public.source_reconciliations') IS NULL OR
              NOT EXISTS (SELECT 1 FROM public.alembic_version_v2
-                         WHERE version_num='20261111_15') THEN
+                         WHERE version_num='20261111_16') THEN
             RAISE EXCEPTION 'injection point did not reach final migration';
           END IF;
           RAISE EXCEPTION 'injected final migration failure';
@@ -281,6 +288,9 @@ def test_upgrade_rolls_back_versions_tables_and_data_after_late_ddl_failure(
         )
         for rel in ("dataset_storage", "fact_content_blocks", "source_reconciliations"):
             assert c.exec_driver_sql("SELECT to_regclass(%s)", (f"public.{rel}",)).scalar() is None
+        from migrations_v2.company_db_objects import verify_application
+
+        verify_application(c.connection.driver_connection, "20261104_12", has_rpa=True)
         assert data_snapshot(c) == before
         c.exec_driver_sql("RESET ROLE")
         assert extension_snapshot(c) == extensions_before
@@ -306,3 +316,49 @@ def test_upgrade_renderer_refuses_sql_for_an_unreviewed_role(monkeypatch):
     monkeypatch.setattr(renderer.command, "upgrade", inject_grant)
     with pytest.raises(RuntimeError, match="DEPLOY_MIGRATION_SQL_CHANGED"):
         renderer.render_upgrade_sql()
+
+
+def test_index_timeout_rolls_back_direct_12_to_16(deployed12, monkeypatch):
+    """普通建索引等待真实冲突锁时被PG取消，13—16必须全部回滚。"""
+    publish(deployed12)
+    upgrade = load_script("index_timeout_upgrade", "upgrade-deployment-db.py")
+    prepare = upgrade.prepare_transaction
+
+    def short_test_budget(connection, *, read_only):
+        prepare(connection, read_only=read_only)
+        if not read_only:
+            connection.execute("SET LOCAL statement_timeout='50ms'")
+
+    monkeypatch.setattr(upgrade, "prepare_transaction", short_test_budget)
+    with deployed12.connect() as c, deployed12.connect() as blocker:
+        before = data_snapshot(c)
+        c.exec_driver_sql("SET ROLE pdd_app")
+        with blocker.connection.driver_connection.transaction():
+            blocker.exec_driver_sql("LOCK TABLE return_records IN ROW EXCLUSIVE MODE")
+            with pytest.raises(psycopg.errors.QueryCanceled):
+                upgrade.upgrade(c.connection.driver_connection, apply=True)
+        assert (
+            c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar()
+            == "20261104_12"
+        )
+        for name in (
+            "dataset_storage",
+            "fact_content_blocks",
+            "source_reconciliations",
+            "ix_return_records_summary_window",
+        ):
+            assert c.exec_driver_sql("SELECT to_regclass(%s)", (f"public.{name}",)).scalar() is None
+        from migrations_v2.company_db_objects import verify_application
+
+        verify_application(c.connection.driver_connection, "20261104_12", has_rpa=True)
+        assert data_snapshot(c) == before
+        c.exec_driver_sql("RESET ROLE")
+        assert c.exec_driver_sql("SELECT value FROM monitor.sentinel").scalar() == "preserved"
+        assert c.exec_driver_sql("SELECT count(*) FROM aftersales_reports_rpa").scalar() == 1
+
+
+@pytest.mark.parametrize("start", ["20261110_13", "20261110_14", "20261111_16", "head", "unknown"])
+def test_increment_renderer_refuses_unreviewed_start(start):
+    renderer = load_script("bounded_index_renderer", "render-db-schema.py")
+    with pytest.raises(RuntimeError, match="DEPLOY_MIGRATION_START_INVALID"):
+        renderer.render_upgrade_sql(start)

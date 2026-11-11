@@ -1,4 +1,4 @@
-"""公司PG17现有库的12→15升级。默认只读核验，--apply执行固定增量。"""
+"""公司PG17现有库的12→16升级。默认只读核验，--apply执行固定增量。"""
 
 import argparse
 import importlib.util

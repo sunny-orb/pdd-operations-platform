@@ -2,7 +2,7 @@
 
 **经营基线维护用户已选定的30张表方案，原01共494个显式字段、50处正式外键；08为退款金额区间追加4列，现经营30表共498字段，外键数不变。** 天气独立扩展`weather_publications`（8字段/1FK）通过Alembic07追加，退款目标08范围扩展见[target-ranges.sql](target-ranges.sql)及[M5专用设计](../implementation/m5-aftersales-implementation.md)，原01迁移保持不变，schema.sql统一包含现行完整迁移链；唯一字段/事务/权限设计见[M6专用方案](../implementation/m6-overview-implementation.md#天气对象数据库与发布专用设计)，派生审阅稿为[weather-publications.sql](weather-publications.sql)。 本轮已修正六处审查问题，删除7个逐行常量，并统一资料重放、标准/计分解耦及报告期间/修订选择，并补齐公共时间/金额/状态和查询索引设计。每张表列出含义、类型、主外键、可空、唯一约束和发布/删除边界；旧72表不再作为现行方案。结构由独立Alembic基线及派生审阅SQL维护；实际创建和验证状态见[TODO](../../TODO.md#当前任务与范围)及[执行记录](../validation/2026-10-28.md#database-v2-local-created)，不将空结构视为业务接入验收。
 
-现行代码head为`20261111_15`：经营30表（498字段）＋天气发布1表（8字段）＋来源检查1表（18字段）＋保留维护5表（35字段）＋内容复用8表（152字段）＋[每周对账状态](weekly-reconciliation.md)1表（8字段），共46张应用表／719字段／72处正式外键，另有1张Alembic技术版本表及5张只读兼容视图（142列投影，无额外事实副本）。运维字段见[离线保留设计](database-retention.md)，内容块、成员及类型化共享事实见[内容复用设计](content-reuse.md)。该head仅随机本机隔离库验证，不代表生产升级。来源检查10—12的字段与约束见[source-checkpoints.md](source-checkpoints.md)。天气内容修订没有新增数据库列。
+现行代码head为`20261111_16`：经营30表（498字段）＋天气发布1表（8字段）＋来源检查1表（18字段）＋保留维护5表（35字段）＋内容复用8表（152字段）＋[每周对账状态](weekly-reconciliation.md)1表（8字段），共46张应用表／719字段／72处正式外键，另有1张Alembic技术版本表及5张只读兼容视图（142列投影，无额外事实副本）。运维字段见[离线保留设计](database-retention.md)，内容块、成员及类型化共享事实见[内容复用设计](content-reuse.md)。该head仅随机本机隔离库验证，不代表生产升级。来源检查10—12的字段与约束见[source-checkpoints.md](source-checkpoints.md)。天气内容修订没有新增数据库列。
 
 数据库确定为PostgreSQL，前期无Redis。输入以[数据契约3.5中文展示字段](../data-contract.md#page-display-contracts)和指定新版`sites-current`五页原型为准；旧M1前后端/迁移不作为设计依据。来源仍是数仓、聚水潭、飞书表；天气按既定范围单独设计。业务答复、剩余参数和真实来源技术待验继续遵守契约，不因字段设计完成而变成已实现或验收。
 
@@ -165,6 +165,8 @@ PK/UQ会建立对应索引，不能再建同列同序普通索引；FK的引用�
 | coverage_records             | 无                                                                                                                                                               | 复用既有版本—范围—字段—窗口NULLS NOT DISTINCT UQ；查询显式带scope_kind和该范围所需空/非空列，不把完整性缺口补0                |
 
 **09追加日期查询索引。** `product_promotion_records`、`product_region_records`分别追加`(dataset_version_id,period_start)`普通B-tree；实际API按period_start查日期，01的粒度/period_end索引不能有效定位这一范围。保留01索引及所有约束。权威为[09迁移](../../apps/api/migrations_v2/versions/20261031_09_query_date_indexes.py)，派生审阅稿[query-performance.sql](query-performance.sql)，执行/回退及实测在[专用设计](../implementation/database-performance.md)。
+
+**16设计：售后历史汇总期间索引。** 2026-11-11隔离发布验收复现旧API的固定版本/期间汇总超时，计划仅向legacy `return_records`追加非唯一`ix_return_records_summary_window`：键`(dataset_version_id,period_start,period_end)`，不含INCLUDE，谓词`row_kind='detail' AND period_start IS NOT NULL AND period_end IS NOT NULL`。不删现有款码索引，不改变字段、PK/FK/UQ、历史数据、RPA或shared表。revision为`20261111_16`，同时将两保留guard按冻结逻辑绑定现行head，生产写入硬关闭不变；仅已做本机随机隔离PG验证，不表示固定恢复副本或生产已建。唯一设计、实测基线、成本及实施/回退计划见[16专用设计](../implementation/database-performance.md#return-summary-index-16)；设计和本地实现已获准，固定恢复副本DDL仍须独立审查与明确授权。
 
 **FK与删除检查。** links.shop_id及高频输入反查已补索引；其他大事实的实体FK不一律机械增建单列索引。日常查询携带固定dataset_version_id，优先复用版本+实体条件UQ/上述范围索引；已发布父对象禁止硬删除，父软删除不发起逐事实FK更新。实施时对未覆盖的反向引用、实际管理排障SQL和锁检查测量，确需时补以FK列为首的索引，不重复声称版本首列索引能覆盖任意不带版本的FK查找。
 

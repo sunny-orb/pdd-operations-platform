@@ -178,3 +178,11 @@ apps/api/.venv/bin/ruff check apps/api/migrations_v2 scripts/render-db-schema.py
 ## 09实际日期查询索引（20261031_09）
 
 2026-10-31按用户全库性能授权追加两条普通B-tree，专用对象/事务/回退方案与31表覆盖证据见[数据库性能设计](../implementation/database-performance.md)。不改01～08、不增加字段或放宽约束。新空库初始化前进到09；08已用库通过`upgrade-query-indexes-local.py`持项目同步锁执行，先通过独立真实PG验证并保存schema备份，禁止用`db-v2 create`覆盖。回退仅删除两条新增索引。
+
+## 16售后历史汇总期间索引（20261111_16）
+
+本轮已获准设计及本机随机PG实现验证；代码head为16，不改01—15、不提交，固定恢复副本和生产尚未执行本迁移。范围是legacy `public.return_records`一条非唯一部分期间索引及两保留guard的必要head绑定适配，业务对象/关系、字段、历史事实、RPA及公司monitor/扩展/权限均不变。权威索引契约、文件职责、真实PG/固定副本性能与成本验收、预算及失败处理统一在[现有性能设计的16节](../implementation/database-performance.md#return-summary-index-16)，不在此重复维护。
+
+公司受控CLI仍只接受实际12→目标16及16只读精确核验；已15的固定隔离副本单独使用审定15:16增量。随机本机真实PG必须证明直接12→16单事务原子路径；旧12→15回执和新增15→16对照不能伪称同一次直接升级。派生schema.sql/schema-songbing.sql由新迁移生成，不能对已用库重放。原维护statement_timeout60秒/lock_timeout5秒先保持并实测构建；失败整笔回滚并留证，不自动延长、不用CONCURRENTLY绕事务、不改API5秒。
+
+新应用/旧API回退优先保留16结构；经审查显式16→15须无offline版本与已登记16回执，仅删本次索引并还原两保留guard到15，保留非空每周对账与旧回执，性能风险需重验。不得自动回退更早结构、删事实或手动stamp。实际执行进度由root维护TODO/validation，本轮不改这些记录。

@@ -14,7 +14,7 @@ from psycopg import sql
 
 from migrations_v2.baseline_20261028.schema import build_metadata
 
-HEAD = "20261111_15"
+HEAD = "20261111_16"
 RECONCILIATIONS = "source_reconciliations"
 RECONCILIATION_COLUMNS = (
     "source_id",

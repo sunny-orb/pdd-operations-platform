@@ -671,7 +671,7 @@ def test_reconciliation_schema_permissions_and_guarded_downgrade(sales_pg):
         downgrade(c)
     with sales_pg.connect() as c:
         assert c.scalar(sa.text("SELECT status FROM source_reconciliations")) == "waiting"
-        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261111_15"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261111_16"
 
 
 def test_first_activation_registers_future_sunday_and_manual_does_not_consume_cycle(sales_pg):

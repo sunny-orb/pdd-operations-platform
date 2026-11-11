@@ -4,7 +4,7 @@ import hashlib
 import json
 
 START_REVISION = "20261104_12"
-TARGET_REVISION = "20261111_15"
+TARGET_REVISION = "20261111_16"
 RPA_TABLE = "aftersales_reports_rpa"
 RPA_INDEX = "aftersale_reports_rpa_pkey"
 RPA_SEQUENCE = "aftersale_reports_rpa_id_seq"
@@ -37,7 +37,7 @@ RPA_COLUMNS = [
     ("end_date", "date"),
 ]
 
-# 冻结的PG17目录指纹由隔离库迁移12及15后取得。按对象类别分开，错误不打印目录内容。
+# 冻结的PG17目录指纹由隔离库迁移12、15及16后取得。按对象类别分开，错误不打印目录内容。
 SCHEMA_SIGNATURES = {
     START_REVISION: {
         "columns": "d1ed987fceefdba4589b86d6f7f0fa1c5de19bb6406e1db3da9454d8585b75aa",
@@ -48,13 +48,22 @@ SCHEMA_SIGNATURES = {
         "internal_triggers": "b8ae19a179d2263bdb1375105520182052351743d162d265149afc64a3cab329",
         "types": "c832100a057573225d9780f9c545ab71ab7173eb6a73ed69c6f1633430305f23",
     },
-    TARGET_REVISION: {
+    "20261111_15": {
         "columns": "ab6725b4a7ab55e52f1d12755091dd76c4c4de6eeaa0210e9383323845e3d06b",
         "constraints": "1bfa5752f4dd2aecf5aa54a4e413f761d41dcbd82b00643247f3ee143204b672",
         "functions": "74b2caf2edc3f61981953dabb772c1adff6dcadd3ce43be04cff341669d2e0d6",
         "relations": "60eb0910ee8ca56fa420a93a736018ef56285981554a60cbe7a26119671c8b8a",
         "triggers": "d4badfa5457ad262ecb75d5785da8c0e97c81030d03728c62ef22abcec38d57d",
         "internal_triggers": "0b9c2b9f56802b45e2661b4030489ff8170223e4d6b316b9f66c16e3a5a1fc95",
+        "types": "0560d24afec221311356e168b60600dd707906cb76ce88fe1da6c699de43256e",
+    },
+    TARGET_REVISION: {
+        "relations": "e64fbae3c6609e5893b28413b77ac38acbe4d16e80b73d9a877d022227f3ea23",
+        "columns": "ab6725b4a7ab55e52f1d12755091dd76c4c4de6eeaa0210e9383323845e3d06b",
+        "constraints": "1bfa5752f4dd2aecf5aa54a4e413f761d41dcbd82b00643247f3ee143204b672",
+        "triggers": "d4badfa5457ad262ecb75d5785da8c0e97c81030d03728c62ef22abcec38d57d",
+        "internal_triggers": "0b9c2b9f56802b45e2661b4030489ff8170223e4d6b316b9f66c16e3a5a1fc95",
+        "functions": "111bde5d8ccc48ebcb8813f9fdf83cf7aec95780eca369cf2327a58d3c2f29b9",
         "types": "0560d24afec221311356e168b60600dd707906cb76ce88fe1da6c699de43256e",
     },
 }
@@ -276,6 +285,13 @@ def verify_application(connection, revision, *, has_rpa):
     # 事件触发器全库生效，monitor或扩展的schema不构成DDL回调许可；本次无已审核回调。
     if connection.execute("SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_event_trigger)").fetchone()[0]:
         raise ValueError("DEPLOY_EVENT_TRIGGER_MISMATCH")
+    if revision == "20261111_16":
+        state = connection.execute(
+            "SELECT indisvalid,indisready FROM pg_index WHERE indexrelid="
+            "to_regclass('public.ix_return_records_summary_window')"
+        ).fetchone()
+        if state != (True, True):
+            raise ValueError("DEPLOY_SCHEMA_MISMATCH:index_state")
     actual = application_signature(connection, has_rpa=has_rpa)
     expected = SCHEMA_SIGNATURES[revision]
     mismatches = sorted(

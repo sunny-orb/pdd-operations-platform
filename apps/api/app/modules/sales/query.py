@@ -54,6 +54,34 @@ def ratio(a, b):
     )
 
 
+def selected_shops(query):
+    """按经营日历校验范围，返回同一批经营店铺身份。"""
+    if (
+        not source_policy.APPROVED_START
+        <= query.date_from
+        <= query.date_to
+        <= source_policy.calendar_through()
+    ):
+        raise SalesError("INVALID_WINDOW", 422)
+    identities = [shop[0] for shop in SHOPS.values()]
+    if query.shop_id and query.shop_id not in identities:
+        raise SalesError("INVALID_SHOP", 422)
+    return [query.shop_id] if query.shop_id else identities
+
+
+PERFORMANCE_INPUTS = {
+    "shop_revenue": ("shop_revenue",),
+    "shop_visitors": ("shop_visitors",),
+    "buyer_conversion": ("buyers", "shop_visitors"),
+    "aov": ("shop_revenue", "buyers"),
+}
+
+
+def performance_inputs(rows, metric):
+    """筛出该经营指标的同店日有效输入，保留真实零。"""
+    return [row for row in rows if all(row[key] is not None for key in PERFORMANCE_INPUTS[metric])]
+
+
 def aggregate(rows, start, end, shop_ids):
     observed = {(r["shop_id"], r["business_date"]) for r in rows}
     coverage = dict(
@@ -69,8 +97,8 @@ def aggregate(rows, start, end, shop_ids):
         window_start=str(start),
         window_end=str(end),
     )
-    conversion = [r for r in rows if r["buyers"] is not None and r["shop_visitors"] is not None]
-    aov = [r for r in rows if r["buyers"] is not None and r["shop_revenue"] is not None]
+    conversion = performance_inputs(rows, "buyer_conversion")
+    aov = performance_inputs(rows, "aov")
     return dict(
         shop_revenue=number(total(rows, "shop_revenue"), money=True),
         shop_visitors=number(total(rows, "shop_visitors")),
@@ -194,19 +222,13 @@ class SalesService:
 
     def read(self, query, *, scope):
         with read_snapshot(self.engine, query.data_version) as snapshot:
-            start, end = source_policy.APPROVED_START, source_policy.calendar_through()
-            if not start <= query.date_from <= query.date_to <= end:
-                raise SalesError("INVALID_WINDOW", 422)
-            identities = [s[0] for s in SHOPS.values()]
-            if query.shop_id and query.shop_id not in identities:
-                raise SalesError("INVALID_SHOP", 422)
+            selected = selected_shops(query)
             rows = [
                 r
                 for r in snapshot["rows"]
                 if query.date_from <= r["business_date"] <= query.date_to
             ]
             if scope == "performance":
-                selected = [query.shop_id] if query.shop_id else identities
                 data = aggregate(
                     [r for r in rows if r["shop_id"] in selected],
                     query.date_from,

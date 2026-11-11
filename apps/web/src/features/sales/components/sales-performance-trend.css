@@ -1,0 +1,211 @@
+.m3-sales-scope .sales-performance-trend {
+  min-width: 0;
+  margin-top: 16px;
+  padding: 18px 20px 14px;
+  border: 1px solid var(--sales-line);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.m3-sales-scope .sales-performance-trend-header h3 {
+  margin: 0;
+  color: #102f57;
+  font-size: 18px;
+}
+
+.m3-sales-scope .sales-performance-trend-header p {
+  margin: 4px 0 0;
+  color: #5d708a;
+  font-size: 13px;
+}
+
+.m3-sales-scope .sales-performance-chart-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 14px;
+  color: #5d708a;
+  font-size: 12px;
+}
+
+.m3-sales-scope .sales-performance-unit {
+  color: #243b5d;
+  font-weight: 600;
+}
+
+.m3-sales-scope .sales-performance-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 7px 0 2px;
+  padding: 0;
+  list-style: none;
+  color: #526984;
+}
+
+.m3-sales-scope .sales-performance-legend li {
+  white-space: nowrap;
+}
+
+.m3-sales-scope .sales-performance-legend small {
+  margin-left: 4px;
+  color: #5d708a;
+  font-size: 11px;
+}
+
+.m3-sales-scope :is(.sales-performance-legend i, .sales-performance-tooltip i) {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+}
+
+.m3-sales-scope :is(.sales-performance-chart, .sales-performance-chart-message) {
+  height: 270px;
+}
+
+.m3-sales-scope .sales-performance-chart {
+  position: relative;
+  min-width: 0;
+}
+
+.m3-sales-scope .sales-performance-chart .recharts-surface:focus-visible,
+.m3-sales-scope .sales-performance-chart .recharts-wrapper:focus-visible {
+  outline: 2px solid var(--sales-blue);
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+.m3-sales-scope .sales-performance-chart-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin: 12px 0 0;
+  color: #5d708a;
+  font-size: 14px;
+}
+
+.m3-sales-scope .sales-performance-chart-empty {
+  position: absolute;
+  inset: 38% 6px auto;
+  margin: 0;
+  color: #5d708a;
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
+}
+
+.m3-sales-scope .sales-performance-tooltip {
+  max-width: min(340px, calc(100vw - 48px));
+  padding: 10px 12px;
+  border: 1px solid #dce3ec;
+  border-radius: 8px;
+  background: #fff;
+  color: #243b5d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 4px 16px #16335414;
+}
+
+.m3-sales-scope .sales-performance-tooltip time {
+  color: #435873;
+  font-weight: 600;
+}
+
+.m3-sales-scope .sales-performance-tooltip > div {
+  display: grid;
+  grid-template-columns: minmax(6.5em, 1fr) minmax(5.25em, auto) minmax(5em, auto);
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.m3-sales-scope .sales-performance-tooltip > .sales-performance-tooltip-head {
+  margin-top: 0;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #edf1f5;
+  color: #5d708a;
+}
+
+.m3-sales-scope .sales-performance-tooltip-head > span {
+  text-align: right;
+}
+
+.m3-sales-scope .sales-performance-tooltip strong {
+  text-align: right;
+  font-weight: 600;
+}
+
+.m3-sales-scope :is(.sales-performance-tooltip, .sales-performance-table-scroll) small {
+  display: block;
+  color: #5d708a;
+  font-weight: 400;
+}
+
+.m3-sales-scope .sales-performance-keyboard-tooltip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  pointer-events: none;
+}
+
+.m3-sales-scope .sales-performance-details {
+  margin: 2px 0 0;
+}
+
+.m3-sales-scope .sales-performance-table-scroll {
+  max-height: 256px;
+  overflow: auto;
+  margin-top: 8px;
+  border: 1px solid var(--sales-line);
+  border-radius: 8px;
+}
+
+.m3-sales-scope .sales-performance-table-scroll table {
+  width: 100%;
+  min-width: max-content;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.m3-sales-scope .sales-performance-table-scroll :is(th, td) {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--sales-line);
+  text-align: left;
+}
+
+.m3-sales-scope .sales-performance-table-scroll caption {
+  padding: 6px 12px;
+  color: #5d708a;
+  caption-side: top;
+  text-align: left;
+}
+
+.m3-sales-scope .sales-performance-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  background: #f5f8fc;
+}
+
+.m3-sales-scope .sales-performance-table-scroll tbody th {
+  white-space: nowrap;
+  font-weight: 400;
+}
+
+@media (max-width: 600px) {
+  .m3-sales-scope .sales-performance-trend {
+    padding: 12px 10px;
+  }
+
+  .m3-sales-scope :is(.sales-performance-chart, .sales-performance-chart-message) {
+    height: 220px;
+  }
+
+  .m3-sales-scope .sales-performance-table-scroll :is(th, td) {
+    padding-inline: 6px;
+  }
+}

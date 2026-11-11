@@ -8,9 +8,45 @@
   min-height: 24px;
 }
 .m3-sales-scope .sales-refund-trigger {
+  position: relative;
+  z-index: 2;
   padding: 0;
   height: 24px;
   font-size: 12px;
+}
+.m3-sales-scope .kpi-card:has(.sales-kpi-trend-button) {
+  position: relative;
+  transition: background-color 120ms ease-out;
+}
+.m3-sales-scope .kpi-card:has(.sales-kpi-trend-button):hover {
+  transform: none;
+  background-color: #f7faff;
+  box-shadow: 0 10px 24px rgba(16, 47, 87, 0.055);
+}
+.m3-sales-scope .kpi-card:has(.sales-kpi-trend-button:active) {
+  background-color: #edf5ff;
+}
+@media (prefers-reduced-motion: reduce) {
+  .m3-sales-scope .kpi-card:has(.sales-kpi-trend-button) {
+    transition: none;
+  }
+}
+.m3-sales-scope .sales-kpi-trend-button {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.m3-sales-scope .kpi-card.is-selected {
+  outline: 1px solid var(--sales-blue);
+  outline-offset: -1px;
+}
+.m3-sales-scope .sales-kpi-trend-button:focus-visible {
+  outline: 2px solid var(--sales-blue);
+  outline-offset: 2px;
 }
 .m3-sales-scope .sales-refund-trigger:not(:disabled) > span {
   color: var(--sales-blue);

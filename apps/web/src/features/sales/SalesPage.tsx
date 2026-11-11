@@ -14,7 +14,7 @@ import { SalesTargets } from "./components/SalesTargets";
 import { SalesRatings } from "./components/SalesRatings";
 import { SalesRegions } from "./components/SalesRegions";
 import { PromotionDetails } from "./components/PromotionDetails";
-import { SalesKpis } from "./components/SalesKpis";
+import { SalesPerformanceMetrics } from "./components/SalesPerformanceMetrics";
 import { SalesNotes } from "./components/SalesNotes";
 import { ShopTable } from "./components/ShopTable";
 import { SalesCoverage } from "./components/SalesCoverage";
@@ -196,13 +196,13 @@ export function SalesPage() {
                 汇总所选日期与店铺的销售、流量、退款和推广数据；推广成交按支付日统计。
               </p>
             </div>
-            <SalesKpis
-              data={data}
-              shops={shops}
-              shopId={scope.shop}
+            <SalesPerformanceMetrics
+              result={result}
+              scope={scope}
+              sources={filters?.data.sources}
               shopName={selectedName}
               rangeLabel={rangeLabel}
-              sources={filters?.data.sources}
+              onConflict={invalidateVersion}
             />
             <SalesNotes data={data} shops={filters?.data.shops} shopId={scope.shop} />
             <PromotionDetails

@@ -1,5 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, render as renderView, screen, waitFor, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render as renderView,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -49,6 +56,102 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   _resetCacheForTesting();
+});
+
+it("八卡按同一首日比较涨跌，保留零基准、缺基准及趋势重试的原值", async () => {
+  const metricKeys = [
+    "shop_revenue",
+    "shop_visitors",
+    "buyer_conversion",
+    "aov",
+    "refund_rate",
+    "promotion_spend",
+    "promotion_ctr",
+    "promotion_roi",
+  ];
+  const observed = (value: string) => ({ value, state: "observed", observed: 1, expected: 1 });
+  const missing = { value: null, state: "no_records", observed: 0, expected: 1 };
+  const points = [
+    { shop_revenue: "100.00", shop_visitors: "0", promotion_roi: "2.00" },
+    {
+      shop_revenue: "120.00",
+      shop_visitors: "20",
+      buyer_conversion: "0.06",
+      promotion_roi: "3.00",
+    },
+    { shop_revenue: "0.00", shop_visitors: "10", buyer_conversion: "0.05" },
+  ].map((values: Record<string, string | undefined>, index) => ({
+    date: `2026-10-${25 + index}`,
+    metrics: Object.fromEntries(
+      metricKeys.map((key) => [key, values[key] == null ? missing : observed(values[key])]),
+    ),
+  }));
+  let attempts = 0;
+  const request = vi.fn(async (path: string) => {
+    if (path.includes("/performance/trend?")) {
+      attempts++;
+      if (attempts === 1) return { ok: false, status: 503, json: async () => ({}) };
+      return { ok: true, json: async () => ({ meta: testMeta, data: { points } }) };
+    }
+    return { ok: true, json: async () => syntheticResponse(path) };
+  });
+  vi.stubGlobal("fetch", request);
+  render(
+    <MemoryRouter initialEntries={["/sales?from=2026-10-25&to=2026-10-27&shop=spigf"]}>
+      <SalesPage />
+    </MemoryRouter>,
+  );
+  const trend = screen.getByRole("region", { name: "经营趋势" });
+  const kpis = within(screen.getByTestId("sales-kpis"));
+  const retryTrend = await within(trend).findByRole("button", { name: "重试读取经营趋势" });
+  expect(kpis.getByText("¥31")).toBeTruthy();
+  fireEvent.click(retryTrend);
+  const details = await within(trend).findByText("查看逐日数据");
+  fireEvent.click(details);
+  const compared = await within(trend).findByRole("table", { name: "多指标逐日数据" });
+  const day = within(within(compared).getByRole("row", { name: /2026-10-26/ }));
+  expect(day.getByText("¥120.00")).toBeTruthy();
+  expect(day.getByText("+20.00%")).toBeTruthy();
+  expect(day.getByText("20 人")).toBeTruthy();
+  expect(day.getByText("6.00%")).toBeTruthy();
+  expect(within(trend).getByText("首日为 0")).toBeTruthy();
+  expect(within(trend).getByText("首日无值")).toBeTruthy();
+  expect(within(compared).getByText("¥0.00")).toBeTruthy();
+  expect(within(compared).getByText("-100.00%")).toBeTruthy();
+  const roi = kpis.getByRole("button", { name: "查看 ROI 趋势" });
+  const sales = kpis.getByRole("button", { name: "查看 销售金额 趋势" });
+  fireEvent.click(roi);
+  expect(roi.getAttribute("aria-pressed")).toBe("true");
+  expect(sales.getAttribute("aria-pressed")).toBe("true");
+  expect(day.getByText("3.00 倍")).toBeTruthy();
+  expect(day.getByText("+50.00%")).toBeTruthy();
+  fireEvent.click(sales);
+  expect(sales.getAttribute("aria-pressed")).toBe("false");
+  expect(day.queryByText("¥120.00")).toBeNull();
+  expect(attempts).toBe(2);
+});
+
+it("趋势连续版本冲突后显示区块重试，保留当前经营卡片", async () => {
+  let attempts = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path: string) => {
+      if (path.includes("/performance/trend?")) {
+        attempts++;
+        return { ok: false, status: 409, json: async () => ({}) };
+      }
+      return { ok: true, json: async () => syntheticResponse(path) };
+    }),
+  );
+  render(
+    <MemoryRouter>
+      <SalesPage />
+    </MemoryRouter>,
+  );
+  const trend = screen.getByRole("region", { name: "经营趋势" });
+  await waitFor(() => expect(attempts).toBe(2));
+  expect(await within(trend).findByRole("button", { name: "重试读取经营趋势" })).toBeTruthy();
+  expect(within(screen.getByTestId("sales-kpis")).getByText("¥31")).toBeTruthy();
 });
 
 it("接口失败仍保留八卡及其他折叠，不创建无依据的推广异常", async () => {

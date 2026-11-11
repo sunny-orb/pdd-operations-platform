@@ -143,8 +143,8 @@ export function useSalesDetail<T extends { meta: { data_version: string } }>(
       })
       .catch((e: unknown) => {
         if (controller.signal.aborted) return;
+        setError({ path, text: "本区块读取失败，请重试；其余区块仍可查看。" });
         if (e instanceof ApiError && e.status === 409) onConflict();
-        else setError({ path, text: "本区块读取失败，请重试；其余区块仍可查看。" });
       });
     return () => controller.abort();
   }, [path, schema, onConflict, refresh, statusKey]);

@@ -1632,6 +1632,8 @@ filters成功读取当前已发布版本；尚无版本返回503 `SALES_NOT_CONN
 
 ### 7.8 M3整页续段查询契约
 
+经营趋势 `GET /sales/performance/trend?date_from&date_to&shop_id?&data_version` 采用和 `performance` 相同的经营日历、店铺身份及输入版本。响应 `data.points` 包含所选范围首尾在内的每个业务日，每日八指标各返回十进制字符串或NULL、状态 `observed/partial/no_records/field_null/unmatched/not_connected/zero_denominator`、已知输入数 `observed` 及适用输入数 `expected`。销售类按店铺、退款按配对店铺、推广按适用店铺渠道计数。每日值使用同一已发布PostgreSQL快照及现有经营卡规则，区间比率仍按相容分子分母汇总。按范围读取退款和推广输入，店铺日沿用快照内发布版读取，再按业务日归组。前端沿现有版本冲突恢复，指标切换只重绘，图表单独加载和重试。
+
 顶部覆盖提示的动态字段边界：逐店销售天数/缺日取`coverage`；新增`refund_coverage`只用于展示所选日期范围内的退款记录覆盖，`state`为observed/not_connected，`missing_record_dates`表示同店同日整行不存在，`null_amount_dates`表示行存在但`reported_refund_amount IS NULL`，真实0不计缺失。两类日期互斥，均独立于销售记录；未接入时不推断无记录。全店响应日期可重复（每店每天一条），逐店响应无跨店重复。原`refund_match.missing_dates`仍仅用于已有销售金额日期的配对解释，指标算法不改。`promotion_channels.latest_observed_date`取当前店铺范围、所选时段内有效记录的最大业务日，无记录为null；顶部提示按渠道汇总六店该字段，仅展示一次。原`source.observed_through`仍为渠道全体数据最大日，其他区块不变。最近检查成功时展示`meta.last_success_at`，失败/中断/进行中时取`last_attempt_at`（缺失才回退成功时间），失败保旧需明确状态；它是检查时间，不随历史日期筛选伪造过去时间。
 
 推广说明新增`promotion_channels.record_issues`，仅描述当前店铺/日期范围生效推广行的覆盖：每项为shop_id、date、kind（missing_record/null_fields）、fields（spend/attributed_revenue/clicks/impressions中为空的字段）；缺行的fields为空数组，真实0不列异常。以已有数仓/历史整行优先后的行集推导，不参与花费、CTR、ROI计算；来源未接入时前端优先显示暂无可用数据，不把清单定性为上游漏采。经营页只用这些字段解释实际受影响的指标；正常数据不显示推广异常块。`promotion_supplements`仍返回完整历史及supplement/warehouse/outside_range状态，独立的“统计口径与历史补充”仅展示status=supplement且位于当前日期/店铺范围的记录。历史补齐选取与金额、比率计算均不变，前端不二次计算，也不从金额为0推断停投。

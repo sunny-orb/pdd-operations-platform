@@ -9,10 +9,12 @@ from app.api.sales_schemas import (
     DetailResponse,
     FiltersResponse,
     PerformanceResponse,
+    PerformanceTrendResponse,
     ShopsResponse,
 )
 from app.modules.sales.contracts import SalesError
 from app.modules.sales.query import SalesQuery, SalesService
+from app.modules.sales.trend import read_performance_trend
 
 router = APIRouter(
     prefix="/api/v1/sales",
@@ -45,6 +47,18 @@ def performance(
 ):
     query = SalesQuery(date_from, date_to, data_version, shop_id)
     return finish(request, SalesService(request.app.state.engine).performance(query))
+
+
+@router.get("/performance/trend", response_model=PerformanceTrendResponse)
+def performance_trend(
+    request: Request,
+    date_from: date,
+    date_to: date,
+    data_version: str = Query(min_length=1, max_length=100),
+    shop_id: str | None = None,
+):
+    query = SalesQuery(date_from, date_to, data_version, shop_id)
+    return finish(request, read_performance_trend(request.app.state.engine, query))
 
 
 @router.get("/shops", response_model=ShopsResponse)

@@ -108,6 +108,46 @@ class PerformanceResponse(BaseModel):
     meta: SalesMeta
 
 
+class TrendValue(BaseModel):
+    value: Numeric | None
+    state: Literal[
+        "observed",
+        "partial",
+        "no_records",
+        "field_null",
+        "unmatched",
+        "not_connected",
+        "zero_denominator",
+    ]
+    observed: int = Field(ge=0)
+    expected: int = Field(ge=0)
+
+
+class TrendMetrics(BaseModel):
+    shop_revenue: TrendValue
+    shop_visitors: TrendValue
+    buyer_conversion: TrendValue
+    aov: TrendValue
+    refund_rate: TrendValue
+    promotion_spend: TrendValue
+    promotion_ctr: TrendValue
+    promotion_roi: TrendValue
+
+
+class TrendPoint(BaseModel):
+    date: str
+    metrics: TrendMetrics
+
+
+class TrendSeries(BaseModel):
+    points: list[TrendPoint]
+
+
+class PerformanceTrendResponse(BaseModel):
+    data: TrendSeries
+    meta: SalesMeta
+
+
 class ShopList(BaseModel):
     items: list[ShopItem]
     missing_shop_days: int

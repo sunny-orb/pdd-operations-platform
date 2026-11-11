@@ -92,9 +92,10 @@ def scoped_rows(s, code, q, shops):
                 .execute(
                     sa.text(
                         "SELECT * FROM public.shop_channel_promotion_daily "
-                        "WHERE dataset_version_id=:v"
+                        "WHERE dataset_version_id=:v AND business_date BETWEEN :lo AND :hi "
+                        "AND shop_id = ANY(:shops)"
                     ),
-                    dict(v=s["versions"][code]),
+                    dict(v=s["versions"][code], lo=q.date_from, hi=q.date_to, shops=shops),
                 )
                 .mappings()
             )
@@ -159,6 +160,34 @@ def promotion_value(metrics, key, *, money=False):
     return format(value.quantize(Decimal("0.000000000001"), rounding=ROUND_HALF_UP), "f")
 
 
+def promotion_shops(code, shops):
+    """根据已接入渠道的业务范围返回适用店铺。"""
+    applicable = {SHOPS[shop][0] for shop in SPECS[code].shop_ids}
+    return [shop for shop in shops if shop in applicable]
+
+
+def matched_refunds(sales, by_key):
+    """销售与退款仅在同店同日且两项金额有效时配对。"""
+    pairs = []
+    for sale in sales:
+        refund = by_key.get((sale["shop_id"], sale["business_date"]))
+        if (
+            sale["shop_revenue"] is not None
+            and refund
+            and refund["reported_refund_amount"] is not None
+        ):
+            pairs.append((sale, refund))
+    return pairs
+
+
+def refund_totals(pairs):
+    """返回配对退款金额与对应销售金额，供卡片和日趋势共用。"""
+    return (
+        total([refund for _, refund in pairs], "reported_refund_amount"),
+        total([sale for sale, _ in pairs], "shop_revenue"),
+    )
+
+
 def enrich_metrics(s, q, data, shops):
     """退款匹配同店日；推广复用店铺推广公共计算，覆盖明细只作解释。"""
     refunds = scoped_rows(s, "shop_refunds", q, shops)
@@ -182,14 +211,8 @@ def enrich_metrics(s, q, data, shops):
             str(r["business_date"]) for r in refunds if r["reported_refund_amount"] is None
         ),
     )
-    matched = [
-        (r, by_key[(r["shop_id"], r["business_date"])])
-        for r in sales
-        if (r["shop_id"], r["business_date"]) in by_key
-        and by_key[(r["shop_id"], r["business_date"])]["reported_refund_amount"] is not None
-    ]
-    denominator = total([r for r, _ in matched], "shop_revenue")
-    numerator = total([r for _, r in matched], "reported_refund_amount")
+    matched = matched_refunds(sales, by_key)
+    numerator, denominator = refund_totals(matched)
     data["refund_rate"] = ratio(numerator, denominator)
     matched_keys = {(r["shop_id"], r["business_date"]) for r, _ in matched}
     excluded_sales = [r for r in sales if (r["shop_id"], r["business_date"]) not in matched_keys]
@@ -238,7 +261,7 @@ def enrich_metrics(s, q, data, shops):
     channels = []
     all_rows = []
     for code in ("shop_channel_product_promotion", "shop_channel_star_shop"):
-        applicable = [x for x in shops if x in {SHOPS[s][0] for s in SPECS[code].shop_ids}]
+        applicable = promotion_shops(code, shops)
         if not applicable:
             continue
         rows = scoped_rows(s, code, q, applicable)

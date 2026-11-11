@@ -107,6 +107,39 @@ export const metricsSchema = z.object({
   coverage: coverageSchema,
   field_states: z.record(z.string(), z.string()),
 });
+const trendValueSchema = z.object({
+  value: numeric,
+  state: z.enum([
+    "observed",
+    "partial",
+    "no_records",
+    "field_null",
+    "unmatched",
+    "not_connected",
+    "zero_denominator",
+  ]),
+  observed: z.number().int().nonnegative(),
+  expected: z.number().int().nonnegative(),
+});
+const trendMetricsSchema = z.object({
+  shop_revenue: trendValueSchema,
+  shop_visitors: trendValueSchema,
+  buyer_conversion: trendValueSchema,
+  aov: trendValueSchema,
+  refund_rate: trendValueSchema,
+  promotion_spend: trendValueSchema,
+  promotion_ctr: trendValueSchema,
+  promotion_roi: trendValueSchema,
+});
+const trendPointSchema = z.object({ date, metrics: trendMetricsSchema });
+export const performanceTrendSchema = z.object({
+  data: z.object({ points: z.array(trendPointSchema).min(1) }),
+  meta: metaSchema,
+});
+export type SalesTrendMetric = keyof z.infer<typeof trendMetricsSchema>;
+export type SalesTrendValue = z.infer<typeof trendValueSchema>;
+export type SalesTrendPoint = z.infer<typeof trendPointSchema>;
+
 const shopSchema = metricsSchema.extend({
   shop_id: z.string(),
   shop_name: z.string(),

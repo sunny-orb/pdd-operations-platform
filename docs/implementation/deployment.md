@@ -128,7 +128,7 @@ GitHub production仅允许main；SSH_PRIVATE_KEY及SSH_KNOWN_HOSTS已设置，�
 
 新增对象的关系、字段、保留和回退边界沿[离线保留](../database-schema/database-retention.md)、[内容复用](../database-schema/content-reuse.md)及[每周对账](../database-schema/weekly-reconciliation.md)设计。增量入口只推进结构和运维元数据；原事实继续使用旧行表示，历史报告沿原输入边及比较报告读取。保留与内容复用生产写入门禁保持关闭。
 
-周日17点和失败后300秒重试策略随相容Worker发布生效；首次登记及中断恢复语义见[周对账设计](../database-schema/weekly-reconciliation.md)。生产调度、认证、实际来源和容量尚未在本轮验收。
+周日17点和失败后300秒重试策略随相容Worker发布生效；首次登记及中断恢复语义见[周对账设计](../database-schema/weekly-reconciliation.md)。本轮实际发布、Worker配置和有限线上接口核验见[11/11记录](../validation/2026-11-11.md)；网站沿用户授权匿名访问，3项原有同步异常和长期容量仍待处理。
 
 ## 同步、证书与容量限制
 

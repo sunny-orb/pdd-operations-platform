@@ -3,6 +3,7 @@
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
+from functools import partial
 from itertools import chain
 from math import ceil
 
@@ -124,9 +125,9 @@ def new_product_catalog(repo, rows, profiles):
     return {lid: item for lid, item in info.items() if item["level"] == "新品"}, groups
 
 
-def scope(repo, q, *, with_members=False):
+def scope(repo, q, *, with_members=False, read_rows=None):
     q.validate(repo)
-    rows = repo.rows(repo.start, repo.end)
+    rows = (read_rows or repo.rows)(repo.start, repo.end)
     profiles = repo.profiles()
     info, _ = labels([r for r in rows if q.start <= r["business_date"] <= q.end], profiles)
     groups = defaultdict(list)
@@ -156,6 +157,10 @@ def risk_top_products(info, rows, q):
         if row["listing_id"] in members and q.start <= row["business_date"] <= q.end:
             groups[row["listing_id"]].append(row)
     amounts = {lid: total(values, "product_revenue") for lid, values in groups.items()}
+    return top_revenue_listings(amounts)
+
+
+def top_revenue_listings(amounts):
     amounts = {lid: value for lid, value in amounts.items() if value is not None}
     if not amounts:
         return set()
@@ -274,7 +279,7 @@ def mark_calendar(values, covered):
     return values
 
 
-def period_windows(repo, q, loaded_rows):
+def period_windows(repo, q, loaded_rows, *, read_rows=None):
     """固定结束日的7/14/30日表现；每期独立筛选，不受主卡商品名单截断。
 
     只读相容版本中必要的60日事实。缺经营日不补零或递补日期；已接收
@@ -283,7 +288,7 @@ def period_windows(repo, q, loaded_rows):
     needed_start = q.end - timedelta(days=59)
     rows = [r for r in loaded_rows if needed_start <= r["business_date"] <= q.end]
     if needed_start < repo.start:
-        rows += repo.rows(needed_start, repo.start - timedelta(days=1))
+        rows += (read_rows or repo.rows)(needed_start, repo.start - timedelta(days=1))
     profiles = repo.profiles()
     received_start = getattr(repo, "versions", {}).get("product_daily", {}).get("period_start")
 
@@ -329,8 +334,45 @@ def period_windows(repo, q, loaded_rows):
     return windows
 
 
-def overview(repo, q):
-    info, groups, members, loaded_rows, period_info = scope(repo, q, with_members=True)
+def keyword_overview(repo, q):
+    """缩小需要取回的经营事实，最终匹配仍按每个比较窗口独立执行。"""
+    q.validate(repo)
+    first = min(
+        repo.start, q.start - ((q.end - q.start) + timedelta(days=1)), q.end - timedelta(days=59)
+    )
+    profiles = repo.profiles()
+    product_ids, names = defaultdict(set), defaultdict(set)
+    for lid, product_id, name in repo.keyword_identity_values(first, repo.end):
+        if not q.products or lid in q.products:
+            product_ids[lid].add(product_id)
+            names[lid].add(name)
+    candidate_ids = []
+    for lid, ids in product_ids.items():
+        profile = profiles.get(lid, {})
+        # 最近日名称冲突时展示名可能为空，仍可能命中ID或资料别名。
+        possible_names = (
+            {profile["product_name"]} if profile.get("product_name") else names[lid] | {None}
+        )
+        if any(
+            matches_keyword(dict(profile, product_id=product_id, product_name=name), q.keyword)
+            for product_id in ids
+            for name in possible_names
+        ):
+            candidate_ids.append(lid)
+    # 本路径没有店铺/资料维度，风险排名池仍是全店，不随关键词或勾选缩小。
+    top = (
+        top_revenue_listings(repo.period_revenue_by_listing(q.start, q.end))
+        if candidate_ids
+        else set()
+    )
+    return overview(repo, q, listing_ids=candidate_ids, risk_top=top)
+
+
+def overview(repo, q, *, listing_ids=None, risk_top=None):
+    read_rows = repo.rows if listing_ids is None else partial(repo.rows, listing_ids=listing_ids)
+    info, groups, members, loaded_rows, period_info = scope(
+        repo, q, with_members=True, read_rows=read_rows
+    )
     shops = set(members.values())
 
     def covered(rows, start, end):
@@ -346,7 +388,8 @@ def overview(repo, q):
         if (mapped := previous_year(q.start + timedelta(days=i))) is not None
     ]
     ys, ye = previous_year(q.start), previous_year(q.end)
-    yr = repo.rows(ys or date(q.start.year - 1, 3, 1), ye or date(q.end.year - 1, 2, 28))
+    read_year = repo.rows if listing_ids is None else partial(repo.rows, listing_ids=info)
+    yr = read_year(ys or date(q.start.year - 1, 3, 1), ye or date(q.end.year - 1, 2, 28))
     mapped_dates = {previous_year(x["business_date"]) for x in current}
     year = [r for r in yr if r["listing_id"] in info and r["business_date"] in mapped_dates]
     merge_safe = daily_aggregates_can_merge(chain(chain.from_iterable(groups.values()), year))
@@ -380,7 +423,7 @@ def overview(repo, q):
     prior_rows = [r for r in loaded_rows if pstart <= r["business_date"] <= pend]
     if pstart < repo.start:
         # 31日对比需62日：只补未加载的前两日，并保留原查询的日期顺序。
-        prior_rows = repo.rows(pstart, min(pend, repo.start - timedelta(days=1))) + prior_rows
+        prior_rows = read_rows(pstart, min(pend, repo.start - timedelta(days=1))) + prior_rows
     prior_info, _ = labels(prior_rows, repo.profiles())
     prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
     comparison_past = [r for r in prior_rows if r["listing_id"] in prior_ids]
@@ -439,7 +482,7 @@ def overview(repo, q):
                 ],
             )
         )
-    windows = period_windows(repo, q, loaded_rows)
+    windows = period_windows(repo, q, loaded_rows, read_rows=read_rows)
     seven = q.end - timedelta(days=6)
     before = seven - timedelta(days=7)
     hot = []
@@ -453,7 +496,7 @@ def overview(repo, q):
     ranked = sorted(
         info, key=lambda k: (-(period_revenue[k] or 0), info[k]["shop_id"], info[k]["product_id"])
     )
-    top = risk_top_products(period_info, loaded_rows, q)
+    top = risk_top_products(period_info, loaded_rows, q) if risk_top is None else risk_top
     for lid, item in info.items():
         values = groups[lid]
         r1 = [r for r in values if seven <= r["business_date"] <= q.end]

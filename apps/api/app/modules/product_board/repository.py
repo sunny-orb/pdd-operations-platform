@@ -286,6 +286,30 @@ class Repository:
     def identity_rows(self, start, end):
         return read_queries.identity_rows(self.c, self.params["product_daily"], start, end)
 
+    def keyword_identity_values(self, start, end):
+        """返回所有历史名称候选，按具体窗口取名和匹配仍由领域查询决定。"""
+        return self.c.execute(
+            sa.text(
+                "SELECT DISTINCT listing_id,source_product_id,source_product_name "
+                "FROM public.read_product_daily_facts WHERE dataset_version_id=:v "
+                "AND business_date BETWEEN :start AND :end"
+            ),
+            dict(v=self.params["product_daily"], start=start, end=end),
+        ).all()
+
+    def period_revenue_by_listing(self, start, end):
+        """用精确金额求风险排名池的链接总额，保留零值与负值。"""
+        return dict(
+            self.c.execute(
+                sa.text(
+                    "SELECT listing_id,sum(product_revenue) FROM public.read_product_daily_facts "
+                    "WHERE dataset_version_id=:v AND business_date BETWEEN :start AND :end "
+                    "AND product_revenue IS NOT NULL GROUP BY listing_id"
+                ),
+                dict(v=self.params["product_daily"], start=start, end=end),
+            ).all()
+        )
+
     def page_rows(self, start, end, listing_ids, page, size):
         return read_queries.page_rows(
             self.c, self.params["product_daily"], start, end, listing_ids, page, size

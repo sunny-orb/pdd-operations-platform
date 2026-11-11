@@ -3,10 +3,13 @@
 from datetime import timedelta
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import event
 
+from app.core.config import Settings
+from app.main import create_app
 from app.modules.product_board import query
-from app.modules.product_board.repository import snapshot
+from app.modules.product_board.repository import snapshot, wire
 from app.modules.product_board.source import normalize
 from app.modules.product_board.storage import ProductBoardStore
 from tests.test_product_board_storage import candidate
@@ -83,3 +86,63 @@ def test_risks_only_read_period_and_baseline_without_changing_full_scope_result(
         for projection in projections
         for field in ("views", "favorites", "buyers", "units", "source_payload")
     ), "风险只读取身份、日期、访客、订单和交易额，其他度量不参与规则"
+
+
+@pytest.mark.parametrize("keyword,count", [("糖豆", "0"), ("新名字", "1")])
+def test_keyword_overview_reads_measures_only_for_possible_matches(
+    sales_pg, tmp_path, keyword, count
+):
+    end, sources = candidate()
+    raw = [
+        dict(
+            z_id=f"{i}-{p}",
+            shop_id="663599807",
+            spu_id=str(2000 + p),
+            spu_name=("糖豆" if i > 15 else "新名字") if p == 0 else f"其他{p}",
+            dt=str(end - timedelta(days=i)),
+            time_granularity="day",
+            transaction_amount=str(100 - p),
+            product_uv=100,
+            transaction_orders=2,
+        )
+        for i in range(65)
+        for p in range(12)
+    ]
+    sources["product_daily"] = normalize("product_daily", raw, end)
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, sources))
+    start = end - timedelta(days=30)
+    q = query.BoardQuery(start, end, keyword=keyword)
+    with snapshot(sales_pg) as repo:
+        expected = wire(query.overview(repo, q))
+        token = repo.token
+    assert expected["product_count"] == count
+    if keyword == "糖豆":
+        assert expected["windows"][2]["metrics"]["revenue"]["previous"] is not None
+    rows_read = []
+
+    def record_sql(conn, cursor, statement, parameters, context, executemany):
+        if (
+            "FROM public.read_product_daily_facts" in statement
+            and "visitors,favorites" in statement
+        ):
+            rows_read.append(cursor.rowcount)
+
+    event.listen(sales_pg, "after_cursor_execute", record_sql)
+    try:
+        app = create_app(Settings(_env_file=None, database_url=""))
+        with TestClient(app) as client:
+            app.state.engine = sales_pg
+            response = client.get(
+                "/api/v1/products/overview",
+                params=dict(
+                    date_from=start,
+                    date_to=end,
+                    keyword=q.keyword,
+                    data_version=token,
+                ),
+            )
+        assert response.status_code == 200
+        assert response.json()["data"] == expected
+    finally:
+        event.remove(sales_pg, "after_cursor_execute", record_sql)
+    assert rows_read and sum(rows_read) <= 65

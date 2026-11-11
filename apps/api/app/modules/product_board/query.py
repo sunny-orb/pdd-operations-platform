@@ -334,18 +334,16 @@ def period_windows(repo, q, loaded_rows, *, read_rows=None):
     return windows
 
 
-def keyword_overview(repo, q):
-    """缩小需要取回的经营事实，最终匹配仍按每个比较窗口独立执行。"""
-    q.validate(repo)
+def keyword_candidate_ids(repo, q):
+    """从各比较窗口的身份字段找出可能匹配关键词的商品。"""
     first = min(
         repo.start, q.start - ((q.end - q.start) + timedelta(days=1)), q.end - timedelta(days=59)
     )
     profiles = repo.profiles()
     product_ids, names = defaultdict(set), defaultdict(set)
     for lid, product_id, name in repo.keyword_identity_values(first, repo.end):
-        if not q.products or lid in q.products:
-            product_ids[lid].add(product_id)
-            names[lid].add(name)
+        product_ids[lid].add(product_id)
+        names[lid].add(name)
     candidate_ids = []
     for lid, ids in product_ids.items():
         profile = profiles.get(lid, {})
@@ -359,6 +357,13 @@ def keyword_overview(repo, q):
             for name in possible_names
         ):
             candidate_ids.append(lid)
+    return candidate_ids
+
+
+def filtered_overview(repo, q):
+    """按勾选商品或关键词缩小事实查询，各比较窗口仍独立应用筛选。"""
+    q.validate(repo)
+    candidate_ids = q.products or keyword_candidate_ids(repo, q)
     # 本路径没有店铺/资料维度，风险排名池仍是全店，不随关键词或勾选缩小。
     top = (
         top_revenue_listings(repo.period_revenue_by_listing(q.start, q.end))

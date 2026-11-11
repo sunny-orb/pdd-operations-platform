@@ -23,7 +23,7 @@ from app.modules.product_board.query import (
     BoardQuery,
     catalog,
     days,
-    keyword_overview,
+    filtered_overview,
     options,
     overview,
     risk_feed,
@@ -128,8 +128,8 @@ def get_overview(
             cache = request.app.state.product_daily_overview_cache
         else:
             calculate = (
-                keyword_overview
-                if q.keyword and not any((q.shop, q.operator, q.category, q.level))
+                filtered_overview
+                if (q.products or q.keyword) and not any((q.shop, q.operator, q.category, q.level))
                 else overview
             )
             return response(request, calculate(repo, q), repo)

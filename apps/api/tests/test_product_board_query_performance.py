@@ -10,7 +10,7 @@ from app.core.config import Settings
 from app.main import create_app
 from app.modules.product_board import query
 from app.modules.product_board.repository import snapshot, wire
-from app.modules.product_board.source import normalize
+from app.modules.product_board.source import identity, normalize
 from app.modules.product_board.storage import ProductBoardStore
 from tests.test_product_board_storage import candidate
 
@@ -88,9 +88,17 @@ def test_risks_only_read_period_and_baseline_without_changing_full_scope_result(
     ), "风险只读取身份、日期、访客、订单和交易额，其他度量不参与规则"
 
 
-@pytest.mark.parametrize("keyword,count", [("糖豆", "0"), ("新名字", "1")])
-def test_keyword_overview_reads_measures_only_for_possible_matches(
-    sales_pg, tmp_path, keyword, count
+@pytest.mark.parametrize(
+    "keyword,products,count,expected_fact_rows",
+    [
+        pytest.param("糖豆", (), "0", 65, id="previous-name"),
+        pytest.param("新名字", (), "1", 65, id="current-name"),
+        pytest.param("", ("2000", "2001"), "2", 130, id="multi-select"),
+        pytest.param("新名字", ("2000", "2001"), "1", 130, id="combined"),
+    ],
+)
+def test_filtered_overview_reads_measures_only_for_possible_matches(
+    sales_pg, tmp_path, keyword, products, count, expected_fact_rows
 ):
     end, sources = candidate()
     raw = [
@@ -111,7 +119,9 @@ def test_keyword_overview_reads_measures_only_for_possible_matches(
     sources["product_daily"] = normalize("product_daily", raw, end)
     ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, sources))
     start = end - timedelta(days=30)
-    q = query.BoardQuery(start, end, keyword=keyword)
+    q = query.BoardQuery(
+        start, end, products=tuple(identity("663599807", p) for p in products), keyword=keyword
+    )
     with snapshot(sales_pg) as repo:
         expected = wire(query.overview(repo, q))
         token = repo.token
@@ -134,15 +144,16 @@ def test_keyword_overview_reads_measures_only_for_possible_matches(
             app.state.engine = sales_pg
             response = client.get(
                 "/api/v1/products/overview",
-                params=dict(
-                    date_from=start,
-                    date_to=end,
-                    keyword=q.keyword,
-                    data_version=token,
-                ),
+                params={
+                    "date_from": start,
+                    "date_to": end,
+                    "keyword": q.keyword,
+                    "listing_ids": q.products,
+                    "data_version": token,
+                },
             )
         assert response.status_code == 200
         assert response.json()["data"] == expected
     finally:
         event.remove(sales_pg, "after_cursor_execute", record_sql)
-    assert rows_read and sum(rows_read) <= 65
+    assert rows_read and sum(rows_read) <= expected_fact_rows

@@ -1,8 +1,10 @@
 # 验证与交付证据
 
-更新日期：2026-11-04。本文维护验收要求与证据入口；执行记录按日期放在 `validation/`，当前进度只见 [TODO](../TODO.md)。范围见[需求](requirements.md)，数据边界见[数据契约](data-contract.md)，调查见[来源证据](source-evidence.md)。测试、样例交付、真实接入与生产上线分别验收。
+更新日期：2026-11-11。本文维护验收要求与证据入口；执行记录按日期放在 `validation/`，当前进度只见 [TODO](../TODO.md)。范围见[需求](requirements.md)，数据边界见[数据契约](data-contract.md)，调查见[来源证据](source-evidence.md)。测试、样例交付、真实接入与生产上线分别验收。
 
 ## 验证记录索引
+
+[合并发布、受控数据库升级与线上验收（2026-11-11）](validation/2026-11-11.md)。
 
 [每周数仓对账与失败隔离（2026-11-11）](validation/weekly-reconciliation.md)。
 

@@ -37,7 +37,7 @@ function setup() {
               baseline_period: { start: "2026-10-25", end: "2026-10-31" },
               trend_period: { start: "2026-10-26", end: date },
               generation_method: "rules",
-              rule_version: "product-risk-online-v1",
+              rule_version: "product-risk-traffic-v2",
               impact_kind: "estimated",
               status,
               total,

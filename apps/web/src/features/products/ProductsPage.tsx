@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Alert, Button, Spin, Tooltip } from "antd";
+import { Alert, Button, Tooltip } from "antd";
 import {
   BarChartOutlined,
   BulbOutlined,
@@ -11,8 +11,9 @@ import {
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { board } from "./contracts";
 import { ApiError } from "./api";
-import { useDebounced, useProducts, useResource } from "./data";
+import { useProducts, useResource } from "./data";
 import { Filters } from "./Filters";
+import { ProductSelectionSummary } from "./ProductSelectionSummary";
 import { Risks } from "./Risks";
 import { Scores } from "./Scores";
 import { Days } from "./Days";
@@ -27,13 +28,12 @@ import "./products.css";
 export function ProductsPage() {
   const state = useProducts();
   const main = state.scope("main");
-  const keyword = useDebounced(main.keyword);
-  const requestScope = { ...main, keyword };
+  const requestScope = main;
   const result = useResource("overview", board, requestScope, state);
   const [active, setActive] = useState(["revenue"]);
   const presentation = useOverviewPresentation(result.data, requestScope, state.version);
   const { data, scope: shownScope } = presentation;
-  const updating = result.isFetching || keyword !== main.keyword;
+  const updating = result.isFetching;
   const unavailable = updating || !!result.error;
   const { ref: filterAnchorRef, capture: captureFilterPosition } = useFilterScrollAnchor(
     result.data,
@@ -146,14 +146,7 @@ export function ProductsPage() {
                 state={state}
                 onBeforeChange={captureFilterPosition}
                 status={
-                  updating ? (
-                    <>
-                      <Spin size="small" delay={150} />
-                      <span>
-                        {data ? "正在更新筛选结果，暂显示上次结果。" : "正在加载筛选结果…"}
-                      </span>
-                    </>
-                  ) : result.error ? (
+                  !updating && result.error ? (
                     <>
                       <span>
                         {result.error instanceof ApiError && result.error.status === 422
@@ -177,21 +170,13 @@ export function ProductsPage() {
             </div>
             <div aria-busy={updating}>
               <div className="product-bar">
-                <div>
-                  <span>商品信息</span>
-                  <b>
-                    {shownScope.products.length === 1
-                      ? (data?.selection.product_name ?? "已选商品")
-                      : shownScope.products.length > 1
-                        ? `已选 ${shownScope.products.length} 款商品对比`
-                        : "筛选条件汇总"}
-                  </b>
-                  <small>
-                    {shownScope.products.length > 1
-                      ? "选择一个指标时，可查看各单款趋势"
-                      : `当前筛选范围内 ${data?.product_count ?? "—"} 个店铺商品链接`}
-                  </small>
-                </div>
+                <ProductSelectionSummary
+                  scope={shownScope}
+                  state={state}
+                  name="main"
+                  ready={!!data}
+                  count={data?.product_count}
+                />
                 <div>
                   <span>店铺名称</span>
                   <b>{data?.selection.shop_name ?? (shownScope.shop ? "所选店铺" : "全部店铺")}</b>

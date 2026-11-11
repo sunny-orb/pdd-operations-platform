@@ -17,7 +17,7 @@ def sample():
             END - timedelta(days=i),
             lid,
             product_revenue=D(amount),
-            visitors=50 if i == 0 else 200,
+            visitors=100 if i == 0 else 200,
             orders=4 if i == 0 else 10,
         )
         for lid, amount in amounts.items()
@@ -78,7 +78,7 @@ def test_postgres_rank_pool_preserved_after_selection(sales_pg, tmp_path):
             dt=str(end - timedelta(days=i)),
             time_granularity="day",
             transaction_amount=str(amount),
-            product_uv=50 if i == 0 else 200,
+            product_uv=100 if i == 0 else 200,
             transaction_users=4 if i == 0 else 10,
             transaction_orders=4 if i == 0 else 10,
             transaction_products=10,

@@ -31,7 +31,9 @@
   min-width: 0;
 }
 .m1-products-scope .filters {
-  grid-template-columns: minmax(250px, 1.45fr) repeat(5, minmax(0, 1fr)) minmax(120px, 1.15fr);
+  grid-template-columns:
+    minmax(250px, 1.45fr) repeat(4, minmax(0, 1fr)) minmax(132px, 1.15fr)
+    minmax(150px, 1.2fr);
   position: relative;
 }
 .m1-products-scope .m1-date-fields {
@@ -486,4 +488,58 @@ body:has(.m1-products-scope) {
   height: 7px;
   border-radius: 50%;
   margin-right: 5px;
+}
+
+/* 仅说明筛选含义；候选、已选与关键词交叉行为沿用原控件。 */
+.m1-products-scope .m1-product-control {
+  min-width: 0;
+  position: relative;
+}
+.m1-products-scope .m1-control-label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+.m1-products-scope .m1-product-control > .ant-select,
+.m1-products-scope .m1-product-control > .ant-input-affix-wrapper {
+  height: 34px;
+}
+
+.m1-products-scope :is(.filters, .detail-filters, .new-potential-filters) {
+  align-items: start;
+}
+.m1-products-scope
+  :is(.filters, .detail-filters, .new-potential-filters)
+  > :not(.m1-product-control):not(.m1-filter-status) {
+  margin-top: 23px;
+}
+.m1-products-scope .m1-selection-summary {
+  min-width: 0;
+  flex: 0 1 auto;
+  max-width: 340px;
+  overflow-wrap: anywhere;
+}
+.m1-products-scope .m1-selected-names {
+  max-width: 480px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.m1-products-scope .m1-selection-summary > .ant-btn {
+  padding-inline: 0;
+  margin-right: 12px;
+}
+.m1-products-scope .m1-detail-selection {
+  margin: 12px 0;
+}
+@media (max-width: 600px) {
+  .m1-products-scope .product-bar > .m1-selection-summary {
+    flex: 1 0 100%;
+    max-width: none;
+  }
+}
+
+.m1-products-scope .m1-candidate-echo {
+  color: var(--ink);
 }

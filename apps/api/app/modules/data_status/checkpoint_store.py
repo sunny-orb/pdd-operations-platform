@@ -4,6 +4,8 @@ from contextlib import contextmanager
 
 import sqlalchemy as sa
 
+from app.modules.data_status.timeliness import merge_update_timing
+
 
 def read_legacy_tasks(c):
     """读取首轮周对账前冻结的普通任务引用，调用方负责一致事务。"""
@@ -51,6 +53,21 @@ class CheckpointStore:
             return {r["source_id"]: dict(r) for r in c.execute(sa.select(table)).mappings()}
 
     def write(self, c, code, **values):
+        """在调用方事务内更新检查点，并保留网页时效及覆盖摘要。"""
+        if "web_updated_at" in values:
+            prior = (
+                c.execute(sa.select(self.table).where(self.table.c.source_id == code))
+                .mappings()
+                .first()
+            )
+            prior = dict(prior) if prior else {}
+            checked = values["web_checked_at"]
+            if prior.get("web_checked_at") and checked < prior["web_checked_at"]:
+                raise ValueError("WEB_CHECK_OLDER_OR_SOURCE_UNINITIALIZED")
+            values["platform_snapshot"] = {
+                **prior.get("platform_snapshot", {}),
+                "update_timing": merge_update_timing(prior, values["web_updated_at"], checked),
+            }
         self.upsert(c, self.table, code, **values)
 
     def write_reconciliation(self, c, code, **values):

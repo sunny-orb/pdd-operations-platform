@@ -9,6 +9,7 @@
 | v2 基线      | `db-v2.py`                                                   | 隔离验证及初始空库创建；已有库不覆盖                                                                     |
 | 字典审阅     | `render-db-schema.py`                                        | 从base到当前head生成完整空库SQL；npm run db:schema生成、check自动核对                                    |
 | 公司初始化   | `init-deployment-db.py [--apply]`                            | 默认只读检查，显式apply初始化公司public并保留monitor，见[部署方案](../docs/implementation/deployment.md) |
+| 公司增量升级 | `upgrade-deployment-db.py [--apply]`                         | 固定12→15，默认只读，维护窗口内显式执行，见[部署方案](../docs/implementation/deployment.md)              |
 | 项目同步     | `sync-project.py`、`install-sync-schedule.py`                | 同一执行链的状态、补跑、钟点及 launchd 安装                                                              |
 | 数仓网页采集 | `configure-warehouse-browser.py --login / --check`           | 专用浏览器飞书登录、无界面8表网页时间验证；不启用调度、不接收经营数据                                    |
 | 历史推广补齐 | `import-promotion-history.py --input <私有JSON> [--publish]` | 默认只校验11条授权范围，显式发布走本机受控身份及全局锁                                                   |

@@ -1,14 +1,14 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
 -- 迁移范围：base → 20261111_15；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：fc94a8f4c95f903c5992e9fb9dc520506892583d3bc732d9cc6fb7d8bcf04b2d
--- 公司单账号：songbing；应用结构须空；保留monitor及登记的扩展成员。
+-- 迁移、冻结实现及生成器SHA-256：b8053646d564debeef52250ef1dd5d13544ed867d40ba315c4d63e4d45e7c8fd
+-- 公司单账号：songbing/pdd_dashboard；应用结构须空；保留monitor及登记的扩展成员。
 -- 不创建角色、不修改数据库或monitor权限；应用对象由执行账号拥有。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。
 
 BEGIN;
 
 DO $preflight$ BEGIN
-  IF current_database() <> 'pdd_operations' THEN
+  IF current_database() <> 'pdd_dashboard' THEN
     RAISE EXCEPTION '初始化数据库不符';
   END IF;
   IF current_setting('server_version_num')::integer / 10000 <> 17 THEN

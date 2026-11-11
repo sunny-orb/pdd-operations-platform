@@ -6,7 +6,6 @@ import {
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
-import { useState } from "react";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { useOverview } from "./useOverview";
 import { buildCenterView, domains, formatMetric, observationCoverage } from "./model";
@@ -17,7 +16,6 @@ import { DefinitionsSection } from "./DefinitionsSection";
 import { AlertCenter } from "./AlertCenter";
 import { ActionsSection } from "./ActionsSection";
 import { DataUpdateStatus } from "./DataUpdateStatus";
-import { homePreview } from "./presentation";
 import "./overview.css";
 const sections = [
   { id: "overview", title: "经营总览", icon: <DashboardOutlined /> },
@@ -34,11 +32,8 @@ export function OverviewPage() {
   const coverage = observationCoverage(states);
   const view = buildCenterView(observations, actions, coverage);
   const { counts } = view;
-  const preview = homePreview(view.alerts, view.actions);
-  const [allAlerts, setAllAlerts] = useState(false);
-  const [allActions, setAllActions] = useState(false);
-  const attentionCount = preview.alerts.length || (counts.availableDomains ? 0 : "—");
-  const actionCount = view.actionCount === null ? "—" : preview.actions.length;
+  const attentionCount = view.alerts.length || (counts.availableDomains ? 0 : "—");
+  const actionCount = view.actionCount ?? "—";
   const sales = states.find((s) => s.id === "sales")?.data?.card;
   const aftersales = states.find((s) => s.id === "aftersales")?.data?.card;
   const target = sales?.pairs.find((p) => p.label === "目标达成")?.value;
@@ -96,7 +91,7 @@ export function OverviewPage() {
                 <i className="green" />
                 目标达成 <b>{formatMetric(target, "percent", 1)}</b>
               </span>
-              <a href="#actions" onClick={() => setAllActions(false)}>
+              <a href="#actions">
                 <i className="amber" />
                 待办动作 <b>{actionCount} 项</b>
               </a>
@@ -151,14 +146,11 @@ export function OverviewPage() {
             unit="项"
             tone="amber"
             href="#alerts"
-            onNavigate={() => setAllAlerts(false)}
             description={
               <>
-                <span>首页展示，非全部异常</span>
+                <span>当前已取得的全部预警</span>
                 <br />
-                <a href="#alerts" onClick={() => setAllAlerts(true)}>
-                  查看全部预警 →
-                </a>
+                <a href="#alerts">查看预警清单 →</a>
               </>
             }
           />
@@ -168,14 +160,11 @@ export function OverviewPage() {
             unit="项"
             tone="blue"
             href="#actions"
-            onNavigate={() => setAllActions(false)}
             description={
               <>
-                <span>首页建议 · 待核查，尚未派单</span>
+                <span>待核查，尚未派单</span>
                 <br />
-                <a href="#actions" onClick={() => setAllActions(true)}>
-                  查看全部建议 →
-                </a>
+                <a href="#actions">查看待办清单 →</a>
               </>
             }
           />
@@ -203,21 +192,8 @@ export function OverviewPage() {
             ))}
           </div>
         </section>
-        <AlertCenter
-          observations={view.alerts}
-          preview={preview.alerts}
-          available={counts.availableDomains > 0}
-          showAll={allAlerts}
-          onShowAllChange={setAllAlerts}
-        />
-        <ActionsSection
-          coverage={coverage}
-          actions={view.actions}
-          preview={preview.actions}
-          total={view.actionCount}
-          showAll={allActions}
-          onShowAllChange={setAllActions}
-        />
+        <AlertCenter observations={view.alerts} available={counts.availableDomains > 0} />
+        <ActionsSection coverage={coverage} actions={view.actions} total={view.actionCount} />
         <WeatherSection />
         <DefinitionsSection
           states={states}

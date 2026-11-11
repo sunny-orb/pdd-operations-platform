@@ -34,7 +34,7 @@ def test_risk_first_branch_and_calendar_coverage():
     assert len(value["trend"]) == 7
     assert all(isinstance(v, Decimal) for v in value["trend"])
     assert risk(rows[:-1], end, True) is None
-    rows[0]["visitors"] = 50
+    rows[0]["visitors"] = 100
     value = risk(rows, end, True)
     assert value["priority"] == "P0" and value["label"] == "爆品严重流量下滑"
 

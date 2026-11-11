@@ -7,6 +7,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.modules.data_status.catalog import DATASET_NAMES, SOURCES, job_for, source_identity
 from app.modules.data_status.checkpoint_store import read_legacy_tasks
+from app.modules.data_status.history_coverage import history_status
+from app.modules.data_status.timeliness import update_timeliness
 from app.modules.product_board.repository import BoardError
 
 DATE_TABLES = {
@@ -54,7 +56,11 @@ def refresh_platform_snapshots(c):
         for source in SOURCES:
             if source.id not in saved:
                 continue
-            snapshot = {}
+            snapshot = {
+                key: saved[source.id][key]
+                for key in ("history", "update_timing")
+                if key in saved[source.id]
+            }
             for code in source.datasets:
                 head = heads.get(code)
                 if not head:
@@ -306,6 +312,14 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                         datasets=datasets,
                         platform_state=platform_state,
                         reconciliation=reconciliation(source.id),
+                        timeliness=update_timeliness(source, p, now),
+                        history=history_status(
+                            source.id,
+                            p.get("platform_snapshot", {}).get("history"),
+                            heads,
+                            now,
+                            *schedule_args,
+                        ),
                         upstream=dict(
                             state=upstream_state,
                             checked_at=p.get("checked_at"),

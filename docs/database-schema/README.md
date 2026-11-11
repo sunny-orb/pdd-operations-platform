@@ -304,3 +304,7 @@ PK/UQ会建立对应索引，不能再建同列同序普通索引；FK的引用�
 后续实施必须先形成专用Alembic/回退、索引、事务、接入与验收方案，再按明确授权进行。文档检查证据见[验证记录](../validation.md)，当前进度仅在[TODO](../../TODO.md)维护。
 
 数据库保留的五张运维表、字段与受控事务边界见[离线保留字典](database-retention.md)；经营字段保持原样，本地迁移13不执行生产清理。
+
+## 公司已有RPA来源保护对象
+
+2026-11-11用户确认`pdd_dashboard.public.aftersales_reports_rpa`为新来源表，要求完整保留。它由`dbrole_admin`拥有、注释为“RPA 抓取每周月售后报表”，不属于应用Alembic的46表，不在本次发布中新建、修改、重命名、接管权限或自动接入指标。固定7个非空字段为id bigint、start_date date、time_granularity text、json_data jsonb、updated_at timestamptz、class text、end_date date；主键为id（aftersale_reports_rpa_pkey），关联序列aftersale_reports_rpa_id_seq，同为dbrole_admin所有；未发现自定义触发器。维护入口只在结构/归属匹配时将其识别为受保护外部对象，其余未知对象继续拒绝。备份包含该表数据与序列；生产升级核对结构/归属/权限未变，不修改来源写入流程，来源自身新增记录不算本项目迁移写入。

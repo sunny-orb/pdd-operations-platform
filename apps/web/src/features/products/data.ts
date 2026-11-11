@@ -1,9 +1,10 @@
 import { waitForPublicationBaseline } from "../../shared/api/publishedVersions";
 import { shouldRetryRequest } from "../../shared/api/client";
 import { usePublishedDomainRefresh } from "../../shared/api/usePublishedDomainRefresh";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
+import { useSearchRestoreKey } from "../../shared/components/useSearchRestoreKey";
 import { z } from "zod";
 import { defaultProductPeriod } from "../../shared/products/period";
 import { ApiError, get, params } from "./api";
@@ -14,6 +15,7 @@ import { patchScope, readScope, scopeError, type Scope, type ScopeName } from ".
 export function useProducts() {
   const client = useQueryClient();
   const [search, setSearch] = useSearchParams();
+  const searchRestoreKey = useSearchRestoreKey();
   const metadata = useQuery({
     queryKey: ["m1", "meta"],
     queryFn: async ({ signal }) => {
@@ -51,7 +53,7 @@ export function useProducts() {
       },
       { replace: true },
     );
-  return { metadata, version, scope, change, reset, stale };
+  return { metadata, version, scope, change, reset, stale, searchRestoreKey };
 }
 export type ProductsState = ReturnType<typeof useProducts>;
 export function useResource<T>(
@@ -93,14 +95,6 @@ export function useResource<T>(
   return invalid && state.version
     ? { ...query, data: undefined, isPending: false, error: new ApiError(422, invalid) }
     : query;
-}
-export function useDebounced(value: string) {
-  const [current, setCurrent] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setCurrent(value), 250);
-    return () => clearTimeout(t);
-  }, [value]);
-  return current;
 }
 /** 每个版本/日期仅取一次轻量目录；维度与搜索即时计算，不读取经营快照。 */
 export function useOptions(scope: Scope, state: ProductsState, needle: string, name: ScopeName) {

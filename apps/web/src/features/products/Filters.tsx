@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Button, DatePicker, Input, Select, Spin } from "antd";
+import { Button, DatePicker, Select, Spin } from "antd";
+import { SearchInput } from "../../shared/components/SearchInput";
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { validDate, type Scope, type ScopeName } from "./scope";
@@ -21,6 +22,13 @@ export function Filters({
   status?: ReactNode;
 }) {
   const [needle, setNeedle] = useState("");
+  const [productPopup, setProductPopup] = useState<{ open: boolean; keyword?: string }>({
+    open: false,
+  });
+  // 路由提交可能延后：首次自动展开只展示该次关键词的候选，避免先打开旧候选列表。
+  const productOpen =
+    productPopup.open && (!productPopup.keyword || productPopup.keyword === scope.keyword);
+  const [searchReset, setSearchReset] = useState(0);
   const result = useOptions(scope, state, needle, name);
   const first = result.data;
   useEffect(() => {
@@ -114,6 +122,8 @@ export function Filters({
   const reset = () => {
     onBeforeChange?.();
     setNeedle("");
+    setProductPopup({ open: false });
+    setSearchReset((n) => n + 1);
     state.reset(name);
   };
   const shopSelect = select(
@@ -193,60 +203,97 @@ export function Filters({
           onChange={(v) => change({ judgement: v ?? "" })}
         />
       )}
-      <Select
-        mode="multiple"
-        aria-label={`${label}商品`}
-        allowClear
-        showSearch={{ filterOption: false, searchValue: needle, onSearch: setNeedle }}
-        value={scope.products}
-        maxTagCount="responsive"
-        placeholder="全部单款"
-        options={products}
-        optionRender={(option) => (
-          <div>
-            <div>{option.data.label}</div>
-            {(option.data.level_details?.length ?? 0) > 1 && (
-              <small>{formatProductLevel(option.data.level, option.data.level_details)}</small>
-            )}
-          </div>
-        )}
-        labelRender={(v) =>
-          products.find((p) => p.value === v.value)?.label ??
-          first?.selected_products.find((p) => p.value === v.value)?.label ??
-          v.label ??
-          String(v.value)
-        }
-        virtual
-        loading={preparing}
-        disabled={preparing}
-        notFoundContent={empty}
-        onOpenChange={(open) => {
-          if (!open) setNeedle("");
-        }}
-        onChange={(products) => {
-          setNeedle("");
-          change({ products: products.slice(0, 20) });
-        }}
-        popupRender={(menu) => (
-          <>
-            {menu}
-            <div className="m1-option-footer">
-              <small>共 {first?.total ?? 0} 款，最多选择20款</small>
-            </div>
-          </>
-        )}
-      />
-      {name !== "score" && (
-        <Input
-          aria-label={`${label}搜索商品`}
-          value={scope.keyword}
+      <div className="m1-product-control">
+        <span className="m1-control-label">选择商品（可多选）</span>
+        <Select
+          mode="multiple"
+          open={productOpen}
+          aria-label={`${label}商品`}
           allowClear
-          placeholder="搜索商品名称或商品 ID"
-          onChange={(e) => change({ keyword: e.target.value })}
+          showSearch={{ filterOption: false, searchValue: needle, onSearch: setNeedle }}
+          value={scope.products}
+          maxTagCount="responsive"
+          placeholder={
+            scope.keyword ? (
+              <span className="m1-candidate-echo" title={`关键词：${scope.keyword}`}>
+                {scope.keyword} · {first && !preparing && !result.error ? first.total : "—"}个候选
+              </span>
+            ) : (
+              "全部单款"
+            )
+          }
+          options={products}
+          optionRender={(option) => (
+            <div>
+              <div>{option.data.label}</div>
+              {(option.data.level_details?.length ?? 0) > 1 && (
+                <small>{formatProductLevel(option.data.level, option.data.level_details)}</small>
+              )}
+            </div>
+          )}
+          labelRender={(v) =>
+            products.find((p) => p.value === v.value)?.label ??
+            first?.selected_products.find((p) => p.value === v.value)?.label ??
+            v.label ??
+            String(v.value)
+          }
+          virtual
+          loading={preparing}
+          disabled={preparing}
+          notFoundContent={empty}
+          onOpenChange={(open) => {
+            setProductPopup({ open });
+            if (!open) setNeedle("");
+          }}
+          onChange={(products) => {
+            setNeedle("");
+            change({ products: products.slice(0, 20) });
+          }}
+          popupRender={(menu) => (
+            <>
+              {menu}
+              <div className="m1-option-footer">
+                <small>共 {first?.total ?? 0} 款，最多选择20款</small>
+              </div>
+            </>
+          )}
         />
+      </div>
+      {name !== "score" && (
+        <div className="m1-product-control">
+          <span className="m1-control-label">关键词筛选</span>
+          <SearchInput
+            aria-label={`${label}搜索商品`}
+            value={scope.keyword}
+            resetKey={JSON.stringify([
+              searchReset,
+              state.searchRestoreKey,
+              scope.from,
+              scope.to,
+              scope.shop,
+              scope.operator,
+              scope.category,
+              scope.level,
+              scope.products,
+            ])}
+            allowClear
+            placeholder="搜索商品名称或商品 ID"
+            onSearch={(keyword) => {
+              change({ keyword });
+              // 仅展开候选，不移动右侧输入焦点或自动选中商品。
+              setProductPopup({
+                open: !!keyword,
+                keyword: productOpen ? undefined : keyword || undefined,
+              });
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setProductPopup({ open: false });
+            }}
+          />
+        </div>
       )}
       {name !== "main" && <Button onClick={reset}>重置</Button>}
-      {status !== undefined && (
+      {status && (
         <div className="m1-filter-status" role="status" aria-live="polite" aria-atomic="true">
           {status}
         </div>

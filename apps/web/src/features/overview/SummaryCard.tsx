@@ -9,7 +9,6 @@ export const SummaryCard = memo(function SummaryCard({
   description,
   tone,
   href,
-  onNavigate,
 }: {
   label: string;
   value: ReactNode;
@@ -17,7 +16,6 @@ export const SummaryCard = memo(function SummaryCard({
   description: ReactNode;
   tone: "green" | "amber" | "blue" | "purple";
   href?: string;
-  onNavigate?: () => void;
 }) {
   const main = (
     <>
@@ -36,7 +34,7 @@ export const SummaryCard = memo(function SummaryCard({
   return (
     <Card className={`m6-summary-card m6-summary-card--${tone}`}>
       {href ? (
-        <a className="m6-summary-main" href={href} onClick={onNavigate}>
+        <a className="m6-summary-main" href={href}>
           {main}
         </a>
       ) : (

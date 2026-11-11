@@ -7,7 +7,7 @@ import {
   PlusSquareOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
-import { Alert, Badge, Button, Modal, Radio, Table, Tabs, Tag, Tooltip } from "antd";
+import { Alert, Badge, Button, Modal, Radio, Select, Table, Tabs, Tag, Tooltip } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { localTime } from "./model";
 import {
@@ -19,8 +19,17 @@ import {
   type DatasetStatus,
   type SourceStatus,
 } from "./sourceStatusApi";
-import { dataUpdateAlerts, sourceHasFailure, sourceUpdateFailed } from "./dataUpdateAlerts";
+import {
+  dataUpdateAlerts,
+  sourceHasAlert,
+  sourceHasCheckFailure,
+  sourceHasSyncFailure,
+  matchesSourceFilter,
+  type SourceFilter,
+} from "./dataUpdateAlerts";
 import "./data-update-status.css";
+import { HistoryCoverage, HistoryCoverageLabel } from "./HistoryCoverage";
+import { UpdateTimeliness, UpdateTimelinessLabel } from "./UpdateTimeliness";
 
 const systems = { warehouse: "数仓", feishu: "飞书", nmc: "气象台" };
 const time = (value: string | null | undefined) => (value ? localTime(value) : "—");
@@ -238,16 +247,27 @@ function SyncStatus({ row }: { row: SourceStatus }) {
 function SourceDetail({ row }: { row: SourceStatus }) {
   const [copyState, setCopyState] = useState("");
   const observation = row.upstream.observation;
+  const syncFailed = sourceHasSyncFailure(row);
+  const checkFailed = sourceHasCheckFailure(row);
   return (
     <div className="m6-update-detail">
-      {sourceUpdateFailed(row) && (
+      <UpdateTimeliness row={row} />
+      <HistoryCoverage row={row} />
+      {(syncFailed || checkFailed) && (
         <p>
           异常影响：{row.pages.map((page) => pageNames[page]).join("、")}。
-          {row.upstream.state === "failed" ? "上游检查未成功；" : "平台接收未成功；"}
+          {row.upstream.state === "failed" && "上游检查未成功；"}
+          {syncFailed && "平台接收未成功；"}
+          {row.history?.state === "failed" && "记录覆盖检查未成功；"}
           请以各用途的数据日期和最近成功时间确认当前可用范围。
           {!row.upstream.error_code &&
             !row.datasets.some((item) => item.error_code) &&
             "具体失败原因尚未确认。"}
+        </p>
+      )}
+      {(syncFailed || checkFailed) && (
+        <p>
+          处理建议：由平台维护人员先核对失败环节；上游采集失败转对应来源维护人员处理，平台接收失败只补跑对应接收任务。维护联系人未登记。补跑后需验证接收成功，已有数据继续保留。
         </p>
       )}
       <dl>
@@ -371,15 +391,17 @@ function SourceDetail({ row }: { row: SourceStatus }) {
 const columns: ColumnsType<SourceStatus> = [
   {
     title: "用途 / 上游来源表",
-    width: 300,
+    onCell: () =>
+      ({ "data-label": "用途 / 上游来源表" }) as React.HTMLAttributes<HTMLTableCellElement>,
+    width: "23%",
     render: (_, row) => (
       <div className="m6-update-name">
-        {sourceHasFailure(row) && (
+        {sourceHasAlert(row) && (
           <span
             className="m6-update-row-dot"
             role="img"
             aria-label={`来源异常：${row.name}`}
-            title="此来源更新异常，展开明细查看"
+            title="此来源检查或同步失败，展开明细查看"
           />
         )}
         <a
@@ -407,12 +429,19 @@ const columns: ColumnsType<SourceStatus> = [
   },
   {
     title: "上游最近更新",
-    width: 210,
-    render: (_, row) => <UpstreamUpdate row={row} />,
+    onCell: () => ({ "data-label": "上游最近更新" }) as React.HTMLAttributes<HTMLTableCellElement>,
+    width: "18%",
+    render: (_, row) => (
+      <div className="m6-update-cell-stack">
+        <UpstreamUpdate row={row} />
+        <UpdateTimelinessLabel row={row} />
+      </div>
+    ),
   },
   {
     title: "最近检查",
-    width: 200,
+    onCell: () => ({ "data-label": "最近检查" }) as React.HTMLAttributes<HTMLTableCellElement>,
+    width: "18%",
     render: (_, row) => {
       const label = upstreamLabel(row);
       return (
@@ -432,10 +461,22 @@ const columns: ColumnsType<SourceStatus> = [
       );
     },
   },
-  { title: "平台数据日期", width: 170, render: (_, row) => <DatasetDates row={row} /> },
+  {
+    title: "近30天记录",
+    onCell: () => ({ "data-label": "近30天记录" }) as React.HTMLAttributes<HTMLTableCellElement>,
+    width: "12%",
+    render: (_, row) => <HistoryCoverageLabel row={row} />,
+  },
+  {
+    title: "平台数据日期",
+    onCell: () => ({ "data-label": "平台数据日期" }) as React.HTMLAttributes<HTMLTableCellElement>,
+    width: "10%",
+    render: (_, row) => <DatasetDates row={row} />,
+  },
   {
     title: "平台同步",
-    width: 245,
+    onCell: () => ({ "data-label": "平台同步" }) as React.HTMLAttributes<HTMLTableCellElement>,
+    width: "15%",
     render: (_, row) => <SyncStatus row={row} />,
   },
 ];
@@ -443,63 +484,53 @@ const columns: ColumnsType<SourceStatus> = [
 function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus> }) {
   const [page, setPage] = useState("all");
   const [activeTab, setActiveTab] = useState<string>();
-  const [onlyFailed, setOnlyFailed] = useState(false);
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
+  const [onlyProcessingFailed, setOnlyProcessingFailed] = useState(false);
   const [sourceKeys, setSourceKeys] = useState<React.Key[]>([]);
   const [processingKeys, setProcessingKeys] = useState<React.Key[]>([]);
   const data = query.data?.data;
   const alerts = dataUpdateAlerts(data);
   const rows = (data?.sources ?? []).filter(
-    (row) => (page === "all" || row.pages.includes(page)) && (!onlyFailed || sourceHasFailure(row)),
+    (row) => (page === "all" || row.pages.includes(page)) && matchesSourceFilter(row, sourceFilter),
   );
   const processingRows = (data?.processing ?? []).filter(
-    (item) => !onlyFailed || item.state === "failed",
+    (item) => !onlyProcessingFailed || item.state === "failed",
   );
-  const locateFailures = (tab: "sources" | "processing") => {
-    setActiveTab(tab);
+  const locateSources = (filter: SourceFilter) => {
+    setActiveTab("sources");
     setPage("all");
-    setOnlyFailed(true);
-    if (tab === "sources") setSourceKeys(alerts.sources.map((row) => row.id));
-    else setProcessingKeys(alerts.processing.map((item) => item.code));
+    setSourceFilter(filter);
+    setSourceKeys(
+      (data?.sources ?? []).filter((row) => matchesSourceFilter(row, filter)).map((row) => row.id),
+    );
+  };
+  const locateProcessing = () => {
+    setActiveTab("processing");
+    setOnlyProcessingFailed(true);
+    setProcessingKeys(alerts.processing.map((item) => item.code));
   };
   return (
     <>
       <div className="m6-update-intro">
         <span>
-          {!data
-            ? "正在读取数据更新状态…"
-            : data.monitor.source_schedule_enabled
-              ? "按计划读取数仓网页更新时间，有变化或接收失败时同步对应来源。"
-              : data.monitor.enabled
-                ? `后台自动检查并同步数据；当前每 ${data.monitor.interval_seconds / 60} 分钟检查一次。`
-                : "自动检查尚未启用。"}
-          {data?.monitor.source_schedule_enabled && (
-            <small className="m6-update-subtext">
-              数仓 {data.monitor.warehouse_times?.join(" / ")} · 飞书{" "}
-              {data.monitor.feishu_times?.join(" / ")}（北京时间）
-              <br />
-              {data.monitor.reconciliation_time &&
-                `数仓每周日 ${data.monitor.reconciliation_time} 对账。`}
-              {data.monitor.reconciliation_retry_seconds &&
-                `失败结束后 ${data.monitor.reconciliation_retry_seconds / 60} 分钟重试。`}
-              聚水潭、天气沿用原计划。
-            </small>
+          状态更新于 {time(query.data?.meta.generated_at)}
+          {hasRunningUpdate(data) && (
+            <small className="m6-update-subtext">任务运行中，每15秒跟踪状态</small>
           )}
-          <small className="m6-update-subtext">
-            {query.isError
-              ? "状态读取失败，自动跟踪已暂停"
-              : hasRunningUpdate(data)
-                ? "任务运行中，每15秒跟踪状态"
-                : "打开时读取状态，可手动刷新"}{" "}
-            · 更新于 {time(query.data?.meta.generated_at)}
-          </small>
+          {query.isError && (
+            <small className="m6-update-subtext">状态读取失败，自动跟踪已暂停</small>
+          )}
         </span>
-        <Button
-          icon={<ReloadOutlined aria-hidden="true" />}
-          loading={query.isFetching}
-          onClick={() => void query.refetch()}
-        >
-          刷新状态
-        </Button>
+        <div className="m6-update-actions">
+          <Button
+            size="small"
+            icon={<ReloadOutlined aria-hidden="true" />}
+            loading={query.isFetching}
+            onClick={() => void query.refetch()}
+          >
+            刷新状态
+          </Button>
+        </div>
       </div>
       {query.isError && (
         <Alert
@@ -509,29 +540,96 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
           description={data ? "保留上次状态，请稍后刷新。" : "暂时无法读取更新状态，请稍后刷新。"}
         />
       )}
-      {(alerts.failed || onlyFailed) && (
-        <div className="m6-update-alert-summary">
-          <span>共 {alerts.sources.length + alerts.processing.length} 项异常</span>
-          {alerts.sources.length > 0 && (
-            <Button type="link" onClick={() => locateFailures("sources")}>
-              查看{alerts.sources.length}项来源异常
-            </Button>
-          )}
-          {alerts.processing.length > 0 && (
-            <Button type="link" onClick={() => locateFailures("processing")}>
-              查看{alerts.processing.length}项处理异常
-            </Button>
-          )}
-          {onlyFailed && (
-            <>
-              <span>仅显示异常</span>
-              <Button type="link" onClick={() => setOnlyFailed(false)}>
-                显示全部
+      {data && (
+        <div className="m6-update-status-groups">
+          <div className="m6-update-status-group">
+            <strong>更新状态</strong>
+            {alerts.sync.length > 0 && (
+              <Button type="link" danger onClick={() => locateSources("sync")}>
+                同步失败 {alerts.sync.length} 项
               </Button>
-            </>
+            )}
+            {alerts.checks.length > 0 && (
+              <Button type="link" danger onClick={() => locateSources("checks")}>
+                检查失败 {alerts.checks.length} 项
+              </Button>
+            )}
+            {alerts.reconciliation.length > 0 && (
+              <Button type="link" danger onClick={() => locateSources("reconciliation")}>
+                周对账失败 {alerts.reconciliation.length} 项
+              </Button>
+            )}
+            {alerts.processing.length > 0 && (
+              <Button type="link" danger onClick={locateProcessing}>
+                处理失败 {alerts.processing.length} 项
+              </Button>
+            )}
+            {!alerts.failed && <span>未发现检查、同步、周对账或处理失败</span>}
+          </div>
+          <div className="m6-update-status-group">
+            <strong>更新时效</strong>
+            {alerts.delayed.length > 0 ? (
+              <Button
+                type="link"
+                className="m6-update-delay"
+                onClick={() => locateSources("delayed")}
+              >
+                更新延迟 {alerts.delayed.length} 项
+              </Button>
+            ) : (
+              <span>暂无已确认的更新延迟</span>
+            )}
+          </div>
+          <div className="m6-update-status-group">
+            <strong>记录情况</strong>
+            {alerts.records.length > 0 ? (
+              <Button type="link" onClick={() => locateSources("records")}>
+                部分日期无记录：{alerts.records.length} 个来源
+              </Button>
+            ) : (
+              <span>暂无无记录日期提示</span>
+            )}
+          </div>
+          {(sourceFilter !== "all" || onlyProcessingFailed) && (
+            <Button
+              type="link"
+              onClick={() => {
+                setSourceFilter("all");
+                setOnlyProcessingFailed(false);
+              }}
+            >
+              显示全部
+            </Button>
           )}
         </div>
       )}
+      <details className="m6-update-explanation">
+        <summary>更新说明</summary>
+        <p>
+          {!data
+            ? "正在读取数据更新状态…"
+            : data.monitor.source_schedule_enabled
+              ? "按计划读取数仓网页更新时间，有变化或接收失败时同步对应来源。"
+              : data.monitor.enabled
+                ? `后台自动检查并同步数据；当前每 ${data.monitor.interval_seconds / 60} 分钟检查一次。`
+                : "自动检查尚未启用。"}
+        </p>
+        {data?.monitor.source_schedule_enabled && (
+          <p>
+            数仓 {data.monitor.warehouse_times?.join(" / ")} · 飞书{" "}
+            {data.monitor.feishu_times?.join(" / ")}（北京时间）
+            <br />
+            {data.monitor.warehouse_times?.includes("16:10") && "16:10 为普通检查。"}
+            {data.monitor.reconciliation_time &&
+              `数仓每周日 ${data.monitor.reconciliation_time} 对账。`}
+            {data.monitor.reconciliation_retry_seconds &&
+              `失败结束后 ${data.monitor.reconciliation_retry_seconds / 60} 分钟重试。`}
+            聚水潭、天气沿用原计划。
+          </p>
+        )}
+        <p>按昨天更新时间推到今天加一小时判断延迟；没有可靠时间依据则不判定。</p>
+        <p>打开时读取状态，可手动刷新。刷新状态只读取平台；同步失败时保留最近成功的数据。</p>
+      </details>
       <Tabs
         activeKey={
           activeTab ??
@@ -545,7 +643,7 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
             label: "来源数据",
             forceRender: true,
             children: (
-              <>
+              <div className="m6-update-panel">
                 <div className="m6-update-toolbar">
                   <h3>
                     上游来源{" "}
@@ -553,6 +651,16 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
                       {rows.length} 项{page !== "all" && ` / 共 ${data?.sources.length ?? 0} 项`}
                     </span>
                   </h3>
+                  <Select
+                    className="m6-update-page-select"
+                    aria-label="筛选看板"
+                    value={page}
+                    onChange={setPage}
+                    options={[
+                      { label: "全部看板", value: "all" },
+                      ...Object.entries(pageNames).map(([value, label]) => ({ value, label })),
+                    ]}
+                  />
                   <Radio.Group
                     value={page}
                     onChange={(event) => setPage(event.target.value)}
@@ -564,44 +672,50 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
                     ]}
                   />
                 </div>
-                <Table
-                  className="m6-update-table"
-                  rowKey="id"
-                  dataSource={rows}
-                  columns={columns}
-                  loading={query.isPending}
-                  pagination={false}
-                  size="middle"
-                  scroll={{ x: 1171, y: "var(--m6-update-body-height)" }}
-                  locale={{ emptyText: onlyFailed ? "当前没有异常来源" : "暂无来源状态" }}
-                  expandable={{
-                    expandedRowKeys: sourceKeys,
-                    onExpandedRowsChange: (keys) => setSourceKeys([...keys]),
-                    columnTitle: "明细",
-                    columnWidth: 46,
-                    expandIcon: ({ expanded, onExpand, record }) => (
-                      <Button
-                        type="text"
-                        size="small"
-                        aria-label={expanded ? "收起来源详情" : "展开来源详情"}
-                        aria-expanded={expanded}
-                        icon={
-                          expanded ? (
-                            <MinusSquareOutlined aria-hidden="true" />
-                          ) : (
-                            <PlusSquareOutlined aria-hidden="true" />
-                          )
-                        }
-                        onClick={(event) => onExpand(record, event)}
-                      />
-                    ),
-                    expandedRowRender: (row) => <SourceDetail row={row} />,
-                  }}
-                />
-                <p className="m6-update-footnote">
-                  每个实际来源一行。网页记录注明核对时刻；刷新状态只读取平台。同步失败时保留最近成功的数据。
-                </p>
-              </>
+                <div
+                  className="m6-update-list"
+                  role="region"
+                  aria-label="来源状态列表"
+                  tabIndex={0}
+                >
+                  <Table
+                    className="m6-update-table"
+                    rowKey="id"
+                    dataSource={rows}
+                    columns={columns}
+                    loading={query.isPending}
+                    pagination={false}
+                    size="middle"
+                    tableLayout="fixed"
+                    locale={{
+                      emptyText: sourceFilter !== "all" ? "当前没有符合条件的来源" : "暂无来源状态",
+                    }}
+                    expandable={{
+                      expandedRowKeys: sourceKeys,
+                      onExpandedRowsChange: (keys) => setSourceKeys([...keys]),
+                      columnTitle: "明细",
+                      columnWidth: "4%",
+                      expandIcon: ({ expanded, onExpand, record }) => (
+                        <Button
+                          type="text"
+                          size="small"
+                          aria-label={expanded ? "收起来源详情" : "展开来源详情"}
+                          aria-expanded={expanded}
+                          icon={
+                            expanded ? (
+                              <MinusSquareOutlined aria-hidden="true" />
+                            ) : (
+                              <PlusSquareOutlined aria-hidden="true" />
+                            )
+                          }
+                          onClick={(event) => onExpand(record, event)}
+                        />
+                      ),
+                      expandedRowRender: (row) => <SourceDetail row={row} />,
+                    }}
+                  />
+                </div>
+              </div>
             ),
           },
           {
@@ -609,91 +723,111 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
             label: "平台处理",
             forceRender: true,
             children: (
-              <Table
-                className="m6-update-table"
-                rowKey="code"
-                dataSource={processingRows}
-                locale={{ emptyText: onlyFailed ? "当前没有处理异常" : "暂无处理状态" }}
-                expandable={{
-                  columnTitle: "明细",
-                  columnWidth: 46,
-                  expandedRowKeys: processingKeys,
-                  onExpandedRowsChange: (keys) => setProcessingKeys([...keys]),
-                  expandedRowRender: (item) => (
-                    <div className="m6-update-detail">
-                      <p>
-                        影响页面：{item.pages.map((page) => pageNames[page]).join("、") || "未提供"}
-                      </p>
-                      {item.state === "failed" && (
+              <div className="m6-update-list" role="region" aria-label="平台处理列表" tabIndex={0}>
+                <Table
+                  className="m6-update-table"
+                  rowKey="code"
+                  dataSource={processingRows}
+                  locale={{ emptyText: onlyProcessingFailed ? "当前没有处理失败" : "暂无处理状态" }}
+                  expandable={{
+                    columnTitle: "明细",
+                    columnWidth: "6%",
+                    expandedRowKeys: processingKeys,
+                    onExpandedRowsChange: (keys) => setProcessingKeys([...keys]),
+                    expandedRowRender: (item) => (
+                      <div className="m6-update-detail">
                         <p>
-                          最近计算未成功；
-                          {item.error_code
-                            ? `失败记录：${item.error_code}，具体原因待核实。`
-                            : "失败原因尚未确认。"}
-                          {item.version_id
-                            ? "已有结果仍保留，请以生成时间和输入日期为准。"
-                            : "当前没有可用的成功结果。"}
+                          影响页面：
+                          {item.pages.map((page) => pageNames[page]).join("、") || "未提供"}
                         </p>
-                      )}
-                      <DatasetDetail item={item} />
-                    </div>
-                  ),
-                }}
-                pagination={false}
-                size="middle"
-                scroll={{ x: 700, y: "var(--m6-update-body-height)" }}
-                columns={[
-                  {
-                    title: "处理项目",
-                    render: (_, item) => (
-                      <span>
                         {item.state === "failed" && (
-                          <span
-                            className="m6-update-row-dot"
-                            role="img"
-                            aria-label={`处理异常：${item.name}`}
-                          />
+                          <p>
+                            最近计算未成功；
+                            {item.error_code
+                              ? `失败记录：${item.error_code}，具体原因待核实。`
+                              : "失败原因尚未确认。"}
+                            {item.version_id
+                              ? "已有结果仍保留，请以生成时间和输入日期为准。"
+                              : "当前没有可用的成功结果。"}
+                          </p>
                         )}
-                        {item.name}
-                      </span>
+                        <DatasetDetail item={item} />
+                      </div>
                     ),
-                  },
-                  {
-                    title: "输入数据截至",
-                    render: (_, item) =>
-                      item.code === "refund_targets" ? "按确认配置" : date(item.date),
-                  },
-                  { title: "最近生成", render: (_, item) => time(item.generated_at) },
-                  {
-                    title: "状态",
-                    render: (_, item) => (
-                      <Tag
-                        color={
-                          item.state === "failed"
-                            ? "error"
+                  }}
+                  pagination={false}
+                  size="middle"
+                  tableLayout="fixed"
+                  columns={[
+                    {
+                      title: "处理项目",
+                      onCell: () =>
+                        ({
+                          "data-label": "处理项目",
+                        }) as React.HTMLAttributes<HTMLTableCellElement>,
+                      render: (_, item) => (
+                        <span>
+                          {item.state === "failed" && (
+                            <span
+                              className="m6-update-row-dot"
+                              role="img"
+                              aria-label={`处理异常：${item.name}`}
+                            />
+                          )}
+                          {item.name}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: "输入数据截至",
+                      onCell: () =>
+                        ({
+                          "data-label": "输入数据截至",
+                        }) as React.HTMLAttributes<HTMLTableCellElement>,
+                      render: (_, item) =>
+                        item.code === "refund_targets" ? "按确认配置" : date(item.date),
+                    },
+                    {
+                      title: "最近生成",
+                      onCell: () =>
+                        ({
+                          "data-label": "最近生成",
+                        }) as React.HTMLAttributes<HTMLTableCellElement>,
+                      render: (_, item) => time(item.generated_at),
+                    },
+                    {
+                      title: "状态",
+                      onCell: () =>
+                        ({ "data-label": "状态" }) as React.HTMLAttributes<HTMLTableCellElement>,
+                      render: (_, item) => (
+                        <Tag
+                          color={
+                            item.state === "failed"
+                              ? "error"
+                              : item.state === "syncing"
+                                ? "processing"
+                                : item.state === "pending"
+                                  ? "warning"
+                                  : item.state === "available"
+                                    ? "success"
+                                    : "default"
+                          }
+                        >
+                          {item.state === "failed"
+                            ? "最近计算失败"
                             : item.state === "syncing"
-                              ? "processing"
+                              ? "正在计算"
                               : item.state === "pending"
-                                ? "warning"
+                                ? "等待重算"
                                 : item.state === "available"
-                                  ? "success"
-                                  : "default"
-                        }
-                      >
-                        {item.state === "failed"
-                          ? "最近计算失败"
-                          : item.state === "syncing"
-                            ? "正在计算"
-                            : item.state === "pending"
-                              ? "等待重算"
-                              : item.state === "available"
-                                ? "结果可用"
-                                : "尚无结果"}
-                      </Tag>
-                    ),
-                  },
-                ]}
-              />
+                                  ? "结果可用"
+                                  : "尚无结果"}
+                        </Tag>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
             ),
           },
         ]}
@@ -702,14 +836,18 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
   );
 }
 
-/** 入口与弹窗共享一次状态查询；全来源失败持续提醒，只有实际恢复后才清除。 */
+/** 入口与弹窗共用状态查询；全来源故障红点优先于延迟黄点，缺记录只在内部说明。 */
 export const DataUpdateStatus = memo(function DataUpdateStatus() {
   const [open, setOpen] = useState(false);
   const query = useDataUpdateStatus(open);
   const alerts = dataUpdateAlerts(query.data?.data);
+  const delayedOnly = !alerts.failed && alerts.delayed.length > 0;
   const statusId = useId();
   const summary = [
     alerts.failed ? `数据更新异常：${alerts.description}` : "",
+    alerts.delayed.length
+      ? `上游更新延迟：${alerts.delayed.map((row) => row.name).join("、")}`
+      : "",
     query.isError ? "状态读取失败，暂时无法确认最新状态" : "",
     !query.isError && alerts.stale ? "部分来源检查已过期" : "",
   ]
@@ -717,8 +855,15 @@ export const DataUpdateStatus = memo(function DataUpdateStatus() {
     .join("；");
   return (
     <>
-      <Tooltip title={summary || (query.isPending ? "正在读取更新状态" : undefined)}>
-        <Badge className="m6-update-badge" dot={alerts.failed} title="" offset={[-2, 2]}>
+      <Tooltip
+        title={open ? undefined : summary || (query.isPending ? "正在读取更新状态" : undefined)}
+      >
+        <Badge
+          className={`m6-update-badge${delayedOnly ? " m6-update-badge-delayed" : ""}`}
+          dot={alerts.failed || delayedOnly}
+          title=""
+          offset={[-2, 2]}
+        >
           <Button
             aria-describedby={statusId}
             className="m6-update-entry"
@@ -745,15 +890,19 @@ export const DataUpdateStatus = memo(function DataUpdateStatus() {
         aria-atomic="true"
       >
         {alerts.failed && <span aria-label="数据更新异常">{summary}</span>}
-        {!alerts.failed && summary}
+        {!alerts.failed && <span>{summary}</span>}
+        {alerts.delayed.length > 0 && (
+          <span aria-label="上游更新延迟">已核对{alerts.delayed.length}个来源更新延迟</span>
+        )}
       </span>
       <Modal
         title="数据更新状态"
         open={open}
         onCancel={() => setOpen(false)}
         footer={null}
+        closable={{ "aria-label": "关闭数据更新状态" }}
         destroyOnHidden
-        width={1360}
+        width="calc(100vw - 32px)"
         className="m6-update-modal"
       >
         {open && <StatusContent query={query} />}

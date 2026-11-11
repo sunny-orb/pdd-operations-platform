@@ -1,6 +1,7 @@
 """运营中心风险接口：真实PG核验完整名单、缺项、身份、期间和页面一致性。"""
 
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -63,7 +64,7 @@ def test_risk_feed_real_pg(sales_pg, tmp_path):
     end, data = candidate(duplicate_profile=False)
     products = [
         ("663599807", pid, "spigf")
-        for pid in ("123", "234", "345", "456", "567", "678", "789", "890", "901")
+        for pid in ("123", "234", "345", "456", "567", "678", "789", "890", "901", "902")
     ] + [("799193231", "123", "spihw")]
     rows, profiles = [], []
     for index, (shop, pid, profile_field) in enumerate(products):
@@ -89,7 +90,9 @@ def test_risk_feed_real_pg(sales_pg, tmp_path):
                     transaction_amount=None if pid == "456" and i == 1 else "100",
                     product_uv=None
                     if pid == "789" and i == 0
-                    else (50 if i == 0 and pid != "567" else 200),
+                    else (
+                        60 if pid == "902" and i == 0 else 100 if i == 0 and pid != "567" else 200
+                    ),
                     transaction_orders=4 if i == 0 and pid != "567" else 10,
                 )
             )
@@ -106,17 +109,20 @@ def test_risk_feed_real_pg(sales_pg, tmp_path):
         assert result.json()["meta"]["data_version"] == token
         assert feed["total"] == 6  # 不截前三、不按页面5条分页截断接口。
         assert feed["counts"] == dict(
-            selected=10, excluded=1, evaluated=7, unevaluated=2, flagged=6, unflagged=1
+            selected=11, excluded=1, evaluated=8, unevaluated=2, flagged=6, unflagged=2
         )
         assert feed["evaluation_date"] == str(end)
         assert feed["baseline_period"] == dict(
             start=str(end - timedelta(days=7)), end=str(end - timedelta(days=1))
         )
         assert feed["trend_period"] == dict(start=str(end - timedelta(days=6)), end=str(end))
-        assert feed["rule_version"] == "product-risk-online-v1"
+        assert feed["rule_version"] == "product-risk-traffic-v2"
         assert feed["impact_kind"] == "estimated"
         assert feed["status"] == "partial"
         overview = client.get("/api/v1/products/overview", params=params).json()["data"]
+        assert overview["observed_rows"] == "87"
+        assert Decimal(overview["metrics"]["revenue"]["value"]) == Decimal("8600")
+        assert "902" not in {item["product_id"] for item in feed["risks"]}
         expected = [{key: row[key] for key in feed["risks"][0]} for row in overview["risks"]]
         assert feed["risks"] == expected
         twins = [row for row in feed["risks"] if row["product_id"] == "123"]
@@ -124,10 +130,10 @@ def test_risk_feed_real_pg(sales_pg, tmp_path):
         assert len({row["shop_id"] for row in twins}) == 2
         item = twins[0]
         assert item["period_revenue"] == "800"
-        assert item["alert"]["current"] == "50"
+        assert item["alert"]["current"] == "100"
         assert item["alert"]["baseline"] == "200"
-        assert item["alert"]["change"] == "-0.75"
-        assert item["alert"]["expected_loss"] == "75.00"
+        assert item["alert"]["change"] == "-0.5"
+        assert item["alert"]["expected_loss"] == "50.00"
         assert item["alert"]["metric"] == "visitors"
         assert item["alert"]["baseline_method"] == "daily_average"
         assert item["alert"]["deadline"] is None

@@ -195,7 +195,7 @@ class RisksData(BaseModel):
     baseline_period: ComparisonPeriod
     trend_period: ComparisonPeriod
     generation_method: Literal["rules"]
-    rule_version: Literal["product-risk-online-v1"]
+    rule_version: Literal["product-risk-traffic-v2"]
     impact_kind: Literal["estimated"]
 
 

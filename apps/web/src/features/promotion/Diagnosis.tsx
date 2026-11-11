@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { Alert, Button, Input, Pagination, Spin } from "antd";
+import { SearchInput } from "../../shared/components/SearchInput";
 import {
   diagnosis,
   diagnosisObjects,
@@ -180,21 +181,28 @@ function ObjectTable({ items, remote }: { items: DiagnosisObject[]; remote?: Rem
     <div className="sop-object-list">
       {(!!items.length || remote) && (
         <div className="sop-list-controls">
-          <Input
-            type="search"
-            aria-label="搜索本清单全部对象"
-            placeholder="搜索本清单全部对象、证据或建议"
-            allowClear
-            value={keyword}
-            onChange={(event) => {
-              if (remote) {
-                remote.search(event.target.value);
-                return;
-              }
-              setKeyword(event.target.value);
-              setPage(1);
-            }}
-          />
+          {remote ? (
+            <SearchInput
+              type="search"
+              aria-label="搜索本清单全部对象"
+              placeholder="搜索本清单全部对象、证据或建议"
+              allowClear
+              value={keyword}
+              onSearch={remote.search}
+            />
+          ) : (
+            <Input
+              type="search"
+              aria-label="搜索本清单全部对象"
+              placeholder="搜索本清单全部对象、证据或建议"
+              allowClear
+              value={keyword}
+              onChange={(event) => {
+                setKeyword(event.target.value);
+                setPage(1);
+              }}
+            />
+          )}
           <span>
             {remote?.pending
               ? "正在更新清单…"
@@ -337,13 +345,8 @@ function ObjectTable({ items, remote }: { items: DiagnosisObject[]; remote?: Rem
 /** 清单展开才挂载；同一范围先完整搜索再取当前页，不提前下载折叠内容。 */
 function RemoteObjectTable({ state, group }: { state: PromotionState; group: ObjectGroup }) {
   const [search, setSearch] = useState("");
-  const [settledSearch, setSettledSearch] = useState("");
   const [page, setPage] = useState(1);
   const [size, setSize] = useState(25);
-  useEffect(() => {
-    const timer = setTimeout(() => setSettledSearch(search), 200);
-    return () => clearTimeout(timer);
-  }, [search]);
   const query = useResource(
     "diagnosis/objects",
     diagnosisObjects,
@@ -353,7 +356,7 @@ function RemoteObjectTable({ state, group }: { state: PromotionState; group: Obj
     state.invalid,
     [],
     false,
-    state.businessReady && search === settledSearch,
+    state.businessReady,
     { group, search },
   );
   useEffect(() => {

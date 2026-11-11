@@ -155,7 +155,7 @@ it("打开后只读专用状态，物理来源一行并可查看不同用途日�
   fireEvent.click(dialog.getByRole("tab", { name: "平台处理" }));
   expect(dialog.getByText("商品评分")).toBeTruthy();
   expect(dialog.getByText("等待重算")).toBeTruthy();
-  fireEvent.click(dialog.getByRole("button", { name: "Close" }));
+  fireEvent.click(dialog.getByRole("button", { name: "关闭数据更新状态" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
@@ -265,7 +265,7 @@ it("未打开弹窗也提示全局同步失败，查看和关闭不会清除未�
   await screen.findByLabelText("数据更新异常");
   fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
   await screen.findByText("最近同步失败");
-  fireEvent.click(screen.getByRole("button", { name: "Close" }));
+  fireEvent.click(screen.getByRole("button", { name: "关闭数据更新状态" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(screen.getByLabelText("数据更新异常")).toBeTruthy();
 });
@@ -347,7 +347,7 @@ it("异常标在对应行，顶部轻量定位能越过筛选并展开明细，�
   expect(dialog.queryByLabelText("来源异常：聚水潭销售 · 已发货 / 已取消")).toBeNull();
   expect(dialog.queryByText(/个来源更新异常/)).toBeNull();
   fireEvent.click(dialog.getByRole("radio", { name: "售后分析" }));
-  fireEvent.click(dialog.getByRole("button", { name: "查看1项来源异常" }));
+  fireEvent.click(dialog.getByRole("button", { name: "同步失败 1 项" }));
   expect(dialog.getByLabelText("来源异常：店铺日经营")).toBeTruthy();
   expect(
     dialog.getByText("失败原因尚未确认。已有成功数据仍可使用，请以数据日期为准。"),
@@ -365,10 +365,256 @@ it("平台处理异常同样标行并可定位解释，不改变等待重算的�
   vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
   mount();
   fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
-  await screen.findByRole("button", { name: "查看1项处理异常" });
-  fireEvent.click(screen.getByRole("button", { name: "查看1项处理异常" }));
+  await screen.findByRole("button", { name: "处理失败 1 项" });
+  fireEvent.click(screen.getByRole("button", { name: "处理失败 1 项" }));
   expect(screen.getByLabelText("处理异常：商品评分")).toBeTruthy();
   expect(screen.getByText(/影响页面：商品数据/)).toBeTruthy();
+});
+
+it("无记录只作数据说明，不计故障或红点，可独立定位店铺日期", async () => {
+  const data = payload();
+  const history = {
+    state: "gaps",
+    window_start: "2026-10-11",
+    window_end: "2026-11-09",
+    checked_through: "2026-11-09",
+    checked_at: "2026-11-10T02:00:00Z",
+    missing_count: 2,
+    missing_date_count: 2,
+    groups: [{ shop_id: "spigf", shop_name: "官方店", dates: ["2026-10-21", "2026-11-09"] }],
+  };
+  data.data.sources = [{ ...row, history } as typeof row];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: /数据更新状态/ }));
+  fireEvent.click(await screen.findByRole("button", { name: "部分日期无记录：1 个来源" }));
+  expect(await screen.findByText("部分日期无记录")).toBeTruthy();
+  expect(screen.getByText(/2026-10-11 至 2026-11-09/)).toBeTruthy();
+  expect(screen.getByText(/官方店：/)).toBeTruthy();
+  expect(screen.queryByText(/平台接收未成功/)).toBeNull();
+  expect(screen.queryByLabelText("数据更新异常")).toBeNull();
+  expect(screen.queryByLabelText(`来源异常：${row.name}`)).toBeNull();
+  expect(screen.queryByText(/共.*项异常/)).toBeNull();
+  expect(screen.getByLabelText(`记录缺失：${row.name}`)).toBeTruthy();
+  expect(document.querySelector(".m6-update-badge .ant-badge-dot")).toBeNull();
+});
+
+it("新变化等待接收与旧业务日期不算失败，实际检查失败单列而不冒充同步失败", async () => {
+  const data = payload();
+  data.data.sources = [
+    {
+      ...row,
+      id: "waiting",
+      platform_state: "pending",
+      upstream: { ...row.upstream, state: "changed" },
+      datasets: [{ ...dataset, date: "2026-10-20" }],
+    },
+    { ...row, id: "checking", upstream: { ...row.upstream, state: "failed" } },
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  fireEvent.click(await screen.findByRole("button", { name: "检查失败 1 项" }));
+  expect(screen.queryByRole("button", { name: /同步失败 \d/ })).toBeNull();
+  expect(screen.getByText(/上游检查未成功/)).toBeTruthy();
+  expect(screen.queryByText(/平台接收未成功/)).toBeNull();
+  expect(screen.queryByText(/并发限制/)).toBeNull();
+});
+
+it("更新延迟独立黄色提醒并定位依据，不改同步成功或把无记录当失败", async () => {
+  const data = payload();
+  data.data.sources = [
+    {
+      ...row,
+      timeliness: {
+        state: "delayed",
+        baseline_updated_at: "2026-11-09 09:30:00",
+        expected_by: "2026-11-10 10:30:00",
+        observed_at: "2026-11-10T02:50:00Z",
+      },
+    } as typeof row,
+    { ...row, id: "unknown", name: "缺少时间依据", timeliness: { state: "unknown" } } as typeof row,
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  await screen.findByLabelText("上游更新延迟");
+  expect(document.querySelector(".m6-update-badge-delayed .ant-badge-dot")).toBeTruthy();
+  expect(screen.queryByLabelText("数据更新异常")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  fireEvent.click(await screen.findByRole("button", { name: "更新延迟 1 项" }));
+  expect(screen.getByLabelText(`更新延迟：${row.name}`)).toBeTruthy();
+  expect(screen.getByText(/昨日上游标注：2026-11-09 09:30:00/)).toBeTruthy();
+  expect(screen.getByText(/今日判断期限：2026-11-10 10:30:00/)).toBeTruthy();
+  expect(screen.queryByText("缺少时间依据")).toBeNull();
+  expect(screen.queryByRole("button", { name: /同步失败/ })).toBeNull();
+  expect(screen.queryByLabelText(`来源异常：${row.name}`)).toBeNull();
+  data.data.sources = [{ ...row, timeliness: { state: "updated" } } as typeof row];
+  fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
+  await waitFor(() => expect(screen.queryByLabelText("上游更新延迟")).toBeNull());
+  expect(screen.queryByLabelText(`更新延迟：${row.name}`)).toBeNull();
+  expect(screen.queryByRole("button", { name: "更新延迟 1 项" })).toBeNull();
+  await waitFor(() => expect(document.querySelector(".m6-update-badge .ant-badge-dot")).toBeNull());
+});
+
+it("无依据和超时未核对保持中性，不显示延迟报警", async () => {
+  const data = payload();
+  data.data.sources = [
+    { ...row, timeliness: { state: "unknown" } } as typeof row,
+    {
+      ...row,
+      id: "waiting",
+      timeliness: { state: "awaiting_check", expected_by: "2026-11-10 10:30:00" },
+    } as typeof row,
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  expect(await screen.findByText("暂无可靠时间依据")).toBeTruthy();
+  expect(screen.getByText("等待核对")).toBeTruthy();
+  expect(screen.queryByLabelText("上游更新延迟")).toBeNull();
+  expect(screen.queryByRole("button", { name: /更新延迟 \d/ })).toBeNull();
+  expect(screen.queryByRole("img", { name: /^更新延迟：/ })).toBeNull();
+});
+
+it("更新说明默认收起，展开后仍能查看真实计划和时效规则", async () => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    async () => new Response(JSON.stringify(payload())),
+  );
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await screen.findByText("聚水潭销售 · 已发货 / 已取消");
+  const disclosure = screen.getByText("更新说明").closest("details");
+  expect(disclosure).toBeTruthy();
+  expect(disclosure?.open).toBe(false);
+  fireEvent.click(screen.getByText("更新说明"));
+  expect(disclosure?.open).toBe(true);
+  expect(within(disclosure!).getByText(/当前每 15 分钟检查一次/)).toBeTruthy();
+  expect(within(disclosure!).getByText(/昨天更新时间/)).toBeTruthy();
+});
+
+it("读取未完成和筛选展开后均可关闭，晚响应不能重新打开弹窗", async () => {
+  let complete!: (response: Response) => void;
+  const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await waitFor(() => expect(fetcher).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "关闭数据更新状态" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  complete(new Response(JSON.stringify(payload())));
+  await screen.findByLabelText("数据更新异常");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  fetcher.mockImplementation(async () => new Response(JSON.stringify(payload())));
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  fireEvent.click(await screen.findByRole("button", { name: "同步失败 1 项" }));
+  expect(screen.getByRole("button", { name: "收起来源详情" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "关闭数据更新状态" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("刷新进行中可关闭，重新打开后Escape也可关闭", async () => {
+  const fetcher = vi
+    .spyOn(globalThis, "fetch")
+    .mockImplementation(async () => new Response(JSON.stringify(payload())));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await screen.findByText("聚水潭销售 · 已发货 / 已取消");
+  let complete!: (response: Response) => void;
+  fetcher.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
+  await waitFor(() => expect(complete).toBeTypeOf("function"));
+  fireEvent.click(screen.getByRole("button", { name: "关闭数据更新状态" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  complete(new Response(JSON.stringify(payload())));
+  fetcher.mockImplementation(async () => new Response(JSON.stringify(payload())));
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  fireEvent.click(screen.getByRole("tab", { name: "平台处理" }));
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape", keyCode: 27 });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("故障、延迟与缺记录并存时入口红点优先，恢复后降为黄点，只有缺记录时熄灭", async () => {
+  const data = payload();
+  const history = {
+    state: "gaps",
+    missing_count: 1,
+    missing_date_count: 1,
+    groups: [{ shop_id: "one", shop_name: "官方店", dates: ["2026-11-09"] }],
+  };
+  const delayedSource = {
+    ...row,
+    id: "delayed-source",
+    name: "另一延迟来源",
+    timeliness: { state: "delayed" },
+  } as typeof row;
+  data.data.sources = [{ ...row, platform_state: "failed", history } as typeof row, delayedSource];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  await screen.findByLabelText("数据更新异常");
+  expect(document.querySelector(".m6-update-badge .ant-badge-dot")).toBeTruthy();
+  expect(document.querySelector(".m6-update-badge-delayed")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  expect(await screen.findByLabelText(`来源异常：${row.name}`)).toBeTruthy();
+  expect(screen.getByLabelText(`记录缺失：${row.name}`)).toBeTruthy();
+  expect(screen.getByLabelText("更新延迟：另一延迟来源")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "部分日期无记录：1 个来源" }));
+  expect(screen.getByText(/官方店：/)).toBeTruthy();
+  data.data.sources = [{ ...row, history } as typeof row, delayedSource];
+  fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
+  await waitFor(() => expect(screen.queryByLabelText("数据更新异常")).toBeNull());
+  expect(screen.queryByLabelText(`来源异常：${row.name}`)).toBeNull();
+  expect(screen.getByLabelText(`记录缺失：${row.name}`)).toBeTruthy();
+  expect(document.querySelector(".m6-update-badge-delayed .ant-badge-dot")).toBeTruthy();
+  data.data.sources = [{ ...row, history } as typeof row];
+  fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
+  await waitFor(() => expect(document.querySelector(".m6-update-badge .ant-badge-dot")).toBeNull());
+  expect(screen.getByLabelText(`记录缺失：${row.name}`)).toBeTruthy();
+  data.data.sources = [
+    {
+      ...row,
+      history: {
+        ...history,
+        state: "observed",
+        missing_count: 0,
+        missing_date_count: 0,
+        groups: [],
+      },
+    } as typeof row,
+  ];
+  fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
+  await waitFor(() => expect(screen.queryByLabelText(`记录缺失：${row.name}`)).toBeNull());
+  expect(screen.queryByRole("button", { name: "部分日期无记录：1 个来源" })).toBeNull();
+});
+
+it("旧检查的缺记录灰点注明上次结果，未知及未发现缺口不标灰点", async () => {
+  const data = payload();
+  data.data.sources = [
+    { ...row, history: { state: "stale", missing_count: 2, missing_date_count: 1 } } as typeof row,
+    { ...row, id: "pending", name: "尚未检查", history: { state: "pending" } } as typeof row,
+    {
+      ...row,
+      id: "observed",
+      name: "已有记录",
+      history: { state: "observed", missing_count: 0 },
+    } as typeof row,
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: /数据更新状态/ }));
+  expect(await screen.findByLabelText(`上次检查记录缺失：${row.name}`)).toBeTruthy();
+  expect(screen.getByText(/上次结果/)).toBeTruthy();
+  expect(screen.queryByLabelText("记录缺失：尚未检查")).toBeNull();
+  expect(screen.queryByLabelText("记录缺失：已有记录")).toBeNull();
+  expect(document.querySelector(".m6-update-badge .ant-badge-dot")).toBeNull();
 });
 
 it("历史输入待恢复时保留可用数据，不误报上游检查失败", async () => {
@@ -426,9 +672,30 @@ it("周对账失败单独提醒，保留数据可用状态和下一次重试时�
   const dialog = within(screen.getByRole("dialog"));
   expect(await dialog.findByText("数据可用")).toBeTruthy();
   expect(dialog.getByText("周对账未完成")).toBeTruthy();
-  fireEvent.click(dialog.getByRole("button", { name: "查看1项来源异常" }));
+  fireEvent.click(dialog.getByRole("button", { name: "周对账失败 1 项" }));
   expect(dialog.getByText("近7日记录数、业务日期及来源时间；历史修订按每周对账核对")).toBeTruthy();
   expect(dialog.getByText("下一次重试")).toBeTruthy();
   expect(dialog.getByText("2026/11/8 17:07:00")).toBeTruthy();
   expect(dialog.queryByText(/平台接收未成功/)).toBeNull();
+  expect(dialog.queryByRole("button", { name: /^(同步|检查)失败/ })).toBeNull();
+});
+
+it("更新说明保留普通16:10检查与独立的周日对账和重试计划", async () => {
+  const data = payload();
+  Object.assign(data.data.monitor, {
+    source_schedule_enabled: true,
+    warehouse_times: ["15:10", "16:10"],
+    feishu_times: ["08:20", "10:10"],
+    reconciliation_time: "17:00",
+    reconciliation_retry_seconds: 300,
+  });
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  const disclosure = (await screen.findByText("更新说明")).closest("details")!;
+  expect(disclosure.open).toBe(false);
+  fireEvent.click(within(disclosure).getByText("更新说明"));
+  expect(await within(disclosure).findByText(/16:10 为普通检查/)).toBeTruthy();
+  expect(within(disclosure).getByText(/每周日 17:00 对账/)).toBeTruthy();
+  expect(within(disclosure).getByText(/失败结束后 5 分钟重试/)).toBeTruthy();
 });

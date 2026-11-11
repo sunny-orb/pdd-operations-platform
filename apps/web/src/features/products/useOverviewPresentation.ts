@@ -5,7 +5,7 @@ import type { Scope } from "./scope";
 type Snapshot = { data: Board; scope: Scope; version: string; key: string };
 
 /** 总览新结果到达前保留同版本的上次完整展示；数值和它的筛选说明始终一起切换。
- * 调用方必须显示更新/失败状态，不能把保留结果解释为新筛选已完成。
+ * 更新期间保留原范围说明并标记aria-busy；失败提供反馈，不把旧结果解释为新筛选已完成。
  */
 export function useOverviewPresentation(data: Board | undefined, scope: Scope, version: string) {
   const key = JSON.stringify(scope);

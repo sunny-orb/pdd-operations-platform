@@ -88,7 +88,7 @@ function RecordIssues({ channel, name }: { channel: Channel; name: (id: string) 
   );
 }
 
-/** 只展示影响本期指标的缺失或更新失败；正常数据及历史补充不单独占用页面。 */
+/** 只展示影响本期指标的缺失或更新失败；记录缺失不视为故障，正常数据及历史补充不单独占用页面。 */
 export const PromotionDetails = memo(function PromotionDetails({
   data,
   sources,
@@ -113,9 +113,12 @@ export const PromotionDetails = memo(function PromotionDetails({
   const name = (id: string) => shops?.find((shop) => shop.shop_id === id)?.display_name ?? id;
 
   return (
-    <aside className="promotion-source sales-promotion-details" aria-label="推广数据提示">
+    <aside
+      className={`promotion-source sales-promotion-details${failed.length ? " has-update-failure" : ""}`}
+      aria-label="推广数据提示"
+    >
       {missing.length > 0 && (
-        <p className="promotion-impact">本期推广数据不完整：{impactSummary(data, missing)}。</p>
+        <p className="promotion-impact">本期推广数据说明：{impactSummary(data, missing)}。</p>
       )}
       {failed.map((channel) => (
         <p key={channel.code} className="source-state-failed">
@@ -124,7 +127,7 @@ export const PromotionDetails = memo(function PromotionDetails({
         </p>
       ))}
       <details className="promotion-details">
-        <summary>查看异常明细</summary>
+        <summary>查看数据明细</summary>
         <p className="promotion-period">
           {data.coverage.window_start} 至 {data.coverage.window_end}
           {shopName && ` · ${shopName}`}

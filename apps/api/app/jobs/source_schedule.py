@@ -332,6 +332,11 @@ def run_scheduled_sources(
         from app.modules.data_status.repository import refresh_platform_snapshots
 
         refresh_platform_snapshots(c)
+        from app.modules.data_status.history_coverage import refresh_history_coverage
+
+        refresh_history_coverage(
+            c, now=clock(), warehouse_times=warehouse_times, feishu_times=feishu_times
+        )
         current = store.read(c)
         failures = weekly_failed | {
             code

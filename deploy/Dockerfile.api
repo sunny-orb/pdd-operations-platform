@@ -6,7 +6,8 @@ RUN pip install --no-cache-dir -r /tmp/requirements.lock && useradd --uid 10001 
 COPY apps/api/app apps/api/app
 COPY apps/api/migrations_v2 apps/api/migrations_v2
 COPY apps/api/alembic-v2.ini apps/api/alembic-v2.ini
-COPY scripts/render-db-schema.py scripts/init-deployment-db.py scripts/sync-project.py scripts/archive-maintenance.py scripts/
+COPY scripts/render-db-schema.py scripts/init-deployment-db.py scripts/upgrade-deployment-db.py \
+     scripts/sync-project.py scripts/archive-maintenance.py scripts/
 COPY config config
 RUN mkdir -p /app/var && chown app:app /app/var
 USER app

@@ -20,7 +20,7 @@
 
 ### 首次部署使用
 
-1. 准备PostgreSQL17空库及数据库所有者连接，按环境配置`pdd_app`／`pdd_ingest`独立最小权限角色与口令。凭据不写进SQL或Git。此文件不安装服务、不创建集群角色、不接收业务数据。此处为本机多角色交付。公司部署现用独立派生文件`schema-songbing.sql`及默认只读的`init-deployment-db.py`维护入口，允许保留monitor及登记的扩展对象，账号及数据库名明确限定为songbing/pdd_operations；具体首次初始化、凭据和发布步骤见[部署方案](../implementation/deployment.md)。
+1. 准备PostgreSQL17空库及数据库所有者连接，按环境配置`pdd_app`／`pdd_ingest`独立最小权限角色与口令。凭据不写进SQL或Git。此文件不安装服务、不创建集群角色、不接收业务数据。此处为本机多角色交付。公司部署现用独立派生文件`schema-songbing.sql`及默认只读的`init-deployment-db.py`维护入口，允许保留monitor及登记的扩展对象，当前派生SQL限定songbing/pdd_dashboard。具体首次初始化、凭据和发布步骤见[部署方案](../implementation/deployment.md)。
 2. 开发侧修改迁移和字段设计后运行`npm run db:schema`；`npm run check`自动执行`check:db-schema`，漏生成或迁移变化会失败。
 3. 在已配置好的数据库所有者连接下执行一次（示例使用PG服务配置名，不含凭据）：
 

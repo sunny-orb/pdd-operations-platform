@@ -7,6 +7,7 @@ from decimal import ROUND_HALF_UP, Decimal
 import sqlalchemy as sa
 
 from app.modules.promotion.metrics import store_metrics
+from app.modules.record_coverage import missing_shop_days
 
 from .contracts import SalesError
 from .datasets import READ_SPECS as SPECS
@@ -173,10 +174,7 @@ def enrich_metrics(s, q, data, shops):
     data["refund_coverage"] = dict(
         state="observed" if "shop_refunds" in s["versions"] else "not_connected",
         missing_record_dates=[
-            str(day)
-            for shop in shops
-            for day in days(q.date_from, q.date_to)
-            if (shop, day) not in by_key
+            str(day) for shop, day in missing_shop_days(by_key, q.date_from, q.date_to, shops)
         ]
         if "shop_refunds" in s["versions"]
         else [],
@@ -240,14 +238,13 @@ def enrich_metrics(s, q, data, shops):
     channels = []
     all_rows = []
     for code in ("shop_channel_product_promotion", "shop_channel_star_shop"):
-        applicable = [x for x in shops if code != "shop_channel_star_shop" or x == "spigf"]
+        applicable = [x for x in shops if x in {SHOPS[s][0] for s in SPECS[code].shop_ids}]
         if not applicable:
             continue
         rows = scoped_rows(s, code, q, applicable)
         all_rows.extend(rows)
         metrics = store_metrics(rows, include_star=code == "shop_channel_star_shop")
         observed = {(r["shop_id"], r["business_date"]) for r in rows}
-        expected = (q.date_to - q.date_from).days + 1
         channels.append(
             dict(
                 code=code,
@@ -259,7 +256,9 @@ def enrich_metrics(s, q, data, shops):
                 revenue=promotion_value(metrics, "revenue", money=True),
                 ctr=promotion_value(metrics, "ctr"),
                 roi=promotion_value(metrics, "roi"),
-                missing_shop_days=expected * len(applicable) - len(observed),
+                missing_shop_days=len(
+                    missing_shop_days(observed, q.date_from, q.date_to, applicable)
+                ),
                 record_issues=promotion_record_issues(rows, q.date_from, q.date_to, applicable),
                 null_counts={
                     f: sum(r[f] is None for r in rows)

@@ -11,21 +11,14 @@ const levels = ["全部", "P0", "P1", "P2", "未评级"];
 export const AlertCenter = memo(function AlertCenter({
   observations,
   available,
-  preview,
-  showAll,
-  onShowAllChange,
 }: {
   observations: readonly AlertObject[];
   available: boolean;
-  preview: readonly AlertObject[];
-  showAll: boolean;
-  onShowAllChange: (value: boolean) => void;
 }) {
   const [level, setLevel] = useState("全部");
   const [page, setPage] = useState(1);
-  const visible = !showAll
-    ? preview
-    : level === "全部"
+  const visible =
+    level === "全部"
       ? observations
       : observations.filter((item) =>
           level === "未评级"
@@ -45,40 +38,26 @@ export const AlertCenter = memo(function AlertCenter({
           <h2>经营预警中心</h2>
         </div>
         <div className="m6-list-tools">
-          {showAll && (
-            <div className="m6-level-tabs" role="group" aria-label="来源优先级">
-              {levels.map((value) => (
-                <Button
-                  key={value}
-                  autoInsertSpace={false}
-                  type={level === value ? "primary" : "default"}
-                  aria-pressed={level === value}
-                  onClick={() => {
-                    setLevel(value);
-                    setPage(1);
-                  }}
-                >
-                  {value}
-                </Button>
-              ))}
-            </div>
-          )}
-          <Button
-            onClick={() => {
-              setLevel("全部");
-              setPage(1);
-              onShowAllChange(!showAll);
-            }}
-            aria-expanded={showAll}
-          >
-            {showAll ? "返回首页关注" : "查看全部预警"}
-          </Button>
+          <div className="m6-level-tabs" role="group" aria-label="来源优先级">
+            {levels.map((value) => (
+              <Button
+                key={value}
+                autoInsertSpace={false}
+                type={level === value ? "primary" : "default"}
+                aria-pressed={level === value}
+                onClick={() => {
+                  setLevel(value);
+                  setPage(1);
+                }}
+              >
+                {value}
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
       <p className="m6-alert-note">
-        {showAll
-          ? `已取得 ${available || observations.length ? observations.length : "—"} 条对象提示；按来源优先级筛选，未映射记录单列。`
-          : "首页关注：按来源顺序最多展示六项，完整清单可按需查看。"}
+        {`已取得 ${available || observations.length ? observations.length : "—"} 条对象提示；按来源优先级筛选，未映射记录单列。`}
         <a href="#definitions">查看口径 →</a>
       </p>
       <div className="m6-alert-list" role="list" aria-label="预警列表">
@@ -176,7 +155,7 @@ export const AlertCenter = memo(function AlertCenter({
         )}
       </div>
       <div className="m6-alert-pagination">
-        {showAll && visible.length > PAGE_SIZE && (
+        {visible.length > PAGE_SIZE && (
           <nav aria-label="预警分页">
             <Pagination
               current={currentPage}

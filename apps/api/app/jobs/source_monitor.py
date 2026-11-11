@@ -145,6 +145,9 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
             from app.modules.data_status.repository import refresh_platform_snapshots
 
             refresh_platform_snapshots(c)
+            from app.modules.data_status.history_coverage import refresh_history_coverage
+
+            refresh_history_coverage(c, now=clock(), source_ids=probes)
             with c.begin():
                 checked_rows = (
                     c.execute(sa.select(table).where(table.c.source_id.in_(tuple(observed))))

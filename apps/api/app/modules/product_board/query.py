@@ -232,7 +232,7 @@ def risk_feed(repo, q):
         baseline_period=dict(start=q.end - timedelta(days=7), end=q.end - timedelta(days=1)),
         trend_period=dict(start=q.end - timedelta(days=6), end=q.end),
         generation_method="rules",
-        rule_version="product-risk-online-v1",
+        rule_version="product-risk-traffic-v2",
         impact_kind="estimated",
     )
 

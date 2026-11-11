@@ -208,9 +208,8 @@ it("总览慢加载保留指标、上方榜单及旧范围，成功后一起替�
       .hasAttribute("disabled"),
   ).toBe(true);
   expect(document.querySelector("#overview .m1-loading")).toBeNull();
-  expect(within(document.getElementById("overview")!).getByRole("status").textContent).toMatch(
-    /上次结果/,
-  );
+  expect(within(document.getElementById("overview")!).queryByRole("status")).toBeNull();
+  expect(document.querySelector('#overview [aria-busy="true"]')).not.toBeNull();
   await respond(1, boardData("250", "1"));
   await waitFor(() => expect(amount()).toBe("¥250"));
   expect(document.querySelector("#overview .metric")).toBe(metricNode);

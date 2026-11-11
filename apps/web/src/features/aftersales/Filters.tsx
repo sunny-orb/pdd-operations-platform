@@ -1,10 +1,13 @@
-import { Button, Input, Segmented, Select } from "antd";
+import { useState } from "react";
+import { Button, Segmented, Select } from "antd";
+import { SearchInput } from "../../shared/components/SearchInput";
 import { ReloadOutlined } from "@ant-design/icons";
 import type { AftersalesState } from "./data";
 import type { Focus } from "./state";
 /** 原售后侧栏筛选进入正文；共享左栏仅承担页内目录。 */
 export function Filters({ state }: { state: AftersalesState }) {
   const { scope } = state;
+  const [searchReset, setSearchReset] = useState(0);
   const data = state.options.data?.data;
   return (
     <section className="m5-panel m5-filters" id="aftersales-filters" aria-label="售后分析筛选条件">
@@ -39,13 +42,20 @@ export function Filters({ state }: { state: AftersalesState }) {
       </label>
       <label className="m5-search">
         单款/原因搜索
-        <Input
+        <SearchInput
           type="search"
           aria-label="单款/原因搜索"
           placeholder="款式编码、商品名、原因"
           allowClear
           value={scope.keyword}
-          onChange={(event) => state.change({ keyword: event.target.value })}
+          resetKey={JSON.stringify([
+            searchReset,
+            state.searchRestoreKey,
+            scope.report,
+            scope.category,
+            scope.focus,
+          ])}
+          onSearch={(keyword) => state.change({ keyword })}
         />
       </label>
       <div className="m5-focus">
@@ -61,7 +71,13 @@ export function Filters({ state }: { state: AftersalesState }) {
           onChange={(focus) => state.change({ focus: focus as Focus })}
         />
       </div>
-      <Button icon={<ReloadOutlined aria-hidden />} onClick={state.reset}>
+      <Button
+        icon={<ReloadOutlined aria-hidden />}
+        onClick={() => {
+          setSearchReset((n) => n + 1);
+          state.reset();
+        }}
+      >
         重置筛选
       </Button>
       {data?.note && <p className="m5-filter-note">{data.note}</p>}

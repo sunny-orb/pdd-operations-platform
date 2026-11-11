@@ -4,6 +4,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,8 @@ spec = importlib.util.spec_from_file_location(
 )
 renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
+
+from migrations_v2.company_db_objects import rpa_manifest, verify_application
 
 
 def initialize(connection, *, database: str, account: str, apply: bool = False) -> str:
@@ -47,42 +50,15 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
             ).fetchall()
             if versions != [(head,)]:
                 raise ValueError("DEPLOY_REVISION_MISMATCH")
-            # 版本标记不足以证明结构完整；验证关键目录以及运行账号对象归属。
-            tables, columns, owned = connection.execute(
-                renderer.EXTENSION_MEMBERS
-                + "SELECT count(DISTINCT c.oid), count(a.attnum), bool_and(c.relowner=current_user::regrole) "
-                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-                "JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped "
-                "WHERE n.nspname='public' AND c.relkind='r' AND c.relname <> 'alembic_version_v2' "
-                "AND NOT EXISTS (SELECT 1 FROM extension_members e "
-                "WHERE e.classid='pg_catalog.pg_class'::regclass AND e.objid=c.oid AND e.objsubid=0)"
-            ).fetchone()
-            if (tables, columns, owned) != (46, 719, True):
-                raise ValueError("DEPLOY_SCHEMA_MISMATCH")
-            views = connection.execute(
-                "SELECT c.relname,count(a.attnum),bool_and(c.relowner=current_user::regrole) "
-                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
-                "JOIN pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped "
-                "WHERE n.nspname='public' AND c.relkind='v' "
-                "AND c.relname=ANY(%s) GROUP BY c.relname ORDER BY c.relname",
-                (
-                    [
-                        "read_product_daily_facts",
-                        "read_product_promotion_records",
-                        "read_product_region_records",
-                        "read_product_sales_records",
-                        "read_return_records",
-                    ],
-                ),
-            ).fetchall()
-            if views != [
-                ("read_product_daily_facts", 27, True),
-                ("read_product_promotion_records", 38, True),
-                ("read_product_region_records", 27, True),
-                ("read_product_sales_records", 23, True),
-                ("read_return_records", 27, True),
-            ]:
-                raise ValueError("DEPLOY_SCHEMA_MISMATCH")
+            connection.execute("SET LOCAL search_path=pg_catalog,public")
+            owner = (
+                "pdd_admin"
+                if account == "pdd_app"
+                and re.fullmatch(r"pdd_operations_v2_test_[0-9a-f]{12}", database)
+                else "dbrole_admin"
+            )
+            manifest = rpa_manifest(connection, owner=owner)
+            verify_application(connection, head, has_rpa=manifest is not None)
             return "already_initialized"
         # 与派生SQL共用前置检查；只读检查不申请事务写锁。
         preflight = renderer.deployment_preflight(account, database)
@@ -94,7 +70,7 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
         if not apply:
             return "empty"
         sql = renderer.render_sql(runtime_account=account, database=database)
-        body = sql[sql.index("BEGIN;") + len("BEGIN;") : sql.rindex("COMMIT;")]
+        body = renderer.transaction_body(sql[sql.index("BEGIN;") :].strip())
         connection.execute(body, prepare=False)
         return "initialized"
 

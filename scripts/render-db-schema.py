@@ -19,22 +19,43 @@ OUTPUT = ROOT / "docs/database-schema/schema.sql"
 DEPLOY_OUTPUT = ROOT / "docs/database-schema/schema-songbing.sql"
 
 
-# 只沿扩展成员(e)及不可独立存在的内部实现(i)识别归属。
-# 普通/自动依赖(n/a/x)并不代表扩展成员，不能据此放行业务对象。
-EXTENSION_MEMBERS = """WITH RECURSIVE extension_members(classid,objid,objsubid) AS (
-  SELECT d.classid,d.objid,d.objsubid
-  FROM pg_catalog.pg_depend d
-  JOIN pg_catalog.pg_extension e ON e.oid=d.refobjid
-  WHERE d.refclassid='pg_catalog.pg_extension'::regclass
-    AND d.deptype='e' AND d.refobjsubid=0
-  UNION
-  SELECT d.classid,d.objid,d.objsubid
-  FROM pg_catalog.pg_depend d
-  JOIN extension_members e
-    ON d.refclassid=e.classid AND d.refobjid=e.objid AND d.refobjsubid=e.objsubid
-  WHERE d.deptype='i'
+from migrations_v2.company_db_objects import (
+    EXTENSION_MEMBERS,
+    START_REVISION,
+    TARGET_REVISION,
 )
-"""
+
+DEPLOY_DATABASE = "pdd_dashboard"
+# 审定的离线12:15原始事务体，包含待剥离的47条本机授权。
+UPGRADE_SQL_SHA256 = "a72bca41c2053e7f980074f4540647f8cc9f2f163dd81797dd899e4dc1266d5a"
+
+
+def transaction_body(sql: str) -> str:
+    """只接受Alembic单事务外壳；实际边界交给调用连接。"""
+    if not sql.startswith("BEGIN;") or not sql.endswith("COMMIT;"):
+        raise RuntimeError("迁移输出事务边界变化，须先核对生成器")
+    return sql[len("BEGIN;") : -len("COMMIT;")]
+
+
+def render_upgrade_sql() -> str:
+    """固定生成12→15增量，仅剥离已审定的本机角色授权。"""
+    output = io.StringIO()
+    config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
+    if ScriptDirectory.from_config(config).get_current_head() != TARGET_REVISION:
+        raise RuntimeError("DEPLOY_MIGRATION_HEAD_CHANGED")
+    command.upgrade(config, f"{START_REVISION}:{TARGET_REVISION}", sql=True)
+    body = transaction_body(output.getvalue().strip())
+    if hashlib.sha256(body.encode()).hexdigest() != UPGRADE_SQL_SHA256:
+        raise RuntimeError("DEPLOY_MIGRATION_SQL_CHANGED")
+    body, count = re.subn(
+        r"(?m)^GRANT (?:SELECT|INSERT|UPDATE\(state\)|SELECT,INSERT,UPDATE) "
+        r"ON public\.[a-z_]+ TO pdd_(?:app|ingest);\n",
+        "",
+        body,
+    )
+    if count != 47 or re.search(r"\bpdd_(?:app|ingest)\b", body):
+        raise RuntimeError("DEPLOY_MIGRATION_PERMISSIONS_CHANGED")
+    return body
 
 
 def deployment_preflight(account: str, database: str = "pdd_operations") -> str:
@@ -142,6 +163,7 @@ def render_sql(
             API / "migrations_v2/env.py",
             API / "alembic-v2.ini",
             Path(__file__).resolve(),
+            API / "migrations_v2/company_db_objects.py",
         ]
     )
     digest = hashlib.sha256()
@@ -151,9 +173,7 @@ def render_sql(
     sql = output.getvalue().strip()
     if target == "head":
         # Alembic单事务离线输出：在同一事务内加前置保护及部署运行权限。
-        if not sql.startswith("BEGIN;") or not sql.endswith("COMMIT;"):
-            raise RuntimeError("迁移输出事务边界变化，须先核对生成器")
-        body = sql[len("BEGIN;") : -len("COMMIT;")]
+        body = transaction_body(sql)
         if runtime_account is None:
             sql = "BEGIN;\n\n" + PREFLIGHT + body
             sql += runtime_permissions() + "\n\nCOMMIT;"
@@ -191,7 +211,7 @@ def render_sql(
         "-- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。\n"
         "-- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。\n"
         if runtime_account is None
-        else f"-- 公司单账号：{runtime_account}；应用结构须空；保留monitor及登记的扩展成员。\n"
+        else f"-- 公司单账号：{runtime_account}/{database}；应用结构须空；保留monitor及登记的扩展成员。\n"
         "-- 不创建角色、不修改数据库或monitor权限；应用对象由执行账号拥有。\n"
     )
     header = (
@@ -214,7 +234,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     outputs = {
         OUTPUT: render_sql(),
-        DEPLOY_OUTPUT: render_sql(runtime_account="songbing"),
+        DEPLOY_OUTPUT: render_sql(runtime_account="songbing", database=DEPLOY_DATABASE),
     }
     if args.check:
         if any(

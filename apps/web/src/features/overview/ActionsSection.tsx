@@ -105,18 +105,12 @@ const columns: TableColumnsType<ActionObject> = [
 /** 对完整来源建议做展示分页；不改建议内容、处理状态、定位或全量待办数。 */
 export const ActionsSection = memo(function ActionsSection({
   actions,
-  preview,
   total,
-  showAll,
-  onShowAllChange,
   coverage,
 }: {
   coverage: readonly ObservationCoverage[];
   actions: readonly ActionObject[];
-  preview: readonly ActionObject[];
   total: number | null;
-  showAll: boolean;
-  onShowAllChange: (value: boolean) => void;
 }) {
   const failed = coverage.filter((item) => item.status === "failed");
   const retained = coverage.filter((item) => item.status === "retained");
@@ -125,16 +119,13 @@ export const ActionsSection = memo(function ActionsSection({
     ? "来源建议读取失败，当前清单不代表没有待处理事项"
     : loading
       ? "正在读取来源建议"
-      : showAll
-        ? "尚未取得可核来源建议"
-        : "首页关注对象暂无来源建议";
+      : "尚未取得可核来源建议";
   const [detailId, setDetailId] = useState<string | null>(null);
-  const visible = showAll ? actions : preview;
   const detail = actions.find((item) => item.id === detailId);
   const [page, setPage] = useState(1);
-  const currentPage = Math.min(page, Math.max(1, Math.ceil(visible.length / PAGE_SIZE)));
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(actions.length / PAGE_SIZE)));
   if (page !== currentPage) setPage(currentPage);
-  const rows = visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const rows = actions.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   return (
     <section className="m6-section m6-actions-section" id="actions">
@@ -143,18 +134,9 @@ export const ActionsSection = memo(function ActionsSection({
           <p className="m6-eyebrow">DAILY ACTIONS</p>
           <h2>本日经营动作</h2>
         </div>
-        <Button
-          onClick={() => {
-            setPage(1);
-            onShowAllChange(!showAll);
-          }}
-          aria-expanded={showAll}
-        >
-          {showAll ? "返回首页建议" : "查看全部建议"}
-        </Button>
       </div>
       <p className="m6-alert-note">
-        {showAll ? `当前清单 ${total ?? "—"} 条归并建议；` : "仅展示首页关注对象的建议；"}
+        {`当前清单 ${total ?? "—"} 条归并建议；`}
         核查后安排执行，未指定负责人及日期显示待分配。
         {failed.length > 0 &&
           ` ${failed.map((item) => sourceLabel(item.domain)).join("、")}来源建议读取失败。`}
@@ -190,12 +172,12 @@ export const ActionsSection = memo(function ActionsSection({
         locale={{ emptyText }}
       />
       <div className="m6-action-pagination">
-        {showAll && visible.length > PAGE_SIZE && (
+        {actions.length > PAGE_SIZE && (
           <nav aria-label="动作分页">
             <Pagination
               current={currentPage}
               pageSize={PAGE_SIZE}
-              total={visible.length}
+              total={actions.length}
               onChange={setPage}
               showSizeChanger={false}
               showLessItems

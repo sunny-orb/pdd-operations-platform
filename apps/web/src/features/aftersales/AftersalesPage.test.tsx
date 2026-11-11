@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 // 发布信号本身在shared及overview组合测试验证，本文件只控制领域响应顺序。
 vi.mock("../../shared/api/publishedVersions", () => ({
@@ -121,7 +121,20 @@ const overview = {
   category_actions: [],
   style_actions: [],
 };
-function mount(withRows = false, customReport = false) {
+function HistoryControls() {
+  const navigate = useNavigate();
+  return (
+    <>
+      <button onClick={() => void navigate(-1)}>测试后退</button>
+      <button onClick={() => void navigate(1)}>测试前进</button>
+    </>
+  );
+}
+function mount(
+  withRows = false,
+  customReport = false,
+  initialEntries = ["/aftersales?focus=quality"],
+) {
   const fetch = vi.fn(async (url: string) => {
     const p = new URL(url, "http://localhost").searchParams;
     const view = p.get("view") || "category";
@@ -168,14 +181,44 @@ function mount(withRows = false, customReport = false) {
   vi.stubGlobal("fetch", fetch);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <MemoryRouter initialEntries={["/aftersales?focus=quality"]}>
+    <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={client}>
+        <HistoryControls />
         <AftersalesPage />
       </QueryClientProvider>
     </MemoryRouter>,
   );
   return fetch;
 }
+it("同关键词的历史前进后退也取消未提交草稿，不覆盖恢复的标签", async () => {
+  const fetch = mount(false, false, ["/aftersales?view=category", "/aftersales?view=style"]);
+  await screen.findByText("style范围说明");
+  const box = screen.getByRole("searchbox", { name: "单款/原因搜索" }) as HTMLInputElement;
+  fireEvent.change(box, { target: { value: "未提交" } });
+  fireEvent.click(screen.getByText("测试后退"));
+  await screen.findByText("category范围说明");
+  expect(box.value).toBe("");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 650)));
+  expect(
+    fetch.mock.calls.some(([url]) => new URL(url, "http://localhost").searchParams.has("keyword")),
+  ).toBe(false);
+  fireEvent.change(box, { target: { value: "前进前草稿" } });
+  fireEvent.click(screen.getByText("测试前进"));
+  await screen.findByText("style范围说明");
+  expect(box.value).toBe("");
+});
+it("同页链接PUSH后退回初始历史项也取消草稿", async () => {
+  mount(false, false, ["/aftersales?view=style"]);
+  await screen.findByText("style范围说明");
+  fireEvent.click(screen.getByRole("link", { name: "售后分析" }));
+  await screen.findByText("category范围说明");
+  const box = screen.getByRole("searchbox", { name: "单款/原因搜索" }) as HTMLInputElement;
+  fireEvent.change(box, { target: { value: "未提交" } });
+  fireEvent.click(screen.getByText("测试后退"));
+  await screen.findByText("style范围说明");
+  expect(box.value).toBe("");
+});
+
 it("完整空态保留共享导航和正文筛选、九卡，缺数据不假零；重置保留标签与折叠", async () => {
   const user = userEvent.setup();
   mount();

@@ -51,8 +51,9 @@ def test_production_prepares_default_overview_on_startup_and_after_publish(
     original = product_board.overview
 
     def count_overview(repo, query):
-        calls.append(repo.token)
-        started.set()
+        calls.append((repo.token, query.start, query.end))
+        if query.start == query.end:
+            started.set()
         return original(repo, query)
 
     monkeypatch.setattr(product_board, "overview", count_overview)
@@ -60,13 +61,22 @@ def test_production_prepares_default_overview_on_startup_and_after_publish(
     monkeypatch.setattr(main, "PRODUCT_OVERVIEW_PREWARM_INTERVAL", 0.02, raising=False)
     app = create_app(Settings(_env_file=None, app_env="production", database_url=""))
     with TestClient(app) as client:
-        assert started.wait(3), "API启动应主动预计算，无需用户请求总览"
+        assert started.wait(3), "API启动应预计算运营中心的最新单日汇总"
         url = "/api/v1/products/overview"
         first = default_params(client)
+        assert first["date_from"] < first["date_to"]
+        daily = {**first, "date_from": first["date_to"]}
         response = client.get(url, params=first)
         assert response.status_code == 200
         assert response.json()["data"]["metrics"]["revenue"]["value"] == "23.17"
-        assert calls == [first["data_version"]]
+        one_day = client.get(url, params=daily)
+        assert one_day.status_code == 200
+        assert one_day.json()["data"]["metrics"]["revenue"]["value"] == "23.17"
+        assert one_day.json()["data"] != response.json()["data"]
+        assert sorted((start, end) for _, start, end in calls) == [
+            (first["date_from"], first["date_to"]),
+            (daily["date_from"], daily["date_to"]),
+        ]
         started.clear()
 
         store.run(lambda hb: candidate(amount="47.25"))
@@ -76,7 +86,18 @@ def test_production_prepares_default_overview_on_startup_and_after_publish(
         response = client.get(url, params=latest)
         assert response.status_code == 200
         assert response.json()["data"]["metrics"]["revenue"]["value"] == "47.25"
-        assert calls == [first["data_version"], latest["data_version"]]
+        latest_daily = {**latest, "date_from": latest["date_to"]}
+        assert (
+            client.get(url, params=latest_daily).json()["data"]["metrics"]["revenue"]["value"]
+            == "47.25"
+        )
+        assert len(calls) == 4
+        assert {token for token, _, _ in calls} == {first["data_version"], latest["data_version"]}
+
+        filtered = client.get(url, params={**latest_daily, "category": "不存在的品类"})
+        assert filtered.status_code == 200
+        assert filtered.json()["data"]["product_count"] == "0"
+        assert len(calls) == 5
 
 
 def test_default_overview_reuses_only_current_published_result(sales_pg, tmp_path, monkeypatch):

@@ -7,7 +7,7 @@ from time import perf_counter
 from uuid import uuid4
 
 import psycopg
-from anyio import create_task_group, sleep, to_thread
+from anyio import CapacityLimiter, create_task_group, sleep, to_thread
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,18 +40,20 @@ prewarm_logger = logging.getLogger("uvicorn.error.product_prewarm")
 PRODUCT_OVERVIEW_PREWARM_INTERVAL = 30
 
 
-async def run_product_overview_prewarm(engine, cache):
-    """在API后台跟踪发布版本，重计算与请求共享缓存和互斥。"""
+async def run_product_overview_prewarm(engine, cache, daily, limiter):
+    """按范围独立跟踪版本，两项商品后台预热串行。"""
     version = None
+    label = "商品单日总览" if daily else "商品总览"
     while True:
         started = perf_counter()
         try:
             version, size = await to_thread.run_sync(
-                prewarm_default_overview, engine, cache, version
+                prewarm_default_overview, engine, cache, version, daily, limiter=limiter
             )
             if size is not None:
                 prewarm_logger.info(
-                    "商品总览预热 version=%s cached=%s bytes=%d elapsed_ms=%.2f",
+                    "%s预热 version=%s cached=%s bytes=%d elapsed_ms=%.2f",
+                    label,
                     version,
                     size <= cache.MAX_BYTES,
                     size,
@@ -59,7 +61,7 @@ async def run_product_overview_prewarm(engine, cache):
                 )
         except Exception as exc:
             reason = exc.code if isinstance(exc, BoardError) else type(exc).__name__
-            prewarm_logger.warning("商品总览预热未完成 reason=%s", reason)
+            prewarm_logger.warning("%s预热未完成 reason=%s", label, reason)
         await sleep(PRODUCT_OVERVIEW_PREWARM_INTERVAL)
 
 
@@ -75,10 +77,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             if configured.app_env == "production" and application.state.engine is not None:
                 async with create_task_group() as tasks:
+                    limiter = CapacityLimiter(1)
                     tasks.start_soon(
                         run_product_overview_prewarm,
                         application.state.engine,
                         application.state.product_overview_cache,
+                        False,
+                        limiter,
+                    )
+                    tasks.start_soon(
+                        run_product_overview_prewarm,
+                        application.state.engine,
+                        application.state.product_daily_overview_cache,
+                        True,
+                        limiter,
                     )
                     try:
                         yield
@@ -94,6 +106,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application = FastAPI(title="拼多多运营平台 API", version="0.1.0", lifespan=lifespan)
     application.state.engine = None
     application.state.product_overview_cache = DefaultOverviewCache()
+    application.state.product_daily_overview_cache = DefaultOverviewCache()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=configured.cors_origins,

@@ -81,6 +81,10 @@ def default_overview_query(repo):
     return BoardQuery(max(repo.start, repo.end - timedelta(days=30)), repo.end)
 
 
+def daily_overview_query(repo):
+    return BoardQuery(repo.end, repo.end)
+
+
 def cached_default_overview(engine, cache: DefaultOverviewCache, q: BoardQuery, version: str):
     """后台预热和请求共用一次版本校验后的计算。"""
 
@@ -92,13 +96,20 @@ def cached_default_overview(engine, cache: DefaultOverviewCache, q: BoardQuery, 
     return cache.get_or_compute(version, compute)
 
 
-def prewarm_default_overview(engine, cache: DefaultOverviewCache, previous_version: str | None):
+def prewarm_default_overview(
+    engine, cache: DefaultOverviewCache, previous_version: str | None, daily: bool = False
+):
     """只检查当前发布版本，换版时预计算，等待缓存期间不占连接。"""
     with snapshot(engine) as repo:
         version = repo.token
         if version == previous_version:
             return version, None
         q = default_overview_query(repo)
+        if daily:
+            latest = daily_overview_query(repo)
+            if latest == q:
+                return version, None
+            q = latest
     return version, len(cached_default_overview(engine, cache, q, version))
 
 
@@ -110,11 +121,13 @@ def get_overview(
 ):
     engine = request.app.state.engine
     with snapshot(engine, data_version) as repo:
-        if q != default_overview_query(repo):
+        if q == default_overview_query(repo):
+            cache = request.app.state.product_overview_cache
+        elif q == daily_overview_query(repo):
+            cache = request.app.state.product_daily_overview_cache
+        else:
             return response(request, overview(repo, q), repo)
-    payload = cached_default_overview(
-        engine, request.app.state.product_overview_cache, q, data_version
-    )
+    payload = cached_default_overview(engine, cache, q, data_version)
     return dict(
         data=json.loads(payload),
         meta=dict(data_version=data_version, request_id=request.state.request_id),

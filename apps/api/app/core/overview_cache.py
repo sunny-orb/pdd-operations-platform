@@ -1,4 +1,4 @@
-"""每个API进程只缓存当前商品默认总览的已验证响应。"""
+"""按总览范围分配实例，每个实例只保留一个已发布结果。"""
 
 from collections.abc import Callable
 from threading import Lock

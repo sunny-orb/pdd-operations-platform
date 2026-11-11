@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from app import main
 from app.api import product_board
 from app.core.config import Settings
+from app.core.overview_cache import DefaultOverviewCache
 from app.main import create_app
-from app.modules.product_board.overview_cache import DefaultOverviewCache
 from app.modules.product_board.source import normalize
 from app.modules.product_board.storage import ProductBoardStore
 from tests.test_product_board_storage import candidate
@@ -58,7 +58,7 @@ def test_production_prepares_default_overview_on_startup_and_after_publish(
 
     monkeypatch.setattr(product_board, "overview", count_overview)
     monkeypatch.setattr(main, "build_engine", lambda settings: sales_pg)
-    monkeypatch.setattr(main, "PRODUCT_OVERVIEW_PREWARM_INTERVAL", 0.02, raising=False)
+    monkeypatch.setattr(main, "OVERVIEW_PREWARM_INTERVAL", 0.02)
     app = create_app(Settings(_env_file=None, app_env="production", database_url=""))
     with TestClient(app) as client:
         assert started.wait(3), "API启动应预计算运营中心的最新单日汇总"

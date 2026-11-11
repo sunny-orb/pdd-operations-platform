@@ -18,7 +18,7 @@ from app.api.product_board_schemas import (
     ScoreDetail,
     ScoresData,
 )
-from app.modules.product_board.overview_cache import DefaultOverviewCache
+from app.core.overview_cache import DefaultOverviewCache
 from app.modules.product_board.query import (
     BoardQuery,
     catalog,

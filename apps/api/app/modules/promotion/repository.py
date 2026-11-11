@@ -259,10 +259,11 @@ class Repository:
             ).mappings()
         ]
 
-    def metadata(self):
-        """实际观察范围与推荐窗口分开；没有上游完成标记时完整日始终未知。"""
+    @cached_property
+    def recommended_from(self):
+        """元信息与默认展示共用推荐起日；商品模式按实际观察日计数。"""
         dates = sorted(day for day in self.date_counts if self.start and day >= self.start)
-        default_start = (
+        return (
             (
                 dates[max(0, len(dates) - 30)]
                 if self.mode == "product"
@@ -271,6 +272,9 @@ class Repository:
             if dates
             else None
         )
+
+    def metadata(self):
+        """实际观察范围与推荐窗口分开；没有上游完成标记时完整日始终未知。"""
         sources = []
         product_sync = source_sync_status(self.c, self.versions) if self.mode == "product" else None
         for code in PRODUCT_CODES if self.mode == "product" else (*STORE_CODES, HISTORY_SPEC.code):
@@ -364,7 +368,7 @@ class Repository:
             definition_revision=definition_revision(),
             date_from=self.start,
             date_to=self.end,
-            recommended_from=default_start,
+            recommended_from=self.recommended_from,
             recommended_to=self.end,
             observed_rows=str(sum(self.date_counts.values())),
             complete_through=None,

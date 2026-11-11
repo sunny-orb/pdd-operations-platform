@@ -1,5 +1,6 @@
 """M2双模式GET协议；严格过滤、版本409及本地只读快照。"""
 
+import json
 from datetime import date
 from typing import Annotated, Literal
 
@@ -17,6 +18,7 @@ from app.api.promotion_schemas import (
     OverviewData,
     SelectedOptionsData,
 )
+from app.core.overview_cache import DefaultOverviewCache
 from app.modules.product_board.repository import wire
 from app.modules.promotion.diagnosis import diagnosis, diagnosis_objects
 from app.modules.promotion.query import PromotionQuery, days, options, overview, selected_options
@@ -66,6 +68,34 @@ def display_overview(data):
             project(item, "metrics", "net") for item in data["channel_summaries"]
         ],
     }
+
+
+def default_product_display_query(repo):
+    start, end = repo.recommended_from, repo.end
+    if start is None or end is None or (end - start).days >= 366:
+        return None
+    return PromotionQuery(start, end, mode="product")
+
+
+def cached_product_display(engine, cache: DefaultOverviewCache, q: PromotionQuery, version: str):
+    def compute():
+        with snapshot(engine, "product", version) as repo:
+            data = OverviewData.model_validate(wire(display_overview(overview(repo, q))))
+            return data.model_dump_json().encode()
+
+    return cache.get_or_compute(version, compute)
+
+
+def prewarm_product_display(engine, cache: DefaultOverviewCache, previous_version: str | None):
+    """发布后预计算商品推广默认展示，后台和首次请求复用相同结果。"""
+    with snapshot(engine, "product") as repo:
+        version = repo.token
+        if version == previous_version:
+            return version, None
+        q = default_product_display_query(repo)
+    if q is None:
+        return version, None
+    return version, len(cached_product_display(engine, cache, q, version))
 
 
 def query(
@@ -133,9 +163,19 @@ def get_overview(
     data_version: str = Query(min_length=1, max_length=100),
     detail: Literal["full", "display"] = "full",
 ):
-    with snapshot(request.app.state.engine, q.mode, data_version) as repo:
-        data = overview(repo, q)
-        return response(request, display_overview(data) if detail == "display" else data, repo)
+    engine = request.app.state.engine
+    with snapshot(engine, q.mode, data_version) as repo:
+        if q.mode != "product" or detail != "display" or q != default_product_display_query(repo):
+            data = overview(repo, q)
+            return response(request, display_overview(data) if detail == "display" else data, repo)
+    # 等待同版本的计算时，释放上面的只读连接。
+    payload = cached_product_display(
+        engine, request.app.state.promotion_product_display_cache, q, data_version
+    )
+    return dict(
+        data=json.loads(payload),
+        meta=dict(data_version=data_version, request_id=request.state.request_id),
+    )
 
 
 @router.get("/options/selected", response_model=Envelope[SelectedOptionsData])

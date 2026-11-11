@@ -3,6 +3,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from functools import partial
 from time import perf_counter
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ from app.api.aftersales import router as aftersales_router
 from app.api.data_status import router as data_status_router
 from app.api.product_board import prewarm_default_overview
 from app.api.product_board import router as products_router
+from app.api.promotion import prewarm_product_display
 from app.api.promotion import router as promotion_router
 from app.api.published_versions import router as published_versions_router
 from app.api.sales import router as sales_router
@@ -30,25 +32,24 @@ from app.core.database_diagnostics import (
     install_sql_timing,
     request_database_metrics,
 )
+from app.core.overview_cache import DefaultOverviewCache
 from app.db.connection import build_engine
-from app.modules.product_board.overview_cache import DefaultOverviewCache
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.contracts import SalesError
 
 logger = logging.getLogger(__name__)
-prewarm_logger = logging.getLogger("uvicorn.error.product_prewarm")
-PRODUCT_OVERVIEW_PREWARM_INTERVAL = 30
+prewarm_logger = logging.getLogger("uvicorn.error.overview_prewarm")
+OVERVIEW_PREWARM_INTERVAL = 30
 
 
-async def run_product_overview_prewarm(engine, cache, daily, limiter):
-    """按范围独立跟踪版本，两项商品后台预热串行。"""
+async def run_overview_prewarm(engine, cache, prepare, label, limiter):
+    """各总览独立跟踪版本，共用一个后台计算名额。"""
     version = None
-    label = "商品单日总览" if daily else "商品总览"
     while True:
         started = perf_counter()
         try:
             version, size = await to_thread.run_sync(
-                prewarm_default_overview, engine, cache, version, daily, limiter=limiter
+                prepare, engine, cache, version, limiter=limiter
             )
             if size is not None:
                 prewarm_logger.info(
@@ -62,7 +63,7 @@ async def run_product_overview_prewarm(engine, cache, daily, limiter):
         except Exception as exc:
             reason = exc.code if isinstance(exc, BoardError) else type(exc).__name__
             prewarm_logger.warning("%s预热未完成 reason=%s", label, reason)
-        await sleep(PRODUCT_OVERVIEW_PREWARM_INTERVAL)
+        await sleep(OVERVIEW_PREWARM_INTERVAL)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -79,17 +80,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 async with create_task_group() as tasks:
                     limiter = CapacityLimiter(1)
                     tasks.start_soon(
-                        run_product_overview_prewarm,
+                        run_overview_prewarm,
                         application.state.engine,
                         application.state.product_overview_cache,
-                        False,
+                        prewarm_default_overview,
+                        "商品总览",
                         limiter,
                     )
                     tasks.start_soon(
-                        run_product_overview_prewarm,
+                        run_overview_prewarm,
                         application.state.engine,
                         application.state.product_daily_overview_cache,
-                        True,
+                        partial(prewarm_default_overview, daily=True),
+                        "商品单日总览",
+                        limiter,
+                    )
+                    tasks.start_soon(
+                        run_overview_prewarm,
+                        application.state.engine,
+                        application.state.promotion_product_display_cache,
+                        prewarm_product_display,
+                        "商品推广默认总览",
                         limiter,
                     )
                     try:
@@ -107,6 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.engine = None
     application.state.product_overview_cache = DefaultOverviewCache()
     application.state.product_daily_overview_cache = DefaultOverviewCache()
+    application.state.promotion_product_display_cache = DefaultOverviewCache()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=configured.cors_origins,

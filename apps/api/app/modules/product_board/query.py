@@ -7,7 +7,7 @@ from itertools import chain
 from math import ceil
 
 from .actions import build_actions
-from .comparison import METRIC_INPUTS, period_comparisons
+from .comparison import METRIC_INPUTS, period_comparisons, summarize_period
 from .diagnosis import operating_diagnosis
 from .filter_projection import level_group, matches_level
 from .health import growth_health
@@ -299,7 +299,9 @@ def period_windows(repo, q, loaded_rows):
         previous_end = start - timedelta(days=1)
         previous_start = start - timedelta(days=days)
         metrics = period_comparisons(
-            filtered(start, q.end), filtered(previous_start, previous_end), f"前{days}日"
+            summarize_period(filtered(start, q.end)),
+            summarize_period(filtered(previous_start, previous_end)),
+            f"前{days}日",
         )
         for value in metrics.values():
             if received_start and previous_start < received_start:
@@ -372,7 +374,8 @@ def overview(repo, q):
     for row in card_year:
         card_year_daily[row["business_date"]].append(row)
     yearly = {day: aggregate(rows, daily=True) for day, rows in card_year_daily.items()}
-    year_comparisons = period_comparisons(current, card_year, "去年同期")
+    current_summary = summarize_period(current)
+    year_comparisons = period_comparisons(current_summary, summarize_period(card_year), "去年同期")
     # 环比在前等长日历窗独立筛选，不能被本期商品名单截断，也不向更早日期递补。
     prior_rows = [r for r in loaded_rows if pstart <= r["business_date"] <= pend]
     if pstart < repo.start:
@@ -381,7 +384,9 @@ def overview(repo, q):
     prior_info, _ = labels(prior_rows, repo.profiles())
     prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
     comparison_past = [r for r in prior_rows if r["listing_id"] in prior_ids]
-    past_comparisons = period_comparisons(current, comparison_past, "前一期")
+    past_comparisons = period_comparisons(
+        current_summary, summarize_period(comparison_past), "前一期"
+    )
     received_start = getattr(repo, "versions", {}).get("product_daily", {}).get("period_start")
     if received_start and pstart < received_start:
         for value in past_comparisons.values():

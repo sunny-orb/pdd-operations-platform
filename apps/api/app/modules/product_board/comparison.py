@@ -1,8 +1,9 @@
 """主卡期间比较：本期合计直接参与涨跌，保留两期记录和无效原因。"""
 
+from dataclasses import dataclass
 from decimal import Decimal
 
-from .metrics import aggregate, compare
+from .metrics import _sum, compare, divide
 
 METRIC_INPUTS = {
     "revenue": ("product_revenue",),
@@ -13,39 +14,56 @@ METRIC_INPUTS = {
     "aov": ("product_revenue", "buyers"),
     "conversion": ("buyers", "visitors"),
 }
+PERIOD_FIELDS = tuple(dict.fromkeys(field for fields in METRIC_INPUTS.values() for field in fields))
 
 
-def period_comparisons(current, baseline, period):
-    """输入已确定范围的两期原行，输出七项合计、增幅和具体空值原因。
+@dataclass(frozen=True)
+class PeriodSummary:
+    row_count: int
+    totals: dict[str, Decimal | None]
 
-    不取两期交集，不补零，不平均日比率；已有行的必需字段无效时仅停止
-    受影响指标的比较。同比历史选择和环比筛选由调用方负责。
+
+def summarize_period(rows) -> PeriodSummary:
+    """按已筛选原行校验并精确汇总，每个必需字段只读一次。
+
+    单个字段不齐时保留其不可比较状态。两项比率只使用完整有效的
+    分子分母合计，金额保留原求和顺序和小数精度。
     """
-    sides = (current, baseline)
-    aggregates = [aggregate(rows, only=tuple(METRIC_INPUTS)) for rows in sides]
-    valid = [
-        {
-            f: all(r.get(f) is not None and Decimal(r[f]).is_finite() and r[f] >= 0 for r in rows)
-            for f in {f for fields in METRIC_INPUTS.values() for f in fields}
-        }
-        for rows in sides
-    ]
+    totals = {}
+    for field in PERIOD_FIELDS:
+        values = []
+        for row in rows:
+            raw = row.get(field)
+            if raw is None:
+                break
+            value = Decimal(raw)
+            if not value.is_finite() or value < 0:
+                break
+            values.append(value)
+        else:
+            totals[field] = _sum(values)
+            continue
+        totals[field] = None
+    return PeriodSummary(len(rows), totals)
+
+
+def period_comparisons(current: PeriodSummary, baseline: PeriodSummary, period: str):
+    """比较已确定范围的两期合计，保留缺项原因及实际记录数。"""
     output = {}
     for key, fields in METRIC_INPUTS.items():
         values, reason, message = [], None, None
-        for rows, totals, fields_valid, label in zip(
-            sides, aggregates, valid, ("本期", period), strict=True
-        ):
-            if not rows:
+        for side, label in ((current, "本期"), (baseline, period)):
+            totals = [side.totals[field] for field in fields]
+            if not side.row_count:
                 value = None
                 if reason is None:
                     reason, message = "no_records", f"{label}暂无经营记录"
-            elif not all(fields_valid[f] for f in fields):
+            elif None in totals:
                 value = None
                 if reason is None:
                     reason, message = "invalid_values", f"{label}计算所需数值不全或无效"
             else:
-                value = totals[key]["value"]
+                value = totals[0] if len(totals) == 1 else divide(*totals)
                 if value is None and reason is None:
                     denominator = "买家数" if key == "aov" else "访客数"
                     reason, message = "zero_denominator", f"{label}{denominator}为0，暂不比较"
@@ -59,7 +77,7 @@ def period_comparisons(current, baseline, period):
             change=compare(now, before) if reason is None else None,
             reason=reason,
             message=message,
-            current_rows=len(current),
-            previous_rows=len(baseline),
+            current_rows=current.row_count,
+            previous_rows=baseline.row_count,
         )
     return output

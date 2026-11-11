@@ -7,6 +7,7 @@ from time import perf_counter
 from uuid import uuid4
 
 import psycopg
+from anyio import create_task_group, sleep, to_thread
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,6 +17,7 @@ from starlette.exceptions import HTTPException
 
 from app.api.aftersales import router as aftersales_router
 from app.api.data_status import router as data_status_router
+from app.api.product_board import prewarm_default_overview
 from app.api.product_board import router as products_router
 from app.api.promotion import router as promotion_router
 from app.api.published_versions import router as published_versions_router
@@ -29,10 +31,36 @@ from app.core.database_diagnostics import (
     request_database_metrics,
 )
 from app.db.connection import build_engine
+from app.modules.product_board.overview_cache import DefaultOverviewCache
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.contracts import SalesError
 
 logger = logging.getLogger(__name__)
+prewarm_logger = logging.getLogger("uvicorn.error.product_prewarm")
+PRODUCT_OVERVIEW_PREWARM_INTERVAL = 30
+
+
+async def run_product_overview_prewarm(engine, cache):
+    """在API后台跟踪发布版本，重计算与请求共享缓存和互斥。"""
+    version = None
+    while True:
+        started = perf_counter()
+        try:
+            version, size = await to_thread.run_sync(
+                prewarm_default_overview, engine, cache, version
+            )
+            if size is not None:
+                prewarm_logger.info(
+                    "商品总览预热 version=%s cached=%s bytes=%d elapsed_ms=%.2f",
+                    version,
+                    size <= cache.MAX_BYTES,
+                    size,
+                    (perf_counter() - started) * 1000,
+                )
+        except Exception as exc:
+            reason = exc.code if isinstance(exc, BoardError) else type(exc).__name__
+            prewarm_logger.warning("商品总览预热未完成 reason=%s", reason)
+        await sleep(PRODUCT_OVERVIEW_PREWARM_INTERVAL)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -45,7 +73,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         application.state.engine = build_engine(configured)
         logger.info("API 启动；数据库配置=%s", application.state.engine is not None)
         try:
-            yield
+            if configured.app_env == "production" and application.state.engine is not None:
+                async with create_task_group() as tasks:
+                    tasks.start_soon(
+                        run_product_overview_prewarm,
+                        application.state.engine,
+                        application.state.product_overview_cache,
+                    )
+                    try:
+                        yield
+                    finally:
+                        tasks.cancel_scope.cancel()
+            else:
+                yield
         finally:
             if application.state.engine is not None:
                 application.state.engine.dispose()
@@ -53,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(title="拼多多运营平台 API", version="0.1.0", lifespan=lifespan)
     application.state.engine = None
+    application.state.product_overview_cache = DefaultOverviewCache()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=configured.cors_origins,

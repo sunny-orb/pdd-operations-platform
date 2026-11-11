@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from decimal import Decimal as D
 
+from app.modules.product_board import comparison
 from app.modules.product_board.query import BoardQuery, options, overview
 from app.modules.product_board.source import previous_year
 
@@ -39,6 +40,33 @@ class Repo:
 
     def profiles(self):
         return self.info
+
+
+def test_period_summary_reuses_exact_totals_across_baselines():
+    class MeasuredRow(dict):
+        reads = 0
+
+        def get(self, key, default=None):
+            self.reads += 1
+            return super().get(key, default)
+
+    current = MeasuredRow(
+        product_revenue=D("100.0100"), visitors=20, favorites=None, buyers=4, units=5
+    )
+    this_period = comparison.summarize_period([current])
+    previous = comparison.summarize_period(
+        [dict(product_revenue=D("50.00"), visitors=0, favorites=1, buyers=2, units=0)]
+    )
+    yoy = comparison.period_comparisons(this_period, comparison.summarize_period([]), "去年同期")
+    mom = comparison.period_comparisons(this_period, previous, "前一期")
+    assert current.reads == 5
+    assert yoy["revenue"]["reason"] == "no_records"
+    assert str(mom["revenue"]["value"]) == "100.0100"
+    assert mom["aov"]["value"] == D("25.0025")
+    assert mom["conversion"]["reason"] == "zero_denominator"
+    assert mom["favorites"]["reason"] == "invalid_values"
+    assert mom["units"]["reason"] == "zero_baseline"
+    assert mom["units"]["previous"] == 0
 
 
 def test_missing_days_keep_partial_total_but_allow_paired_card_comparisons():

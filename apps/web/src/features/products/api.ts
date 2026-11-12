@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ApiError as TransportError, getJson } from "../../shared/api/client";
-import type { Scope } from "./scope";
+import { dimensionValues, type Scope } from "./scope";
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -40,10 +40,10 @@ export function params(scope: Scope, version: string) {
     operator: scope.operator,
     category: scope.category,
     level: scope.level,
-    keyword: scope.keyword,
-    judgement: scope.judgement,
   }))
-    if (value) p.set(key, value);
+    dimensionValues(value).forEach((item) => p.append(key, item));
+  if (scope.keyword) p.set("keyword", scope.keyword);
+  if (scope.judgement) p.set("judgement", scope.judgement);
   scope.products.forEach((id) => p.append("listing_ids", id));
   return p;
 }

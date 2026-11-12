@@ -20,6 +20,7 @@ import { Days } from "./Days";
 import { Brief, Health, Metrics, Trends } from "./Overview";
 import { useFilterScrollAnchor, useOverviewPresentation } from "./useOverviewPresentation";
 import { localTime } from "./format";
+import { dimensionValues } from "./scope";
 import { formatProductLevel } from "../../shared/products/levels";
 import "./prototype.css";
 import "./products.css";
@@ -34,6 +35,12 @@ export function ProductsPage() {
   const presentation = useOverviewPresentation(result.data, requestScope, state.version);
   const { data, scope: shownScope } = presentation;
   const updating = result.isFetching;
+  const selectedShops = dimensionValues(shownScope.shop);
+  const selectedOperators = dimensionValues(shownScope.operator);
+  const selectedCategories = dimensionValues(shownScope.category);
+  const selectedLevels = dimensionValues(shownScope.level).map((level) =>
+    formatProductLevel(level),
+  );
   const unavailable = updating || !!result.error;
   const { ref: filterAnchorRef, capture: captureFilterPosition } = useFilterScrollAnchor(
     result.data,
@@ -179,19 +186,33 @@ export function ProductsPage() {
                 />
                 <div>
                   <span>店铺名称</span>
-                  <b>{data?.selection.shop_name ?? (shownScope.shop ? "所选店铺" : "全部店铺")}</b>
+                  <b>
+                    {selectedShops.length > 1
+                      ? `已选 ${selectedShops.length} 家店铺`
+                      : (data?.selection.shop_name ??
+                        (selectedShops.length ? "所选店铺" : "全部店铺"))}
+                  </b>
                 </div>
                 <div>
                   <span>款式对应运营</span>
-                  <b>{shownScope.operator || "全部运营"}</b>
+                  <b title={selectedOperators.join("、")}>
+                    {selectedOperators.slice(0, 2).join("、") || "全部运营"}
+                    {selectedOperators.length > 2 && ` 等 ${selectedOperators.length} 项`}
+                  </b>
                 </div>
                 <div>
                   <span>品类</span>
-                  <b>{shownScope.category || "全部品类"}</b>
+                  <b title={selectedCategories.join("、")}>
+                    {selectedCategories.slice(0, 2).join("、") || "全部品类"}
+                    {selectedCategories.length > 2 && ` 等 ${selectedCategories.length} 项`}
+                  </b>
                 </div>
                 <div>
                   <span>产品等级</span>
-                  <b>{shownScope.level ? formatProductLevel(shownScope.level) : "全部等级"}</b>
+                  <b title={selectedLevels.join("、")}>
+                    {selectedLevels.slice(0, 2).join("、") || "全部等级"}
+                    {selectedLevels.length > 2 && ` 等 ${selectedLevels.length} 项`}
+                  </b>
                 </div>
               </div>
               <Metrics data={data} active={active} toggle={toggle} />

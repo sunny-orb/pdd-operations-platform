@@ -334,9 +334,9 @@ const productOption = z.object({
 });
 export const options = z.object({
   selection: z.object({
-    operator: z.string(),
-    category: z.string(),
-    level: z.string(),
+    operator: z.union([z.string(), z.array(z.string())]),
+    category: z.union([z.string(), z.array(z.string())]),
+    level: z.union([z.string(), z.array(z.string())]),
     products: z.array(z.string()),
   }),
   selected_products: z.array(productOption),

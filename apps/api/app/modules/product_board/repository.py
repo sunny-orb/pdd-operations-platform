@@ -286,6 +286,17 @@ class Repository:
     def identity_rows(self, start, end):
         return read_queries.identity_rows(self.c, self.params["product_daily"], start, end)
 
+    def dimension_identity_values(self, start, end):
+        """各比较窗的店铺商品身份，只扫描必要列。"""
+        return self.c.execute(
+            sa.text(
+                "SELECT DISTINCT listing_id,source_shop_id "
+                "FROM public.read_product_daily_facts WHERE dataset_version_id=:v "
+                "AND business_date BETWEEN :start AND :end"
+            ),
+            dict(v=self.params["product_daily"], start=start, end=end),
+        ).all()
+
     def keyword_identity_values(self, start, end):
         """返回所有历史名称候选，按具体窗口取名和匹配仍由领域查询决定。"""
         return self.c.execute(

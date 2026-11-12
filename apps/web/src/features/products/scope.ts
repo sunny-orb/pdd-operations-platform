@@ -1,10 +1,21 @@
+export type Dimension = string | string[];
+
+export function dimensionValues(value: Dimension) {
+  return Array.isArray(value) ? value : value ? [value] : [];
+}
+
+export function dimensionSelection(values: string[]): Dimension {
+  const unique = [...new Set(values.filter(Boolean))];
+  return unique.length > 1 ? unique : (unique[0] ?? "");
+}
+
 export type Scope = {
   from: string;
   to: string;
-  shop: string;
-  operator: string;
-  category: string;
-  level: string;
+  shop: Dimension;
+  operator: Dimension;
+  category: Dimension;
+  level: Dimension;
   keyword: string;
   products: string[];
   page: number;
@@ -19,10 +30,10 @@ export function readScope(p: URLSearchParams, name: ScopeName, from: string, to:
   return {
     from: start,
     to: end,
-    shop: get("shop"),
-    operator: get("operator"),
-    category: get("category"),
-    level: get("level"),
+    shop: dimensionSelection(p.getAll(`${name}_shop`)),
+    operator: dimensionSelection(p.getAll(`${name}_operator`)),
+    category: dimensionSelection(p.getAll(`${name}_category`)),
+    level: dimensionSelection(p.getAll(`${name}_level`)),
     keyword: get("keyword"),
     products: p.getAll(`${name}_listing`),
     page: Math.max(1, Number(get("page")) || 1),
@@ -52,6 +63,7 @@ export function writeScope(params: URLSearchParams, name: ScopeName, scope: Scop
   [...next.keys()].filter((k) => k.startsWith(`${name}_`)).forEach((k) => next.delete(k));
   for (const [key, value] of Object.entries(scope)) {
     if (key === "products") scope.products.forEach((id) => next.append(`${name}_listing`, id));
+    else if (Array.isArray(value)) value.forEach((item) => next.append(`${name}_${key}`, item));
     else if (value !== "" && value != null) next.set(`${name}_${key}`, String(value));
   }
   return next;

@@ -157,3 +157,64 @@ def test_filtered_overview_reads_measures_only_for_possible_matches(
     finally:
         event.remove(sales_pg, "after_cursor_execute", record_sql)
     assert rows_read and sum(rows_read) <= expected_fact_rows
+
+
+def test_repeated_dimension_query_unions_values_and_narrows_facts(sales_pg, tmp_path):
+    end, sources = candidate()
+    sources["product_daily"] = normalize(
+        "product_daily",
+        [
+            dict(
+                z_id=f"{i}-{p}",
+                shop_id=shop,
+                spu_id=str(2000 + p),
+                spu_name=f"商品{p}",
+                dt=str(end - timedelta(days=i)),
+                time_granularity="day",
+                transaction_amount="50",
+                product_uv=100,
+                transaction_orders=2,
+            )
+            for i in range(60)
+            for p, shop in enumerate(("663599807", "799193231", "191467219"))
+        ],
+        end,
+    )
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, sources))
+    start = end - timedelta(days=30)
+    with snapshot(sales_pg) as repo:
+        token = repo.token
+    reads = []
+
+    def record_sql(conn, cursor, statement, parameters, context, executemany):
+        if (
+            "FROM public.read_product_daily_facts" in statement
+            and "visitors,favorites" in statement
+        ):
+            reads.append(cursor.rowcount)
+
+    event.listen(sales_pg, "after_cursor_execute", record_sql)
+    try:
+        app = create_app(Settings(_env_file=None, database_url=""))
+        with TestClient(app) as client:
+            app.state.engine = sales_pg
+            response = client.get(
+                "/api/v1/products/overview",
+                params=[
+                    ("date_from", start),
+                    ("date_to", end),
+                    ("shop_id", "663599807"),
+                    ("shop_id", "799193231"),
+                    ("data_version", token),
+                ],
+            )
+        assert response.status_code == 200
+        assert response.json()["data"]["product_count"] == "2"
+    finally:
+        event.remove(sales_pg, "after_cursor_execute", record_sql)
+    assert reads and sum(reads) == 120
+    with snapshot(sales_pg) as repo:
+        expected = wire(
+            query.overview(repo, query.BoardQuery(start, end, shop=("663599807", "799193231")))
+        )
+    assert response.json()["data"] == expected

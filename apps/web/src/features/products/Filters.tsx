@@ -3,7 +3,13 @@ import { Button, DatePicker, Select, Spin } from "antd";
 import { SearchInput } from "../../shared/components/SearchInput";
 import { ReloadOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
-import { validDate, type Scope, type ScopeName } from "./scope";
+import {
+  dimensionSelection,
+  dimensionValues,
+  validDate,
+  type Scope,
+  type ScopeName,
+} from "./scope";
 import { useOptions, type ProductsState } from "./data";
 import { catalogOptions } from "./catalog";
 import { formatProductLevel } from "../../shared/products/levels";
@@ -42,9 +48,9 @@ export function Filters({
       !result.isPlaceholderData &&
       !result.error &&
       selection &&
-      (selection.operator !== scope.operator ||
-        selection.category !== scope.category ||
-        selection.level !== scope.level ||
+      (JSON.stringify(selection.operator) !== JSON.stringify(scope.operator) ||
+        JSON.stringify(selection.category) !== JSON.stringify(scope.category) ||
+        JSON.stringify(selection.level) !== JSON.stringify(scope.level) ||
         selection.products.join() !== scope.products.join())
     ) {
       state.change(name, { ...selection, page: 1 });
@@ -89,10 +95,14 @@ export function Filters({
   ) => (
     <Select
       aria-label={`${label}${placeholder}`}
+      mode="multiple"
       allowClear
-      value={scope[field] || undefined}
+      maxTagCount={dimensionValues(scope[field]).length > 1 ? 0 : 1}
+      maxTagPlaceholder={(values) => `已选 ${values.length} 项`}
+      maxTagTextLength={5}
+      value={dimensionValues(scope[field])}
       placeholder={`全部${placeholder}`}
-      popupMatchSelectWidth={field === "level" ? 240 : undefined}
+      popupMatchSelectWidth
       options={
         field === "level"
           ? values.map((item) => ({ ...item, label: formatProductLevel(item.value) }))
@@ -114,7 +124,7 @@ export function Filters({
       loading={preparing}
       disabled={preparing}
       notFoundContent={empty}
-      onChange={(value) => change({ [field]: value ?? "" })}
+      onChange={(values) => change({ [field]: dimensionSelection(values) })}
     />
   );
   const strings = (values: string[] | undefined) =>

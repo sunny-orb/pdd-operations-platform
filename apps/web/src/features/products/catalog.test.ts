@@ -52,3 +52,25 @@ it("右侧关键词仍联动候选，左侧查找可临时覆盖候选搜索但�
   expect(selected.keyword).toBe("商品1");
   expect(catalogOptions(catalog, selected).products.map((p) => p.value)).toEqual(["1"]);
 });
+
+it("同维多选取并集，跨维筛选保留仍有效的下游项", () => {
+  const input = {
+    ...catalog,
+    items: catalog.items.map((item, index) => ({
+      ...item,
+      operator: index < 2 ? "甲" : "乙",
+      category: index === 0 || index === 2 ? "帽子" : "围巾",
+    })),
+  };
+  const selected = {
+    ...scope,
+    operator: ["甲", "乙"],
+    category: ["帽子", "不存在"],
+    level: ["A级", "多等级"],
+  };
+  const result = catalogOptions(input, selected);
+  expect(result.selection.category).toBe("帽子");
+  expect(result.selection.level).toEqual(["A级", "多等级"]);
+  expect(result.products.map((item) => item.value)).toEqual(["0", "2"]);
+  expect(catalogOptions(input, { ...selected, operator: "乙" }).selection.level).toBe("多等级");
+});

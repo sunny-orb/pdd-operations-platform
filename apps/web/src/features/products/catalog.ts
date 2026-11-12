@@ -1,20 +1,32 @@
 import type { Catalog, Options } from "./contracts";
-import type { Scope } from "./scope";
+import { dimensionSelection, dimensionValues, type Scope } from "./scope";
 import { matchesProductLevel, productLevelGroup } from "../../shared/products/levels";
 
 /** 只筛轻量目录；顺序沿用店铺→运营→品类→等级，搜索不清除有效已选商品。 */
 export function catalogOptions(catalog: Catalog, scope: Scope, needle = ""): Options {
-  const shops = catalog.items.filter((item) => !scope.shop || item.shop === scope.shop);
-  const operator = shops.some((item) => item.operator === scope.operator) ? scope.operator : "";
-  const operators = shops.filter((item) => !operator || item.operator === operator);
-  const category = operators.some((item) => item.category === scope.category) ? scope.category : "";
-  const categories = operators.filter((item) => !category || item.category === category);
-  const level = categories.some((item) => matchesProductLevel(item, scope.level))
-    ? scope.level
-    : "";
-  const candidates = categories.filter((item) => matchesProductLevel(item, level));
-  const levels = new Set(categories.map(productLevelGroup));
-  if (level) levels.add(level);
+  const selectedShops = dimensionValues(scope.shop);
+  const shops = catalog.items.filter(
+    (item) => !selectedShops.length || selectedShops.includes(item.shop),
+  );
+  const operator = dimensionValues(scope.operator).filter((value) =>
+    shops.some((item) => item.operator === value),
+  );
+  const operators = shops.filter(
+    (item) => !operator.length || operator.some((value) => value === item.operator),
+  );
+  const category = dimensionValues(scope.category).filter((value) =>
+    operators.some((item) => item.category === value),
+  );
+  const categories = operators.filter(
+    (item) => !category.length || category.some((value) => value === item.category),
+  );
+  const level = dimensionValues(scope.level).filter((value) =>
+    categories.some((item) => matchesProductLevel(item, value)),
+  );
+  const candidates = categories.filter(
+    (item) => !level.length || level.some((value) => matchesProductLevel(item, value)),
+  );
+  const levels = new Set([...categories.map(productLevelGroup), ...level]);
   const ids = new Set(candidates.map((item) => item.value));
   const search = (needle || scope.keyword).toLowerCase();
   const products = candidates.filter((item) => item.search_text.toLowerCase().includes(search));
@@ -29,7 +41,12 @@ export function catalogOptions(catalog: Catalog, scope: Scope, needle = ""): Opt
     levels: [...levels].sort(),
     products,
     total: products.length,
-    selection: { operator, category, level, products: scope.products.filter((id) => ids.has(id)) },
+    selection: {
+      operator: dimensionSelection(operator),
+      category: dimensionSelection(category),
+      level: dimensionSelection(level),
+      products: scope.products.filter((id) => ids.has(id)),
+    },
     selected_products: catalog.items.filter((item) => scope.products.includes(item.value)),
   };
 }

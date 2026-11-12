@@ -34,10 +34,10 @@ from .source import previous_year
 class BoardQuery:
     start: date
     end: date
-    shop: str = ""
-    operator: str = ""
-    category: str = ""
-    level: str = ""
+    shop: str | tuple[str, ...] = ""
+    operator: str | tuple[str, ...] = ""
+    category: str | tuple[str, ...] = ""
+    level: str | tuple[str, ...] = ""
     products: tuple[str, ...] = ()
     keyword: str = ""
     page: int = 1
@@ -88,14 +88,33 @@ def labels(rows, profiles):
     return info, groups
 
 
+def dimension_values(value):
+    return (value,) if isinstance(value, str) and value else value or ()
+
+
+def dimension_selection(values):
+    selected = tuple(dict.fromkeys(filter(None, values)))
+    return selected if len(selected) > 1 else selected[0] if selected else ""
+
+
+def matches_dimension(item, field, selection):
+    values = dimension_values(selection)
+    if field == "level":
+        return not values or any(matches_level(item, value) for value in values)
+    name = "shop_id" if field == "shop" else field
+    return not values or item.get(name) in values
+
+
+def matches_dimensions(item, q):
+    return all(
+        matches_dimension(item, field, getattr(q, field))
+        for field in ("shop", "operator", "category", "level")
+    )
+
+
 def matches(item, q):
-    for field in ("shop", "operator", "category"):
-        wanted = getattr(q, field)
-        name = "shop_id" if field == "shop" else field
-        if wanted and item.get(name) != wanted:
-            return False
     return (
-        matches_level(item, q.level)
+        matches_dimensions(item, q)
         and (not q.products or item["listing_id"] in q.products)
         and matches_keyword(item, q.keyword)
     )
@@ -279,7 +298,7 @@ def mark_calendar(values, covered):
     return values
 
 
-def period_windows(repo, q, loaded_rows, *, read_rows=None):
+def period_windows(repo, q, loaded_rows, *, read_rows=None, selected_ids=None):
     """固定结束日的7/14/30日表现；每期独立筛选，不受主卡商品名单截断。
 
     只读相容版本中必要的60日事实。缺经营日不补零或递补日期；已接收
@@ -294,6 +313,8 @@ def period_windows(repo, q, loaded_rows, *, read_rows=None):
 
     def filtered(start, end):
         period = [r for r in rows if start <= r["business_date"] <= end]
+        if selected_ids is not None:
+            return [r for r in period if r["listing_id"] in selected_ids]
         info, _ = labels(period, profiles)
         ids = {lid for lid, item in info.items() if matches(item, q)}
         return [r for r in period if r["listing_id"] in ids]
@@ -363,6 +384,23 @@ def keyword_candidate_ids(repo, q):
 def filtered_overview(repo, q):
     """按勾选商品或关键词缩小事实查询，各比较窗口仍独立应用筛选。"""
     q.validate(repo)
+    if any((q.shop, q.operator, q.category, q.level)):
+        first = min(
+            repo.start,
+            q.start - ((q.end - q.start) + timedelta(days=1)),
+            q.end - timedelta(days=59),
+        )
+        profiles = repo.profiles()
+        identities = repo.dimension_identity_values(first, repo.end)
+        ids = {
+            lid
+            for lid, shop_id in identities
+            if matches_dimensions(dict(profiles.get(lid, {}), shop_id=shop_id), q)
+        }
+        # 仅名称关键词或异常身份需按窗重新分组取名。
+        stable = not q.keyword and len(identities) == len({lid for lid, _ in identities})
+        selected_ids = ids.intersection(q.products) if q.products else ids
+        return overview(repo, q, listing_ids=ids, selected_ids=selected_ids if stable else None)
     candidate_ids = q.products or keyword_candidate_ids(repo, q)
     # 本路径没有店铺/资料维度，风险排名池仍是全店，不随关键词或勾选缩小。
     top = (
@@ -373,7 +411,7 @@ def filtered_overview(repo, q):
     return overview(repo, q, listing_ids=candidate_ids, risk_top=top)
 
 
-def overview(repo, q, *, listing_ids=None, risk_top=None):
+def overview(repo, q, *, listing_ids=None, risk_top=None, selected_ids=None):
     read_rows = repo.rows if listing_ids is None else partial(repo.rows, listing_ids=listing_ids)
     info, groups, members, loaded_rows, period_info = scope(
         repo, q, with_members=True, read_rows=read_rows
@@ -429,8 +467,10 @@ def overview(repo, q, *, listing_ids=None, risk_top=None):
     if pstart < repo.start:
         # 31日对比需62日：只补未加载的前两日，并保留原查询的日期顺序。
         prior_rows = read_rows(pstart, min(pend, repo.start - timedelta(days=1))) + prior_rows
-    prior_info, _ = labels(prior_rows, repo.profiles())
-    prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
+    prior_ids = selected_ids
+    if prior_ids is None:
+        prior_info, _ = labels(prior_rows, repo.profiles())
+        prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
     comparison_past = [r for r in prior_rows if r["listing_id"] in prior_ids]
     past_comparisons = period_comparisons(
         current_summary, summarize_period(comparison_past), "前一期"
@@ -487,7 +527,7 @@ def overview(repo, q, *, listing_ids=None, risk_top=None):
                 ],
             )
         )
-    windows = period_windows(repo, q, loaded_rows, read_rows=read_rows)
+    windows = period_windows(repo, q, loaded_rows, read_rows=read_rows, selected_ids=selected_ids)
     seven = q.end - timedelta(days=6)
     before = seven - timedelta(days=7)
     hot = []
@@ -876,16 +916,26 @@ def options(repo, q, selected_ids=(), new_only=False):
         if lid in info
     ]
     shops = sorted({(r["shop_id"], r["shop_name"]) for r in values})
-    shop_rows = [r for r in values if not q.shop or r["shop_id"] == q.shop]
-    operator = q.operator if any(r["operator"] == q.operator for r in shop_rows) else ""
-    operator_rows = [r for r in shop_rows if not operator or r["operator"] == operator]
-    category = q.category if any(r["category"] == q.category for r in operator_rows) else ""
-    category_rows = [r for r in operator_rows if not category or r["category"] == category]
-    level = q.level if any(matches_level(r, q.level) for r in category_rows) else ""
-    candidates = [r for r in category_rows if matches_level(r, level)]
-    levels = {level_group(r) for r in category_rows}
-    if level:
-        levels.add(level)  # 旧链接保留精确组合，供选框回显，不扩大范围。
+    shop_rows = [r for r in values if matches_dimension(r, "shop", q.shop)]
+    operator = dimension_selection(
+        value
+        for value in dimension_values(q.operator)
+        if any(r["operator"] == value for r in shop_rows)
+    )
+    operator_rows = [r for r in shop_rows if matches_dimension(r, "operator", operator)]
+    category = dimension_selection(
+        value
+        for value in dimension_values(q.category)
+        if any(r["category"] == value for r in operator_rows)
+    )
+    category_rows = [r for r in operator_rows if matches_dimension(r, "category", category)]
+    level = dimension_selection(
+        value
+        for value in dimension_values(q.level)
+        if any(matches_level(r, value) for r in category_rows)
+    )
+    candidates = [r for r in category_rows if matches_dimension(r, "level", level)]
+    levels = {level_group(r) for r in category_rows} | set(dimension_values(level))
     candidate_ids = {r["listing_id"] for r in candidates}
     selection = dict(
         operator=operator,

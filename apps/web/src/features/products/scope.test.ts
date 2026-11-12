@@ -48,3 +48,12 @@ it("keeps default dates following versions after only a shop filter changes", as
   );
   expect(readScope(chosen, "main", "2026-09-28", "2026-10-28").to).toBe("2026-10-10");
 });
+
+it("round-trips repeated dimensions and emits every selected value", async () => {
+  const { params } = await import("./api");
+  const url = new URLSearchParams("main_shop=one&main_shop=two&main_level=A级&main_level=B级");
+  const scope = readScope(url, "main", "2026-10-01", "2026-10-26");
+  expect(writeScope(url, "main", scope).getAll("main_shop")).toEqual(["one", "two"]);
+  expect(params(scope, "v").getAll("shop_id")).toEqual(["one", "two"]);
+  expect(params(scope, "v").getAll("level")).toEqual(["A级", "B级"]);
+});

@@ -47,6 +47,7 @@ def test_production_prepares_default_overview_on_startup_and_after_publish(
     store = ProductBoardStore(sales_pg, tmp_path)
     store.run(lambda hb: candidate())
     calls = []
+    filtered_calls = []
     started = Event()
     original = product_board.overview
 
@@ -56,7 +57,14 @@ def test_production_prepares_default_overview_on_startup_and_after_publish(
             started.set()
         return original(repo, query)
 
+    original_filtered = product_board.filtered_overview
+
+    def count_filtered(repo, query):
+        filtered_calls.append(query)
+        return original_filtered(repo, query)
+
     monkeypatch.setattr(product_board, "overview", count_overview)
+    monkeypatch.setattr(product_board, "filtered_overview", count_filtered)
     monkeypatch.setattr(main, "build_engine", lambda settings: sales_pg)
     monkeypatch.setattr(main, "OVERVIEW_PREWARM_INTERVAL", 0.02)
     app = create_app(Settings(_env_file=None, app_env="production", database_url=""))
@@ -97,20 +105,28 @@ def test_production_prepares_default_overview_on_startup_and_after_publish(
         filtered = client.get(url, params={**latest_daily, "category": "不存在的品类"})
         assert filtered.status_code == 200
         assert filtered.json()["data"]["product_count"] == "0"
-        assert len(calls) == 5
+        assert len(calls) == 4 and len(filtered_calls) == 1
 
 
 def test_default_overview_reuses_only_current_published_result(sales_pg, tmp_path, monkeypatch):
     store = ProductBoardStore(sales_pg, tmp_path)
     store.run(lambda hb: candidate())
     calls = []
+    filtered_calls = []
     original = product_board.overview
 
     def count_overview(repo, query):
         calls.append(query)
         return original(repo, query)
 
+    original_filtered = product_board.filtered_overview
+
+    def count_filtered(repo, query):
+        filtered_calls.append(query)
+        return original_filtered(repo, query)
+
     monkeypatch.setattr(product_board, "overview", count_overview)
+    monkeypatch.setattr(product_board, "filtered_overview", count_filtered)
     with TestClient(create_app(Settings(_env_file=None, database_url=""))) as client:
         client.app.state.engine = sales_pg
 
@@ -128,16 +144,16 @@ def test_default_overview_reuses_only_current_published_result(sales_pg, tmp_pat
         filtered = client.get(url, params={**first_params, "category": "不存在的品类"})
         assert filtered.status_code == 200
         assert filtered.json()["data"]["product_count"] == "0"
-        assert len(calls) == 2
+        assert len(calls) == 1 and len(filtered_calls) == 1
         assert client.get(url, params=first_params).json()["data"] == first.json()["data"]
-        assert len(calls) == 2
+        assert len(calls) == 1 and len(filtered_calls) == 1
 
         store.run(lambda hb: candidate(amount="47.25"))
         assert client.get(url, params=first_params).status_code == 409
         latest = client.get(url, params=default_params(client))
         assert latest.status_code == 200
         assert latest.json()["data"]["metrics"]["revenue"]["value"] == "47.25"
-        assert len(calls) == 3
+        assert len(calls) == 2 and len(filtered_calls) == 1
 
 
 def test_real_pg_endpoints_decimal_ad_merge_and_stale_vector(sales_pg, tmp_path):

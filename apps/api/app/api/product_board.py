@@ -23,6 +23,7 @@ from app.modules.product_board.query import (
     BoardQuery,
     catalog,
     days,
+    dimension_selection,
     filtered_overview,
     options,
     overview,
@@ -53,10 +54,10 @@ def meta(request: Request):
 def query(
     date_from: date,
     date_to: date,
-    shop_id: str = "",
-    operator: str = "",
-    category: str = "",
-    level: str = "",
+    shop_id: Annotated[list[str] | None, Query()] = None,
+    operator: Annotated[list[str] | None, Query()] = None,
+    category: Annotated[list[str] | None, Query()] = None,
+    level: Annotated[list[str] | None, Query()] = None,
     listing_ids: Annotated[list[str] | None, Query()] = None,
     keyword: str = Query("", max_length=120),
     page: int = Query(1, ge=1, le=100000),
@@ -66,10 +67,7 @@ def query(
     return BoardQuery(
         date_from,
         date_to,
-        shop_id,
-        operator,
-        category,
-        level,
+        *(dimension_selection(values or ()) for values in (shop_id, operator, category, level)),
         tuple(listing_ids or ()),
         keyword,
         page,
@@ -129,7 +127,7 @@ def get_overview(
         else:
             calculate = (
                 filtered_overview
-                if (q.products or q.keyword) and not any((q.shop, q.operator, q.category, q.level))
+                if any((q.shop, q.operator, q.category, q.level, q.products, q.keyword))
                 else overview
             )
             return response(request, calculate(repo, q), repo)

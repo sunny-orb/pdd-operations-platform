@@ -65,14 +65,14 @@ Web镜像自身负责响应压缩与静态资源缓存，不依赖或修改共�
 
 页面入口：[Secrets](https://github.com/sunny-orb/pdd-operations-platform/settings/secrets/actions)、[Environments](https://github.com/sunny-orb/pdd-operations-platform/settings/environments)、[Actions权限](https://github.com/sunny-orb/pdd-operations-platform/settings/actions)。[GHCR认证说明](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry)区分Actions的GITHUB_TOKEN和服务器拉取身份；不为拉取额外授予删除包权限。
 
-| 文件                                                        | 服务器项目目录内位置    | 说明                                                                |
-| ----------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------- |
-| compose.production.yaml、release.sh、rollback.sh、manage.py | 根目录                  | 白名单4文件；Actions同版本上传                                      |
-| .env.example → .env                                         | 根目录，建议600         | 仅供人工维护Compose，镜像占位须换为构建清单digest；正式发布忽略.env |
-| .env.runtime.example → .env.runtime                         | 根目录，600             | 真实数据库URL等私密配置，raw格式，不加外层引号                      |
-| .htpasswd                                                   | 根目录，600             | 单独站点访问口令，不使用数据库口令                                  |
-| .docker/config.json                                         | .docker目录700、文件600 | 专用registry登录；只允许ghcr.io的auths                              |
-| compose.sync.yaml、runtime/、lark-home/                     | 根目录下                | 可选；同步启用另行准备并授权，不由本次发布创建或修改                |
+| 文件                                                                    | 服务器项目目录内位置    | 说明                                                                |
+| ----------------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------- |
+| compose.production.yaml、release.sh、rollback.sh、manage.py、storage.py | 根目录                  | 白名单5文件；Actions同版本上传                                      |
+| .env.example → .env                                                     | 根目录，建议600         | 仅供人工维护Compose，镜像占位须换为构建清单digest；正式发布忽略.env |
+| .env.runtime.example → .env.runtime                                     | 根目录，600             | 真实数据库URL等私密配置，raw格式，不加外层引号                      |
+| .htpasswd                                                               | 根目录，600             | 单独站点访问口令，不使用数据库口令                                  |
+| .docker/config.json                                                     | .docker目录700、文件600 | 专用registry登录；只允许ghcr.io的auths                              |
+| compose.sync.yaml、runtime/、lark-home/                                 | 根目录下                | 可选；同步启用另行准备并授权，不由本次发布创建或修改                |
 
 本机预览为`/Users/sunny/Documents/ChatGPT/部署/upload-preview-20261104`，含required/templates/optional及逐文件SHA-256。无私钥、真实.env、Token、来源登录状态或业务数据。`dispatch.py`在GitHub runner运行，不上传服务器。Dockerfile、Nginx配置、维护脚本和应用源码构建入镜像，不另传node_modules、.venv、dist、var或整个源码备份。
 
@@ -259,3 +259,11 @@ DNS A为121.40.167.37，本次AAAA查询无结果；HTTP返回308跳转HTTPS。�
 停用使用同目录`storage.py disable`，同样验证和等待空闲，只移除策略，后续新版本恢复原写法；已发布共享版本继续通过兼容视图读取，不删事实、不回拨指针。遇损坏策略或未知目录漂移时入口拒绝，须先核查原因，不能通过跳过检查强行开关。应用回退只能使用已验证兼容18及共享读取的镜像；不能直接回退到不兼容的新结构之前的旧镜像，不自动降级数据库。
 
 宿主入口仅对已核验的本项目现有worker执行命令，不拉镜像、不建容器、不改网络、不改其他目录和全局设置。生产DELETE/离线/恢复仍硬拒绝；历史清理需另行适配归档恢复并按批准候选逐版处理。本轮本地验证不能替代真实生产TLS、权限、容量峰值与同步耗时验收。
+
+## 11/14发布范围与验收约束
+
+用户已批准本轮分支提交、main、CI/CD上线与启用验收。交付窗口增量、天气及派生归档复用、17/18迁移、固定项目三表复用、地区候选查询和409换版恢复；售后publisher/targets两处未发布优化及专项测试留本地。前端不改布局、指标或筛选口径。实际生产先核验精确起点、公司保护对象及空闲任务，再走受控迁移，未知结构拒绝。
+
+按用户不额外保存完整副本的要求，纯约束和保护函数升级不重复复制整库及运行目录。事务内核对目录、权限、报告输入和发布指针，失败回滚；不自动删除已有恢复材料。Git仅能复现代码，不能重建业务数据；若实际迁移范围超过已验证方案则停止变更。只启用未来三表内容复用，不开放生产历史DELETE。
+
+发布前后比较固定版本的业务响应摘要、浏览器展示及筛选、接口状态和耗时、网络与镜像身份。完成后只清理本轮临时资源，不全局prune，不改他人目录或共享网络。

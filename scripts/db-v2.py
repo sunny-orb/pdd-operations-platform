@@ -497,6 +497,13 @@ def inspect_permissions(connection) -> None:
                     else (writer and permission in {"SELECT", "INSERT"})
                     or (permission == "UPDATE" and column in allowed_updates)
                 )
+                if (
+                    role == "pdd_ingest"
+                    and name == "alembic_version_v2"
+                    and column == "version_num"
+                    and permission == "SELECT"
+                ):
+                    expected = True
                 if actual != expected:
                     raise RuntimeError("运行身份列权限不符合最小授权")
     owners = (

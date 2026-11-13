@@ -94,3 +94,18 @@ it("领域HTTP错误共用有限恢复；非查询库调用离页取消等待", 
   await vi.advanceTimersByTimeAsync(3000);
   expect(failing).toHaveBeenCalledTimes(1);
 });
+
+it("HTTP409是版本变化，不误报服务不可用且不按旧版本重试", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: { code: "DATA_VERSION_CHANGED" } }), { status: 409 }),
+      ),
+  );
+  const error = await getJson("/api/v1/test").catch((value: unknown) => value);
+  expect(requestErrorText(error)).toContain("版本");
+  expect(requestErrorText(error)).not.toContain("不可用");
+  expect(shouldRetryRequest(0, error)).toBe(false);
+});

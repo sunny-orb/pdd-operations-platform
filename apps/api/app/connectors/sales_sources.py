@@ -16,8 +16,8 @@ from app.modules.sales.datasets import (
     SOURCE_PAGE_SIZE,
     SPECS,
 )
-from app.modules.sales.source_normalization import normalize_source
 from app.modules.sales.source_policy import MAX_ATTEMPTS, validate_read_window
+from app.modules.sales.window_incremental import normalize_sales_window
 
 
 class SalesSourceReader:
@@ -91,16 +91,18 @@ class SalesSourceReader:
             start = stop
         return rows
 
-    def read_stable(self, code, window):
+    def read_stable(self, code, window, *, allow_empty=False):
         validate_read_window(window, code)
         spec = SPECS[code]
         if spec.source_system != "warehouse":
             raise SalesError("SOURCE_READER_MISMATCH")
         for _ in range(MAX_ATTEMPTS):
-            before = normalize_source(
-                code, self.scan(spec, window), window, self.heartbeat
+            before = normalize_sales_window(
+                code, self.scan(spec, window), window, self.heartbeat, allow_empty=allow_empty
             ).fingerprint
-            after = normalize_source(code, self.scan(spec, window), window, self.heartbeat)
+            after = normalize_sales_window(
+                code, self.scan(spec, window), window, self.heartbeat, allow_empty=allow_empty
+            )
             if before == after.fingerprint:
                 return after
         raise SalesError("SOURCE_CHANGED_DURING_READ", 503)

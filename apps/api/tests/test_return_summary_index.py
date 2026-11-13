@@ -22,7 +22,7 @@ def revision_sql(start, target, *, downgrade=False):
     return output.getvalue()
 
 
-def install(engine, target="head"):
+def install(engine, target="20261111_16"):
     renderer = load_script("summary_index_renderer", "render-db-schema.py")
     with engine.connect() as c:
         options = (
@@ -89,7 +89,7 @@ def test_head_index_contract_and_downgrade_preserve_facts(allocated_database):
 
 
 def test_index_preserves_exact_null_zero_and_period_summaries(allocated_database):
-    renderer = install(allocated_database, "20261111_15")
+    install(allocated_database, "20261111_15")
     rows = [
         dict(
             id="zero",
@@ -150,7 +150,7 @@ def test_index_preserves_exact_null_zero_and_period_summaries(allocated_database
             Decimal("1.5"),
         )
         c.connection.driver_connection.execute(
-            renderer.render_upgrade_sql("20261111_15"), prepare=False
+            revision_sql("20261111_15", "20261111_16"), prepare=False
         )
         assert c.exec_driver_sql(statement, params).one() == before
         assert c.exec_driver_sql(statement, ("missing", *params[1:])).one() == (
@@ -165,7 +165,7 @@ def test_index_preserves_exact_null_zero_and_period_summaries(allocated_database
 
 
 def test_same_name_wrong_index_is_not_silently_accepted(allocated_database):
-    renderer = install(allocated_database, "20261111_15")
+    install(allocated_database, "20261111_15")
     import psycopg
 
     with allocated_database.connect() as c:
@@ -174,7 +174,7 @@ def test_same_name_wrong_index_is_not_silently_accepted(allocated_database):
         before = index_contract(c)
         guards = guard_definitions(c)
         with pytest.raises(psycopg.errors.DuplicateTable), raw.transaction():
-            raw.execute(renderer.render_upgrade_sql("20261111_15"), prepare=False)
+            raw.execute(revision_sql("20261111_15", "20261111_16"), prepare=False)
         assert index_contract(c) == before
         assert guard_definitions(c) == guards
         assert (
@@ -184,7 +184,7 @@ def test_same_name_wrong_index_is_not_silently_accepted(allocated_database):
 
 
 def test_index_statement_timeout_rolls_back_the_entire_increment(allocated_database):
-    renderer = install(allocated_database, "20261111_15")
+    install(allocated_database, "20261111_15")
     import psycopg
 
     with allocated_database.connect() as c, allocated_database.connect() as blocker:
@@ -195,7 +195,7 @@ def test_index_statement_timeout_rolls_back_the_entire_increment(allocated_datab
             with pytest.raises(psycopg.errors.QueryCanceled), raw.transaction():
                 raw.execute("SET LOCAL statement_timeout='50ms'")
                 raw.execute("SET LOCAL lock_timeout='5s'")
-                raw.execute(renderer.render_upgrade_sql("20261111_15"), prepare=False)
+                raw.execute(revision_sql("20261111_15", "20261111_16"), prepare=False)
         assert index_contract(c) is None
         assert guard_definitions(c) == guards
         assert (
@@ -208,7 +208,7 @@ def test_existing_and_new_unbounded_numeric_remain_exact(allocated_database):
     """15合法大数可升级；16仍能写入合法大数，既有数值域不能因索引缩小。"""
     import hashlib
 
-    renderer = install(allocated_database, "20261111_15")
+    install(allocated_database, "20261111_15")
     digits = "".join(str(int(hashlib.sha256(str(i).encode()).hexdigest(), 16)) for i in range(160))
     amount = Decimal(digits)
     publish(
@@ -227,7 +227,7 @@ def test_existing_and_new_unbounded_numeric_remain_exact(allocated_database):
         before = c.exec_driver_sql("SELECT sum(actual_inbound_amount) FROM return_records").scalar()
         assert before == amount
         with raw.transaction():
-            raw.execute(renderer.render_upgrade_sql("20261111_15"), prepare=False)
+            raw.execute(revision_sql("20261111_15", "20261111_16"), prepare=False)
         assert (
             c.exec_driver_sql("SELECT sum(actual_inbound_amount) FROM return_records").scalar()
             == before
@@ -301,6 +301,8 @@ def test_retention_head_guards_block_unsafe_transitions_and_preserve_receipts(
     from app.modules import database_retention as retention
     from tests.test_database_archive import old_candidate
 
+    monkeypatch.setattr(archive, "HEAD", "20261111_16")
+    monkeypatch.setattr(retention, "HEAD", "20261111_16")
     install(allocated_database, "20261111_15")
     engine = allocated_database.execution_options(isolation_level="READ COMMITTED")
     old_candidate(engine)

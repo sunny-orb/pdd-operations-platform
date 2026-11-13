@@ -93,7 +93,9 @@ def collect_coverage(
             # 与地区页保持相同排除分类，不把包材等记录当有效覆盖。
             from app.modules.sales.region_queries import PRODUCT_CTE_TEMPLATE
 
-            prefix = PRODUCT_CTE_TEMPLATE.format(columns="shop_id,period_start")
+            prefix = PRODUCT_CTE_TEMPLATE.format(
+                columns="shop_id,period_start", records="public.read_product_region_records"
+            )
             table = "labeled"
         else:
             prefix, table = "", "public." + table

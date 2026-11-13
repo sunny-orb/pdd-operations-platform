@@ -79,13 +79,21 @@ export function useDomain<M>(spec: DomainSpec<M>): DomainState {
     ...queryPolicy,
   });
   const retried = useRef(new Set<string>());
+  const [completedConflicts, setCompletedConflicts] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const conflict = isConflict(facts.error) || isConflict(diagnostics.error);
+  const conflictKey = `${version}:${scope}`;
+  // 只在既有一次自动换版恢复期间显示更新中；预算耗尽或真正失败仍显示错误。
+  const recoveringConflict = Boolean(conflict && version && !completedConflicts.has(conflictKey));
   const refetchMeta = meta.refetch;
   useEffect(() => {
     const key = `${version}:${scope}`;
     if (conflict && version && !retried.current.has(key)) {
       retried.current.add(key);
-      void refetchMeta();
+      void refetchMeta().finally(() => {
+        setCompletedConflicts((previous) => new Set([...previous, key]));
+      });
     }
   }, [conflict, version, scope, refetchMeta]);
   const [retained, setRetained] = useState<{ data: DomainPayload; meta: DomainMeta }>();
@@ -103,11 +111,17 @@ export function useDomain<M>(spec: DomainSpec<M>): DomainState {
   }
   const showingRetained = !current && Boolean(retained);
   const data = current ?? retained?.data;
-  const diagnosticError = spec.loadDiagnostics ? requestErrorText(diagnostics.error) : null;
-  const observationLoading = Boolean(spec.loadDiagnostics && enabled && diagnostics.isPending);
+  const visibleError = (error: unknown) =>
+    recoveringConflict && isConflict(error) ? null : requestErrorText(error);
+  const diagnosticError = spec.loadDiagnostics ? visibleError(diagnostics.error) : null;
+  const observationLoading = Boolean(
+    spec.loadDiagnostics &&
+    enabled &&
+    (diagnostics.isPending || (recoveringConflict && isConflict(diagnostics.error))),
+  );
   const error =
     requestErrorText(meta.error) ??
-    requestErrorText(facts.error) ??
+    visibleError(facts.error) ??
     (diagnosticError ? `风险与建议读取失败：${diagnosticError}` : null);
   const refresh = () => {
     void meta.refetch().then((next) => {
@@ -126,9 +140,9 @@ export function useDomain<M>(spec: DomainSpec<M>): DomainState {
     // 保留值的日期与其原版本一致，不能把新版元信息日期贴到旧指标上。
     meta: showingRetained ? retained?.meta : meta.data,
     data,
-    retained: showingRetained,
-    loading: !data && (meta.isPending || (enabled && facts.isPending)),
-    refreshing: meta.isFetching || facts.isFetching || diagnostics.isFetching,
+    retained: showingRetained || (recoveringConflict && Boolean(data)),
+    loading: !data && (meta.isPending || (enabled && facts.isPending) || recoveringConflict),
+    refreshing: meta.isFetching || facts.isFetching || diagnostics.isFetching || recoveringConflict,
     observationLoading,
     observationError: diagnosticError,
     error,

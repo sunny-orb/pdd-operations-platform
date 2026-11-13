@@ -16,7 +16,7 @@ ROOT = Path("/home/songbing/pdd-operations-platform")
 ACCOUNT = "songbing"
 PROJECT = "pdd-operations-production"
 DOMAIN = "pdd-operations.kktree.cn"
-UPLOADS = ("compose.production.yaml", "release.sh", "rollback.sh", "manage.py")
+UPLOADS = ("compose.production.yaml", "release.sh", "rollback.sh", "manage.py", "storage.py")
 STATE = (
     ".release.json",
     ".release.previous.json",

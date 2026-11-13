@@ -26,10 +26,12 @@ from migrations_v2.company_db_objects import (
 )
 
 DEPLOY_DATABASE = "pdd_dashboard"
-# 两个精确离线增量；公司CLI只执行12→16，15→16仅用于已升级隔离副本对照。
+# 精确离线增量：公司CLI允许12/16/17→18，15仅用于隔离副本验证。
 UPGRADE_SQL_SHA256 = {
-    START_REVISION: "ba48de7dd93ee9b000a1815d4d1003cb4c2c8ae12ac6a9c4482c6e8a88ec1723",
-    "20261111_15": "efbf56bdd332379a0a7fac3527c883569af8cdbc13a2c683ac557647ea95b612",
+    "20261104_12": "3896140dacd1ced70611877d4f758a07110f54b6f9340c5e3d82af10bace7b39",
+    "20261111_15": "a2fa717e3f8ff82929945a099dab29abe23743b4d5fba3bc20222e1369939104",
+    "20261111_16": "593974ad7961f70881af10958a8854f7605bf5b6bc5f4be31eeaca28cfccff24",
+    "20261113_17": "d70ff79fe83b0962bc94b2d8a5f4551a795a760bda2981b5f1179b2a53fc1e46",
 }
 
 
@@ -41,7 +43,7 @@ def transaction_body(sql: str) -> str:
 
 
 def render_upgrade_sql(start_revision: str = START_REVISION) -> str:
-    """只生成已审定12/15→16增量；不扩展公司CLI的实际起点许可。"""
+    """只生成12/15/16/17→18精确增量；起点与正文均校验。"""
     if start_revision not in UPGRADE_SQL_SHA256:
         raise RuntimeError("DEPLOY_MIGRATION_START_INVALID")
     output = io.StringIO()
@@ -53,12 +55,12 @@ def render_upgrade_sql(start_revision: str = START_REVISION) -> str:
     if hashlib.sha256(body.encode()).hexdigest() != UPGRADE_SQL_SHA256[start_revision]:
         raise RuntimeError("DEPLOY_MIGRATION_SQL_CHANGED")
     body, count = re.subn(
-        r"(?m)^GRANT (?:SELECT|INSERT|UPDATE\(state\)|SELECT,INSERT,UPDATE) "
-        r"ON public\.[a-z_]+ TO pdd_(?:app|ingest);\n",
+        r"(?m)^GRANT (?:SELECT|SELECT\(version_num\)|INSERT|UPDATE\(state\)|SELECT,INSERT,UPDATE) "
+        r"ON public\.[a-z_][a-z0-9_]* TO pdd_(?:app|ingest);\n",
         "",
         body,
     )
-    expected_grants = 47 if start_revision == START_REVISION else 0
+    expected_grants = 48 if start_revision == START_REVISION else 1
     if count != expected_grants or re.search(r"\bpdd_(?:app|ingest)\b", body):
         raise RuntimeError("DEPLOY_MIGRATION_PERMISSIONS_CHANGED")
     return body

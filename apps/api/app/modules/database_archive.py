@@ -1,4 +1,4 @@
-"""第一阶段本机加密归档/恢复演练；只有随机测试库可写，无生产恢复入口。"""
+"""本机项目加密归档/恢复演练；独立随机库验收，无生产恢复入口。"""
 
 import hashlib
 import json
@@ -27,6 +27,7 @@ from app.modules.database_retention import (
     digest,
     require_local_test,
 )
+from app.modules.local_storage import require_local_maintenance, verify_connection
 from migrations_v2.baseline_20261028.schema import build_metadata
 from migrations_v2.local import ROOT, local_url
 
@@ -91,7 +92,8 @@ def file_hash(path):
 
 def pg_dump(c, section):
     """仅本机固定Compose服务内PG17工具，沿当前RR导出快照，不在容器写文件。"""
-    require_local_test(c.engine)
+    require_local_maintenance(c.engine)
+    verify_connection(c)
     snapshot = c.scalar(sa.text("SELECT pg_export_snapshot()"))
     command = [
         "docker",
@@ -126,7 +128,7 @@ def pg_dump(c, section):
 
 def export(engine, selected, destination, key, *, version_id=None):
     """固定一个候选版本；同时归档依赖元数据/维度/规则，不复制其他大事实表。"""
-    require_local_test(engine)
+    require_local_maintenance(engine)
     candidates = selected["candidates"]
     if version_id is None:
         if len(candidates) != 1:

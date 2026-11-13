@@ -339,3 +339,85 @@ it("同版诊断刷新失败保留旧观察并标记保留，恢复成功后才�
   await waitFor(() => expect(result.current.error).toBeNull());
   expect(observationCoverage([result.current])[0].status).toBe("observed");
 });
+
+it("变版自动恢复期间不闪接口故障，按新版完成后正常展示", async () => {
+  const { wrapper } = setup();
+  let finish: (value: DomainMeta) => void = () => {};
+  let calls = 0;
+  const spec = {
+    id: "aftersales" as const,
+    meta: async () => {
+      calls++;
+      return calls === 1
+        ? meta("aftersales")
+        : new Promise<DomainMeta>((resolve) => {
+            finish = resolve;
+          });
+    },
+    load: async (m: DomainMeta) => {
+      if (m.version === "v1") throw new ApiError("接口暂时不可用，请稍后重试。", 409);
+      return payload("新版值");
+    },
+  };
+  const { result } = renderHook(() => useDomain(spec), { wrapper });
+  await waitFor(() => expect(calls).toBe(2));
+  expect(result.current.error).toBeNull();
+  expect(result.current.loading).toBe(true);
+  await act(async () => finish(meta("aftersales", "v2")));
+  await waitFor(() => expect(result.current.data?.card.value).toBe("新版值"));
+  expect(result.current.error).toBeNull();
+  expect(calls).toBe(2);
+});
+
+it("已有观察遇到409自动恢复时保留旧值标签", async () => {
+  const { client, wrapper } = setup();
+  let conflict = false;
+  let finish: (value: DomainMeta) => void = () => {};
+  const spec = {
+    id: "products" as const,
+    meta: async () =>
+      conflict
+        ? new Promise<DomainMeta>((resolve) => {
+            finish = resolve;
+          })
+        : meta("products"),
+    load: async () => payload("旧值"),
+    loadDiagnostics: async () => {
+      if (conflict) throw new ApiError("版本变化", 409);
+      return { observations: [], actions: [], observationState: "observed" as const };
+    },
+  };
+  const { result } = renderHook(() => useDomain(spec), { wrapper });
+  await waitFor(() => expect(observationCoverage([result.current])[0].status).toBe("observed"));
+  conflict = true;
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["overview", "products", "diagnostics"] });
+  });
+  await waitFor(() => expect(result.current.observationLoading).toBe(true));
+  expect(result.current.error).toBeNull();
+  expect(result.current.data?.card.value).toBe("旧值");
+  expect(observationCoverage([result.current])[0].status).toBe("retained");
+  await act(async () => finish(meta("products")));
+  await waitFor(() => expect(result.current.error).not.toBeNull());
+});
+
+it("自动恢复预算耗尽后刷新状态不能再次隐藏持续409", async () => {
+  const { wrapper } = setup();
+  let calls = 0;
+  const spec = {
+    id: "products" as const,
+    meta: async () => {
+      calls++;
+      return calls <= 2 ? meta("products") : new Promise<DomainMeta>(() => {});
+    },
+    load: async () => {
+      throw new ApiError("版本变化", 409);
+    },
+  };
+  const { result } = renderHook(() => useDomain(spec), { wrapper });
+  await waitFor(() => expect(calls).toBe(2));
+  await waitFor(() => expect(result.current.error).toContain("版本变化"));
+  act(() => result.current.refreshStatus?.());
+  await waitFor(() => expect(calls).toBe(3));
+  expect(result.current.error).toContain("版本变化");
+});

@@ -47,13 +47,23 @@ def reflect_tables(engine, fact_table="shop_daily_facts"):
 
 class ShopDailyStore:
     def __init__(
-        self, engine, *, archive_root: Path, approved=None, spec=None, reconcile_full_scope=False
+        self,
+        engine,
+        *,
+        archive_root: Path,
+        approved=None,
+        spec=None,
+        reconcile_full_scope=False,
+        reconciliation=False,
     ):
         if spec is not None and READ_SPECS.get(spec.code) != spec:
             raise SalesError("UNKNOWN_SALES_DATASET")
         self.spec = spec
         self.reconcile_full_scope = reconcile_full_scope
         self.code = spec.code if spec else "shop_daily"
+        if reconciliation and self.code != "product_regions":
+            raise SalesError("INVALID_RECONCILIATION_DATASET")
+        self.job_code = "sync_" + self.code + ("_reconciliation" if reconciliation else "")
         self.fact_table = spec.fact_table if spec else "shop_daily_facts"
         self.date_column = spec.date_column if spec else "business_date"
         self.revision = EXTENDED_REVISION if spec else POLICY_REVISION
@@ -116,7 +126,7 @@ class ShopDailyStore:
                 connection.execute(
                     tasks.insert().values(
                         id=run_id,
-                        job_code="sync_" + self.code,
+                        job_code=getattr(self, "job_code", "sync_" + self.code),
                         request_ref=f"{self.approved.start}/{self.approved.end}",
                         lock_key=self.code,
                         status="running",
@@ -328,7 +338,9 @@ class ShopDailyStore:
                     )
                 )
         if not reuse:
-            if self.fact_table in fact_content.FACTS and fact_content.enabled(connection):
+            if self.fact_table in fact_content.FACTS and fact_content.enabled(
+                connection, self.fact_table
+            ):
                 with connection.begin():
                     self._lease(connection, run_id)
                     fact_content.write_version(
@@ -409,6 +421,16 @@ class ShopDailyStore:
                     versions.update().where(versions.c.id == version_id).values(state="published")
                 )
             self._lease(connection, run_id)
+            if candidate.source_metadata and "incremental_baseline" in candidate.source_metadata:
+                baseline = connection.execute(
+                    sa.select(current.c.version_id)
+                    .where(current.c.dataset_code == self.code)
+                    .with_for_update()
+                ).scalar_one_or_none()
+                if (str(baseline) if baseline else None) != candidate.source_metadata[
+                    "incremental_baseline"
+                ]:
+                    raise SalesError("INCREMENTAL_BASELINE_CHANGED")
             connection.execute(
                 insert(current)
                 .values(dataset_code=self.code, version_id=version_id)
@@ -446,6 +468,9 @@ def producer_sources():
     names = [
         "modules/fact_content.py",
         "modules/sales/contracts.py",
+        "modules/sales/product_regions_incremental.py",
+        "modules/sales/window_incremental.py",
+        "modules/sales/archive_replay.py",
         "modules/sales/promotion_history.py",
         "modules/sales/datasets.py",
         "modules/sales/source_normalization.py",

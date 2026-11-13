@@ -18,6 +18,7 @@ WAREHOUSE_SOURCES = (
     "shop_channel_star_shop",
     "shop_regions",
 )
+RECONCILIATION_SOURCES = (*WAREHOUSE_SOURCES, "product_regions")
 FEISHU_SOURCES = ("shop_refunds", "sales_targets")
 LEGACY_SOURCES = (
     "product_regions",

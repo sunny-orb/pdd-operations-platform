@@ -39,6 +39,8 @@ def build_steps(
     warehouse_password: Callable[[], str],
     *,
     product_sources=None,
+    reconcile_product_regions=False,
+    reconcile_sources=(),
 ):
     """装配既有接收、校验、发布及报告；仓库口令只在对应步骤真正执行时获取。"""
     from app.connectors.product_board import ProductBoardReader
@@ -50,6 +52,14 @@ def build_steps(
     from app.modules.sales.source_policy import approved_window
     from app.modules.sales.storage import ShopDailyStore
 
+    full_sources = set(reconcile_sources)
+    if reconcile_product_regions:
+        full_sources.add("product_regions")
+    from app.modules.data_status.schedule_policy import RECONCILIATION_SOURCES
+
+    if not full_sources <= set(RECONCILIATION_SOURCES):
+        raise ValueError("INVALID_RECONCILIATION_SOURCES")
+
     def products(selected=None):
         selection = selected if selected is not None else product_sources
         reader = None
@@ -58,12 +68,19 @@ def build_steps(
             def receive(hb):
                 nonlocal reader
                 reader = ProductBoardReader(password=warehouse_password(), heartbeat=hb)
-                return (
-                    reader.read_stable(selection) if selection is not None else reader.read_stable()
+                from app.modules.product_board.incremental import receive_product_board
+
+                return receive_product_board(
+                    store,
+                    reader,
+                    selected=selection,
+                    full_sources=full_sources
+                    & {"product_daily", "product_promotion", "profile_records"},
+                    heartbeat=hb,
                 )
 
             store = ProductBoardStore(
-                engine, paths.ingestion_root / "product_board", reconcile_full_scope=True
+                engine, paths.ingestion_root / "product_board", reconcile_full_scope=False
             )
             return (
                 store.run_selected(selection, receive)
@@ -88,6 +105,31 @@ def build_steps(
                     if code == "shop_refunds"
                     else SalesSourceReader(password=warehouse_password(), heartbeat=hb)
                 )
+                if code == "product_regions":
+                    from app.modules.sales.product_regions_incremental import (
+                        receive_product_regions,
+                    )
+
+                    return receive_product_regions(
+                        store,
+                        lambda w: reader.read_stable(code, w, allow_empty=True),
+                        heartbeat=hb,
+                        full=code in full_sources,
+                    )
+                from app.modules.sales.window_incremental import (
+                    SALES_INCREMENTAL_SOURCES,
+                    receive_sales_window,
+                )
+
+                if code in SALES_INCREMENTAL_SOURCES:
+                    return receive_sales_window(
+                        store,
+                        (lambda w: reader.read_stable(w, allow_empty=True))
+                        if code == "shop_daily"
+                        else (lambda w: reader.read_stable(code, w, allow_empty=True)),
+                        heartbeat=hb,
+                        full=code in full_sources,
+                    )
                 return (
                     reader.read_stable(window)
                     if code in ("shop_daily", "shop_refunds")
@@ -98,7 +140,9 @@ def build_steps(
                 engine,
                 archive_root=paths.ingestion_root / code,
                 spec=None if code == "shop_daily" else SPECS[code],
-                reconcile_full_scope=True,
+                reconcile_full_scope=code == "shop_refunds"
+                or (code in full_sources and code != "product_regions"),
+                **({"reconciliation": code in full_sources} if code == "product_regions" else {}),
             )
             return asdict(store.run(receive))
         finally:
@@ -190,6 +234,8 @@ def execute_project(
     max_attempts: int = 2,
     lock_connection=None,
     product_sources=None,
+    reconcile_product_regions=False,
+    reconcile_sources=(),
 ):
     """同一批次标识重用PG幂等/互斥；串行跑完整业务链，返回脱敏运行报告。
 
@@ -202,6 +248,8 @@ def execute_project(
         engine,
         paths,
         warehouse_password,
+        **({"reconcile_product_regions": True} if reconcile_product_regions else {}),
+        **({"reconcile_sources": tuple(reconcile_sources)} if reconcile_sources else {}),
         **({"product_sources": product_sources} if product_sources is not None else {}),
     )
     if only is not None:

@@ -32,7 +32,7 @@ def producer_sources():
         for path in (
             *(
                 Path(__file__).with_name(name)
-                for name in ("storage.py", "source.py", "profile_rules.py")
+                for name in ("storage.py", "source.py", "profile_rules.py", "incremental.py")
             ),
             Path(fact_content.__file__),
         )
@@ -44,6 +44,22 @@ def producer_hash():
 
 
 LOADED_PRODUCER_HASH = producer_hash()
+
+
+def _profile_rows(records, version):
+    """从必要资料投影和固定来源版本生成关系；发布与无变化判断共用。"""
+    return [
+        dict(
+            profile_record_id=identity(version, record["source_row_key"]),
+            listing_id=identity(shop, product),
+            relationship_status="matched",
+            relationship_reason="numeric_rows_and_explicit_status_notes",
+            listed_date_applicability_status="unknown",
+        )
+        for record in records
+        for shop, field in SHOP_PROFILE.items()
+        for product in parse_ids(record[field])
+    ]
 
 
 class ProductBoardStore:
@@ -159,6 +175,9 @@ class ProductBoardStore:
         code_hash = LOADED_PRODUCER_HASH
         reuse_sources = _source_versions if _source_versions is not None else {}
         self.changes = []
+        self.incremental_baselines = {}
+        self.incremental_receipts = {}
+        self.reconcile_sources = set()
         task = self.tables["task_runs"]
         run = str(uuid4())
         with self.engine.connect() as c:
@@ -244,6 +263,31 @@ class ProductBoardStore:
                         if not retained:
                             raise ValueError("ARCHIVE_RESTORE_REQUIRED")
                         require_archive(retained)
+                # 完整来源内容及派生输入均相同时引用既有证据，尚未创建归档目录。
+                with c.begin():
+                    unchanged = self._unchanged(c, rows, end, reuse_sources)
+                    if unchanged:
+                        self._check_lease(c, run)
+                        self._check_baselines(c, reuse_sources)
+                        versions, evidence = unchanged
+                        c.execute(
+                            task.update()
+                            .where(task.c.id == run)
+                            .values(
+                                status="succeeded",
+                                finished_at=sa.func.clock_timestamp(),
+                                lease_expires_at=None,
+                                result_version_id=versions["profile_links"],
+                                evidence_ref=evidence,
+                            )
+                        )
+                if unchanged:
+                    return dict(
+                        status="published",
+                        versions=versions,
+                        rows={k: len(v) for k, v in rows.items()},
+                        end=str(end),
+                    )
                 archive = self.archive_root / run
                 archive.mkdir(parents=True, mode=0o700)
                 os.chmod(archive, 0o700)
@@ -291,6 +335,7 @@ class ProductBoardStore:
                         code: windows(end, code) for code in TABLES if code != "profile_records"
                     },
                     reused_source_versions=dict(reuse_sources),
+                    receipts=self.incremental_receipts,
                     files={p.name: fingerprint(p.read_text()) for p in archive.iterdir()},
                 )
                 write_archive(
@@ -300,12 +345,15 @@ class ProductBoardStore:
                 versions = self._stage(
                     c, rows, end, archive, heartbeat, reuse_sources=reuse_sources
                 )
-                if self.reconcile_full_scope:
+                if self.reconcile_full_scope or self.reconcile_sources:
                     changes = archive / "reconciliation.json"
                     write_archive(changes, json.dumps(self.changes, ensure_ascii=False))
                     os.chmod(changes, 0o600)
                     manifest["files"][changes.name] = fingerprint(changes.read_text())
                     manifest["reconciliation_policy"] = "stable-full-scope"
+                    manifest["reconciliation_sources"] = sorted(
+                        TABLES if self.reconcile_full_scope else self.reconcile_sources
+                    )
                     store_for(archive / "manifest.json").check(
                         len(json.dumps(manifest, default=str).encode())
                     )
@@ -319,6 +367,7 @@ class ProductBoardStore:
                     raise ValueError("PRODUCER_CODE_CHANGED")
                 with c.begin():
                     self._check_lease(c, run)
+                    self._check_baselines(c, reuse_sources)
                     for code, vid in reuse_sources.items():
                         current = c.execute(
                             sa.text(
@@ -387,6 +436,84 @@ class ProductBoardStore:
                 c.execute(sa.text("SELECT pg_advisory_unlock(hashtext('m1-product-board'))"))
                 c.commit()
 
+    def _check_baselines(self, c, reused):
+        """最终事务重验接收基线，首次接收也不允许覆盖中途出现的来源头。"""
+        for code, expected in {**self.incremental_baselines, **reused}.items():
+            current = c.execute(
+                sa.text(
+                    "SELECT version_id FROM current_datasets WHERE dataset_code=:code FOR UPDATE"
+                ),
+                dict(code=code),
+            ).scalar_one_or_none()
+            if current != expected:
+                raise ValueError("SOURCE_INPUT_CHANGED")
+
+    def _unchanged(self, c, rows, end, reused):
+        """仅在四个当前头、内容摘要、生成版本、派生依赖和归档均相容时省去写入。"""
+        current = {
+            r["dataset_code"]: dict(r)
+            for r in c.execute(
+                sa.text(
+                    "SELECT v.* FROM current_datasets d "
+                    "JOIN dataset_versions v ON v.id=d.version_id "
+                    "WHERE d.dataset_code=ANY(:codes) AND v.state='published' FOR UPDATE OF d"
+                ),
+                dict(codes=[*TABLES, "profile_links"]),
+            ).mappings()
+        }
+        if set(current) != {*TABLES, "profile_links"}:
+            return None
+        versions = {code: current[code]["id"] for code in TABLES}
+        for code in TABLES:
+            if code in reused:
+                if versions[code] != reused[code]:
+                    raise ValueError("SOURCE_INPUT_CHANGED")
+                continue
+            digest = fingerprint(
+                dict(
+                    rows=rows[code],
+                    revision=REVISION,
+                    producer=LOADED_PRODUCER_HASH,
+                    end=None if code == "profile_records" else end,
+                    inputs=None,
+                )
+            )
+            if digest != current[code]["content_fingerprint"]:
+                return None
+        raw = _profile_rows(rows["profile_records"], versions["profile_records"])
+        derived = current["profile_links"]
+        digest = fingerprint(
+            dict(
+                rows=raw, revision=REVISION, producer=LOADED_PRODUCER_HASH, end=end, inputs=versions
+            )
+        )
+        if (
+            derived["producer_revision"] != LOADED_PRODUCER_HASH
+            or digest != derived["content_fingerprint"]
+        ):
+            return None
+        inputs = dict(
+            c.execute(
+                sa.text(
+                    "SELECT input_role,input_version_id FROM version_inputs "
+                    "WHERE output_version_id=:vid"
+                ),
+                dict(vid=derived["id"]),
+            ).all()
+        )
+        if inputs != {
+            "profile_records": versions["profile_records"],
+            "product_current": versions["product_daily"],
+            "ad_current": versions["product_promotion"],
+        }:
+            raise ValueError("SOURCE_INPUT_CHANGED")
+        versions["profile_links"] = derived["id"]
+        ensure_online(c, versions.values())
+        for item in current.values():
+            require_archive(item["retained_input_ref"])
+        evidence = str(Path(require_archive(derived["retained_input_ref"])) / "manifest.json")
+        return versions, evidence
+
     def _check_lease(self, c, run):
         t = self.tables["task_runs"]
         current = c.execute(sa.select(t).where(t.c.id == run).with_for_update()).mappings().one()
@@ -440,7 +567,9 @@ class ProductBoardStore:
                         if not fields or any(a <= r[fields[2]] <= b for a, b in windows(end, code))
                     }
                     removed = oldkeys - newrows.keys()
-                    if removed and not self.reconcile_full_scope:
+                    if removed and not (
+                        self.reconcile_full_scope or code in self.reconcile_sources
+                    ):
                         raise ValueError("SOURCE_DELETE_UNCONFIRMED")
                     changed = (
                         sum(
@@ -451,7 +580,9 @@ class ProductBoardStore:
                         if fields
                         else 0
                     )
-                    if changed and not self.reconcile_full_scope:
+                    if changed and not (
+                        self.reconcile_full_scope or code in self.reconcile_sources
+                    ):
                         raise ValueError("SOURCE_KEY_IDENTITY_CHANGED")
                     self.changes.append(
                         dict(
@@ -466,13 +597,11 @@ class ProductBoardStore:
             for code in ("product_daily", "product_promotion")
             for r in rows[code]
         }
-        links = []
         for record in rows["profile_records"]:
             for shop, field in SHOP_PROFILE.items():
                 for product in parse_ids(record[field]):
                     lid = identity(shop, product)
                     listings[lid] = (shop, product)
-                    links.append(dict(profile_key=record["source_row_key"], listing_id=lid))
         with c.begin():
             shops = self.tables["shops"]
             for sid, (_, name, _) in SHOPS.items():
@@ -500,16 +629,7 @@ class ProductBoardStore:
             if producer_hash() != LOADED_PRODUCER_HASH:
                 raise ValueError("PRODUCER_CODE_CHANGED")
             if code == "profile_links":
-                raw = [
-                    dict(
-                        profile_record_id=identity(versions["profile_records"], r["profile_key"]),
-                        listing_id=r["listing_id"],
-                        relationship_status="matched",
-                        relationship_reason="numeric_rows_and_explicit_status_notes",
-                        listed_date_applicability_status="unknown",
-                    )
-                    for r in links
-                ]
+                raw = _profile_rows(rows["profile_records"], versions["profile_records"])
             else:
                 raw = rows[code]
             if code in reuse_sources:
@@ -578,25 +698,25 @@ class ProductBoardStore:
                             )
                         )
             t = self.tables[FACT_TABLES[code]]
-            values = [
-                dict(
-                    r,
-                    id=identity(
-                        vid,
-                        r["source_row_key"]
-                        if code != "profile_links"
-                        else r["profile_record_id"] + "/" + r["listing_id"],
-                    ),
-                    dataset_version_id=vid,
-                )
-                for r in raw
-            ]
-            if t.name in fact_content.FACTS and fact_content.enabled(c):
+            if t.name in fact_content.FACTS and fact_content.enabled(c, t.name):
                 heartbeat()
                 with c.begin():
                     fact_content.write_version(c, t.name, vid, raw)
                 heartbeat()
             else:
+                values = [
+                    dict(
+                        r,
+                        id=identity(
+                            vid,
+                            r["source_row_key"]
+                            if code != "profile_links"
+                            else r["profile_record_id"] + "/" + r["listing_id"],
+                        ),
+                        dataset_version_id=vid,
+                    )
+                    for r in raw
+                ]
                 for offset in range(0, len(values), 1000):
                     heartbeat()
                     with c.begin():

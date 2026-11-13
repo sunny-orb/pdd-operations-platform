@@ -148,12 +148,15 @@ def test_profile_rebuild_preserves_sources_and_is_idempotent(sales_pg, tmp_path,
 
 
 def test_failed_profile_rebuild_keeps_all_current_inputs(sales_pg, tmp_path, monkeypatch):
+    from app.modules.product_board import storage
+
     store = ProductBoardStore(sales_pg, tmp_path)
     first = store.run(lambda hb: candidate())
 
     def fail(*args, **kwargs):
         raise ValueError("PROFILE_REBUILD_TEST_FAILURE")
 
+    monkeypatch.setattr(storage, "parse_ids", lambda value: ())
     monkeypatch.setattr(store, "_stage", fail)
     with pytest.raises(ValueError, match="PROFILE_REBUILD_TEST_FAILURE"):
         store.rebuild_profiles()

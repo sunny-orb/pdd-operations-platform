@@ -2,6 +2,7 @@
 
 from datetime import date, datetime, timedelta
 
+import pytest
 import sqlalchemy as sa
 
 from app.modules.sales.contracts import ReadWindow
@@ -138,7 +139,11 @@ def test_unknown_sources_are_not_reported_complete_and_get_does_not_scan(sales_p
     assert not any("shop_daily_facts" in s for s in statements)
 
 
-def test_extended_sources_reuse_scopes_and_product_region_exclusions(sales_pg, tmp_path):
+@pytest.mark.parametrize("shared", [False, True])
+def test_extended_sources_reuse_scopes_and_product_region_exclusions(
+    sales_pg, tmp_path, monkeypatch, shared
+):
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(shared).lower())
     from app.modules.data_status.history_coverage import collect_coverage
     from app.modules.data_status.repository import versions
     from app.modules.sales.datasets import SPECS

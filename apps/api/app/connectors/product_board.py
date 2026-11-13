@@ -65,14 +65,18 @@ class ProductBoardReader:
         # 接收覆盖两源最新观察；页面分别按事实MAX日期展示，不以较慢源截断。
         return min(max(latest), yesterday) if latest else yesterday
 
-    def projection(self, code, end):
+    def projection(self, code, end, *, periods=None):
         numbers = set(PRODUCT_NUM.values()) if code == "product_daily" else set(AD_NUM.values())
         columns = ",".join(
             f"CAST(`{k}` AS CHAR) AS `{k}`" if k in numbers else f"`{k}`" for k in COLUMNS[code]
         )
         key = "__id" if code == "profile_records" else "z_id" if code == "product_daily" else "id"
         result = []
-        periods = (None,) if code == "profile_records" else windows(end, code)
+        periods = (
+            (None,)
+            if code == "profile_records"
+            else (windows(end, code) if periods is None else periods)
+        )
         for period in periods:
             offset = 0
             while True:
@@ -110,15 +114,35 @@ class ProductBoardReader:
                 offset += 1000
         return normalize(code, result, end)
 
-    def read_stable(self, selected=None):
+    def read_stable(self, selected=None, *, periods=None, end=None):
         """两次读取选中来源；MAX日期只用于批准窗口，不作为上游更新标记。"""
         selected = tuple(TABLES) if selected is None else tuple(selected)
         if not selected or not set(selected) <= TABLES.keys():
             raise ValueError("INVALID_SOURCE_SELECTION")
-        end = self.latest(selected)
+        end = self.latest(selected) if end is None else end
+        if periods is not None:
+            for code in selected:
+                if code == "profile_records":
+                    continue
+                spans = periods.get(code)
+                if not spans or any(
+                    a > b or not any(x <= a <= b <= y for x, y in windows(end, code))
+                    for a, b in spans
+                ):
+                    raise ValueError("SOURCE_DATE_SCOPE_INVALID")
+                if any(b >= a for (_, b), (a, _) in zip(spans, spans[1:], strict=False)):
+                    raise ValueError("SOURCE_DATE_SCOPE_INVALID")
+
+        def projection(code):
+            return (
+                self.projection(code, end)
+                if periods is None or code == "profile_records"
+                else self.projection(code, end, periods=periods[code])
+            )
+
         for _ in range(2):
-            first = {code: self.projection(code, end) for code in selected}
-            second = {code: self.projection(code, end) for code in selected}
+            first = {code: projection(code) for code in selected}
+            second = {code: projection(code) for code in selected}
             if fingerprint(first) == fingerprint(second):
                 return end, second
         raise ValueError("SOURCE_CHANGED_DURING_READ")

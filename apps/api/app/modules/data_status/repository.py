@@ -144,7 +144,8 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 head = heads.get(code)
                 task = (
                     legacy_tasks.get(source_id)
-                    if reconciliations.get(source_id, {}).get("last_attempt_at")
+                    if source_id != "product_regions"
+                    and reconciliations.get(source_id, {}).get("last_attempt_at")
                     else jobs.get(job_for(code))
                 )
                 expired = bool(
@@ -168,7 +169,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 )
 
             from app.modules.data_status.schedule_policy import (
-                WAREHOUSE_SOURCES,
+                RECONCILIATION_SOURCES,
                 due_sources,
                 first_reconciliation,
                 next_check,
@@ -201,7 +202,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
             legacy_tasks = read_legacy_tasks(c) if reconciliations else {}
 
             def reconciliation(code):
-                if not scheduled or code not in WAREHOUSE_SOURCES:
+                if not scheduled or code not in RECONCILIATION_SOURCES:
                     return None
                 row = reconciliations.get(code, {"status": "waiting"})
                 next_at = (

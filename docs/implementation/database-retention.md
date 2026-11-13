@@ -1,6 +1,6 @@
 # 数据库历史快照保留、离线清理与内容复用方案
 
-2026-11-10。状态：用户已授权第一阶段本地实现与测试；禁止修改生产数据库、删除线上数据、推送或部署。第二阶段也已获准本地实现和测试，仍不授权生产启用；字段与实现分别见[内容复用设计](../database-schema/content-reuse.md)和[实施计划](content-reuse.md)。本文只维护数据库容量治理；原始文件由[采集归档方案](archive-retention.md)负责，迁库由[迁库方案](database-relocation.md)负责，进度只见[TODO](../../TODO.md)。
+2026-11-14。状态：用户已授权本地实现、测试及本机业务库受控启用；禁止修改生产数据库、删除线上数据、推送或部署。第二阶段也已获准本地实现和测试，仍不授权生产启用；字段与实现分别见[内容复用设计](../database-schema/content-reuse.md)和[实施计划](content-reuse.md)。本文只维护数据库容量治理；原始文件由[采集归档方案](archive-retention.md)负责，迁库由[迁库方案](database-relocation.md)负责，进度只见[TODO](../../TODO.md)。
 
 ## 目标、依据与边界
 
@@ -62,7 +62,7 @@
 
 字段与约束已细化到[运维字段字典](../database-schema/database-retention.md)。追加dataset_publications原子记录真实指针切换，原有task_runs不足以可靠还原每个来源的历史退出时刻，因此不猜测补造旧事件。当前实现保守保护全部非白名单版本及其输入闭包，可能多留一部分不再被当前页面读取的旧数据；以安全为先，不保证此前估算的候选容量仍可释放。
 
-第一阶段CLI和Python写入口均硬限定127.0.0.1:55432、pdd_admin和pdd_operations_v2_test_<12位随机值>；数据库维护明细触发器另拒绝非随机测试库名。配置production_apply_enabled=false不可用于解锁生产。真实生产维护能力、批准双故障域副本和首轮完整生产业务基线仍是后续独立门槛。
+现行CLI和Python维护入口限定127.0.0.1:55432、pdd_admin和随机测试库；18额外允许已授权的精确本机pdd_operations业务库，连接与数据库触发器共同核对实际身份。配置production_apply_enabled=false不可用于解锁生产。真实生产维护能力、批准双故障域副本和首轮完整生产业务基线仍是后续独立门槛。
 
 ### 受控删除与恢复
 
@@ -145,7 +145,7 @@ DELETE通常先形成可复用空间，不立即归还OS；第一目标是降低
 
 ## 本地工具与恢复包边界
 
-入口为scripts/database-maintenance.py，无动作参数时只执行plan；export要求显式冻结清单、单候选、项目var/production-db-archives子目录及独立存放的32字节600权限密钥文件。verify验证全包AEAD/文件集合/摘要；drill新建并销毁本机随机PG库，成功生成绑定密钥的回执；apply/restore仍仅允许随机测试库。部分包保留为排障证据，但没有完整manifest和成功演练回执不能维护。旧schema/格式需要已验证适配器，本轮没有通用降级或自动适配旁路。
+入口为scripts/database-maintenance.py，无动作参数时只执行plan；export要求显式冻结清单、单候选、项目var/production-db-archives子目录及独立存放的32字节600权限密钥文件。verify验证全包AEAD/文件集合/摘要；drill新建并销毁本机随机PG库，成功生成绑定密钥的回执；18的apply/restore另允许已授权本机业务库管理员，生产继续拒绝。部分包保留为排障证据，但没有完整manifest和成功演练回执不能维护。旧schema/格式需要已验证适配器，本轮没有通用降级或自动适配旁路。
 
 每包包含一个候选的精确COPY原行，以及恢复外键所需的元数据、小表、运维审计和必要原始输入证据。隔离演练库只用于该候选与约束校验，不代表恢复了其他未打包的大事实或完整看板；不得把它交给业务使用。完整项目备份仍采用全项目pg_dump，首次生产维护还需完整项目恢复验收。当前本机回执明确production_approved=false；本机加密包和隔离演练不是两份独立故障域副本。
 

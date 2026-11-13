@@ -9,7 +9,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
-from app.modules.archive_store import write_archive
+from app.modules.archive_store import require_archive, write_archive
 from app.modules.database_residency import ensure_online
 from app.modules.product_board.repository import CODES, snapshot
 
@@ -82,6 +82,98 @@ def _seal(c, tables, vid, fingerprint, evidence):
     )
 
 
+def _publication_fingerprints(bundle):
+    """从已计算并校验的完整结果生成发布摘要，复用判定与实际写入使用同一口径。"""
+    standard = digest(
+        dict(
+            inputs=bundle["inputs"], calibration=bundle["calibration"], producer=bundle["producer"]
+        )
+    )
+    score = digest(
+        dict(
+            inputs=bundle["inputs"],
+            standard=identity("m1-trial", "score_standards", standard),
+            rule=digest(bundle["parameters"]),
+            scores=bundle["scores"],
+            producer=bundle["producer"],
+        )
+    )
+    return dict(score_standards=standard, product_scores=score)
+
+
+def _publication_edges(bundle, standard):
+    """固定两类输出的输入角色及窗口，封版和复用均核对完整依赖。"""
+    start, end, inputs = bundle["start"], bundle["end"], bundle["inputs"]
+    return dict(
+        score_standards=[
+            ("product_history", inputs["product_daily"], start, end - timedelta(days=14)),
+            ("ad_current", inputs["product_promotion"], start, end - timedelta(days=14)),
+            ("profile", inputs["profile_links"], None, None),
+        ],
+        product_scores=[
+            ("product_current", inputs["product_daily"], end - timedelta(days=6), end),
+            (
+                "product_previous",
+                inputs["product_daily"],
+                end - timedelta(days=13),
+                end - timedelta(days=7),
+            ),
+            ("ad_current", inputs["product_promotion"], end - timedelta(days=6), end),
+            ("profile", inputs["profile_links"], None, None),
+            ("standard", standard, None, None),
+        ],
+    )
+
+
+def _reusable_evidence(c, tables, bundle):
+    """仅完整相容的已发布输出对复用归档；部分输出仍走发布，缺档一律拒绝。"""
+    fingerprints = _publication_fingerprints(bundle)
+    versions = {code: identity("m1-trial", code, fp) for code, fp in fingerprints.items()}
+    table = tables["dataset_versions"]
+    records = {
+        row["id"]: row
+        for row in c.execute(
+            sa.select(table).where(table.c.id.in_([*bundle["inputs"].values(), *versions.values()]))
+        ).mappings()
+    }
+    ensure_online(c, records)
+    for row in records.values():
+        if not row["retained_input_ref"]:
+            raise ValueError("ARCHIVE_RESTORE_REQUIRED")
+        require_archive(row["retained_input_ref"])
+    edges = _publication_edges(bundle, versions["score_standards"])
+    complete = True
+    for code, vid in versions.items():
+        row = records.get(vid)
+        if row is None:
+            complete = False
+            continue
+        if row["state"] not in ("validated", "published"):
+            raise ValueError("SCORE_VERSION_NOT_SEALED")
+        actual_edges = set(
+            c.execute(
+                sa.select(
+                    tables["version_inputs"].c.input_role,
+                    tables["version_inputs"].c.input_version_id,
+                    tables["version_inputs"].c.window_start,
+                    tables["version_inputs"].c.window_end,
+                ).where(tables["version_inputs"].c.output_version_id == vid)
+            ).all()
+        )
+        if (
+            row["dataset_code"] != code
+            or row["origin_kind"] != "derived"
+            or row["content_fingerprint"] != fingerprints[code]
+            or row["producer_revision"] != bundle["producer"]
+            or actual_edges != set(edges[code])
+            or code == "product_scores"
+            and row["rule_set_id"] != identity("m1-trial-rule", digest(bundle["parameters"]))
+        ):
+            raise ValueError("SCORE_VERSION_INCOMPATIBLE")
+        complete = complete and row["state"] == "published"
+    return records[versions["product_scores"]]["retained_input_ref"] if complete else None
+
+
 def _persist(c, t, b, evidence):
     params = b["parameters"]
     rule_hash = digest(params)
@@ -103,13 +195,13 @@ def _persist(c, t, b, evidence):
         )
         .on_conflict_do_nothing()
     )
-    standard_fp = digest(
-        dict(inputs=b["inputs"], calibration=b["calibration"], producer=b["producer"])
-    )
+    fingerprints = _publication_fingerprints(b)
+    standard_fp = fingerprints["score_standards"]
     standard_version, new_standard = _version(
         c, t, "score_standards", standard_fp, b["producer"], evidence
     )
     end, start = b["end"], b["start"]
+    edges = _publication_edges(b, standard_version)
     if new_standard:
         for row in b["scores"]:
             sid = identity(standard_version, row["listing_id"])
@@ -174,22 +266,10 @@ def _persist(c, t, b, evidence):
             c,
             t,
             standard_version,
-            [
-                ("product_history", b["inputs"]["product_daily"], start, end - timedelta(days=14)),
-                ("ad_current", b["inputs"]["product_promotion"], start, end - timedelta(days=14)),
-                ("profile", b["inputs"]["profile_links"], None, None),
-            ],
+            edges["score_standards"],
         )
         _seal(c, t, standard_version, standard_fp, evidence)
-    score_fp = digest(
-        dict(
-            inputs=b["inputs"],
-            standard=standard_version,
-            rule=rule_hash,
-            scores=b["scores"],
-            producer=b["producer"],
-        )
-    )
+    score_fp = fingerprints["product_scores"]
     score_version, new_score = _version(
         c, t, "product_scores", score_fp, b["producer"], evidence, rule=rule_id
     )
@@ -235,18 +315,7 @@ def _persist(c, t, b, evidence):
             c,
             t,
             score_version,
-            [
-                ("product_current", b["inputs"]["product_daily"], end - timedelta(days=6), end),
-                (
-                    "product_previous",
-                    b["inputs"]["product_daily"],
-                    end - timedelta(days=13),
-                    end - timedelta(days=7),
-                ),
-                ("ad_current", b["inputs"]["product_promotion"], end - timedelta(days=6), end),
-                ("profile", b["inputs"]["profile_links"], None, None),
-                ("standard", standard_version, None, None),
-            ],
+            edges["product_scores"],
         )
         _seal(c, t, score_version, score_fp, evidence)
     for table, parent, key in (
@@ -334,7 +403,6 @@ def publish_scores(engine, *, archive_root=None):
             validate_bundle(bundle)
             if producer_hash() != code_hash or bundle["producer"] != code_hash:
                 raise ValueError("SCORING_CODE_CHANGED")
-            evidence = _archive(root / run, bundle)
             with c.begin():
                 current = dict(
                     c.execute(
@@ -353,6 +421,9 @@ def publish_scores(engine, *, archive_root=None):
                 ).scalar_one()
                 if lease < c.execute(sa.select(sa.func.clock_timestamp())).scalar_one():
                     raise ValueError("SCORING_LEASE_EXPIRED")
+                evidence = _reusable_evidence(c, tables, bundle)
+                if evidence is None:
+                    evidence = _archive(root / run, bundle)
                 versions = _persist(c, tables, bundle, evidence)
                 for code, vid in versions.items():
                     version = tables["dataset_versions"]
@@ -368,9 +439,14 @@ def publish_scores(engine, *, archive_root=None):
                             index_elements=["dataset_code"], set_=dict(version_id=vid)
                         )
                     )
-                c.execute(
+                succeeded = c.execute(
                     task.update()
-                    .where(task.c.id == run)
+                    .where(
+                        task.c.id == run,
+                        task.c.status == "running",
+                        task.c.worker_ref == run,
+                        task.c.lease_expires_at > sa.func.clock_timestamp(),
+                    )
                     .values(
                         status="succeeded",
                         finished_at=sa.func.clock_timestamp(),
@@ -379,6 +455,8 @@ def publish_scores(engine, *, archive_root=None):
                         evidence_ref=evidence,
                     )
                 )
+                if succeeded.rowcount != 1:
+                    raise ValueError("SCORING_LEASE_EXPIRED")
             return dict(
                 status="published_trial",
                 versions=versions,
@@ -391,7 +469,7 @@ def publish_scores(engine, *, archive_root=None):
             with c.begin():
                 c.execute(
                     task.update()
-                    .where(task.c.id == run, task.c.status == "running")
+                    .where(task.c.id == run, task.c.status == "running", task.c.worker_ref == run)
                     .values(
                         status="failed",
                         finished_at=sa.func.clock_timestamp(),

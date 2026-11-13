@@ -10,7 +10,7 @@ from uuid import uuid4
 import sqlalchemy as sa
 
 from app.connectors.weather import BULLETIN_URL, MID_RANGE_URL
-from app.modules.archive_store import store_for
+from app.modules.archive_store import require_archive, store_for
 from app.modules.weather.parser import PARSER_REVISION, build_document
 
 LOCK_KEY = "nmc-weather-publication"
@@ -41,6 +41,26 @@ def _assert_lease(c, tasks, run):
         raise ValueError("TASK_LEASE_LOST")
 
 
+def _reuse_evidence(existing, manifest):
+    """兼容无sidecar的既有天气归档；用发布指纹及清单绑定核验后返回证据路径。"""
+    document_path = Path(require_archive(existing["retained_input_ref"]))
+    evidence_path = Path(require_archive(existing["validation_evidence_ref"]))
+    if str(evidence_path) != existing["interpretation_ref"]:
+        raise ValueError("ARCHIVE_MANIFEST")
+    body = json.loads(document_path.read_text(encoding="utf-8"))
+    digest = hashlib.sha256(
+        canonical({"parser": PARSER_REVISION, "document": body}).encode()
+    ).hexdigest()
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    if (
+        digest != manifest["content_sha256"]
+        or evidence != {**manifest, "publication_id": existing["id"]}
+        or document_path != evidence_path.parent / manifest["document_file"]
+    ):
+        raise ValueError("ARCHIVE_CHECKSUM")
+    return str(evidence_path)
+
+
 def publish(engine, receive, archive_root):
     """receive()->两官文；返回真实父版本/文档ID和复用状态，接收不持发布事务。"""
     metadata = sa.MetaData()
@@ -51,10 +71,8 @@ def publish(engine, receive, archive_root):
     weather, versions, current, tasks = (tables[name] for name in tables)
     run = str(uuid4())
     folder = Path(archive_root) / run
-    folder.mkdir(parents=True, mode=0o700)
-    os.chmod(folder.parent, 0o700)
-    os.chmod(folder, 0o700)
-    evidence = str(folder / "manifest.json")
+    evidence = None
+    candidate_created = False
     with engine.connect() as c:
         if not c.scalar(sa.text("SELECT pg_try_advisory_lock(hashtext(:key))"), {"key": LOCK_KEY}):
             c.rollback()
@@ -102,7 +120,6 @@ def publish(engine, receive, archive_root):
                 digest = hashlib.sha256(
                     canonical({"parser": PARSER_REVISION, "document": body}).encode()
                 ).hexdigest()
-                _write(folder / "document.json", body)
                 manifest = dict(
                     parser_revision=PARSER_REVISION,
                     content_sha256=digest,
@@ -112,13 +129,37 @@ def publish(engine, receive, archive_root):
                 )
                 with c.begin():
                     _assert_lease(c, tasks, run)
-                    existing = c.execute(
-                        sa.select(weather.c.id)
-                        .join(versions, versions.c.id == weather.c.id)
-                        .where(weather.c.content_sha256 == digest, versions.c.state == "published")
-                    ).scalar_one_or_none()
-                    publication_id = existing or str(uuid4())
-                    if not existing:
+                    existing = (
+                        c.execute(
+                            sa.select(
+                                weather.c.id,
+                                versions.c.retained_input_ref,
+                                versions.c.validation_evidence_ref,
+                                versions.c.interpretation_ref,
+                            )
+                            .join(versions, versions.c.id == weather.c.id)
+                            .where(
+                                weather.c.content_sha256 == digest, versions.c.state == "published"
+                            )
+                        )
+                        .mappings()
+                        .one_or_none()
+                    )
+                    publication_id = existing["id"] if existing else str(uuid4())
+                    if existing:
+                        evidence = _reuse_evidence(existing, manifest)
+                    else:
+                        # 仅真正的新候选创建目录，重复检查/锁冲突不留下空目录。
+                        store_for(folder / "document.json").check(len(canonical(body).encode()))
+                        folder.mkdir(parents=True, mode=0o700)
+                        candidate_created = True
+                        os.chmod(folder.parent, 0o700)
+                        os.chmod(folder, 0o700)
+                        evidence = str(folder / "manifest.json")
+                        _write(folder / "document.json", body)
+                        _write(
+                            folder / "manifest.json", {**manifest, "publication_id": publication_id}
+                        )
                         revision = (
                             c.scalar(
                                 sa.select(
@@ -185,8 +226,6 @@ def publish(engine, receive, archive_root):
                             index_elements=[current.c.dataset_code], set_={"version_id": latest}
                         )
                     )
-                    manifest["publication_id"] = publication_id
-                    _write(folder / "manifest.json", manifest)
                     completed = c.execute(
                         tasks.update()
                         .where(*_lease(tasks, run))
@@ -195,6 +234,7 @@ def publish(engine, receive, archive_root):
                             finished_at=sa.func.clock_timestamp(),
                             lease_expires_at=None,
                             result_version_id=publication_id,
+                            evidence_ref=evidence,
                             source_updated_text=" | ".join(s.issue_time for s in received),
                             source_update_observed_at=sa.func.clock_timestamp(),
                         )
@@ -223,9 +263,14 @@ def publish(engine, receive, archive_root):
                     }
                     else "WEATHER_PUBLICATION_FAILED"
                 )
-                _write(folder / "manifest.json", {"status": "failed", "error_code": code})
                 if c.in_transaction():
                     c.rollback()
+                if candidate_created:
+                    try:
+                        _write(folder / "manifest.json", {"status": "failed", "error_code": code})
+                    except (OSError, ValueError):
+                        # 磁盘故障不能遮蔽任务失败记录，更不能覆盖旧版归档。
+                        evidence = None
                 with c.begin():
                     c.execute(
                         tasks.update()
@@ -240,6 +285,7 @@ def publish(engine, receive, archive_root):
                             lease_expires_at=None,
                             error_code=code,
                             error_summary="天气接收或校验未成功，保留最近成功发布",
+                            evidence_ref=evidence,
                         )
                     )
                 raise ValueError(code) from exc

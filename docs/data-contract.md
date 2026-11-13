@@ -1852,11 +1852,24 @@ Meta逐源显示实际窗内MIN/MAX、完整日未知、本输入版最近成功
 | 天气公报                | [中央气象台天气公报](https://www.nmc.cn/publish/weather-bulletin/index.htm) | 运营中心             |
 | 中期预报                | [中央气象台中期预报](https://www.nmc.cn/publish/bulletin/mid-range.htm)     | 运营中心             |
 
+2026-11-13确认的本地窗口增量范围如下，是否上线以[验证记录](validation/2026-11-13.md)为准。仍按原时点检查变化，接收成功后才推进接受标记；不是每到时点都下载，也不是只追加昨日记录。
+
+| 来源                                                                                 | 普通接收                                                       | 历史及完整核对                                                                       |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 店铺日经营、店铺评分、店铺商品推广汇总、明星店铺推广、店铺地区成交、商品地区实发实退 | 业务日回看30日，与已发布且校验通过的基线合并；停机断档扩大读取 | 保留原批准完整历史；两种店铺推广保留2025同比范围                                     |
+| 商品日经营、商品推广明细                                                             | 当前30日及批准覆盖中新进入的日期；去年同期新进入日期也必须补读 | 沿原当前120/60日＋去年同期60日范围，按各来源基线分别计算；滚出当前窗口不删除历史版本 |
+| 商品上架资料、飞书退款/目标、天气                                                    | 保留修订或内容变化触发的必要快照                               | 未验证可靠逐行修改/删除标记，不改成按创建日期追加                                    |
+| 聚水潭售后退货、已发货/已取消销售、货品分类资料                                      | 保留已有窗口与必要范围读取                                     | 状态可能跨期变化，未满足安全缩窗条件；同一销售来源两种状态保持相容                   |
+
+前两组周日17:00在各自完整批准范围对账，失败结束后每300秒重试至成功。`dt`、`create_time`及未证实的`updated_at`不当修改游标。普通增量对缺旧键、跨日/跨店或已定义经营身份移动先阻断，保留上一版；显式完整接收沿各来源原有完整范围校验规则，商品地区继续拒绝未经确认的删除。30日外修订由周对账或明确完整补跑发现，稳定双读不代表上游业务绝对齐数。普通与周对账状态分开，同轮只接收一次；手动强制普通接收不消费周周期。
+
+发布候选仍可独立重放，历史报告固定原输入不改写；没有新增增量副本表、delta目录或缓存。无变化复用既有版本/归档，覆盖推进和有效更正仍可能产生必要新版本；减少来源读取不等于开启PG内容块复用或自动清理。来源范围和指标保持，实现边界见[同步专用设计](implementation/project-sync-implementation.md)。
+
 固定时点策略启用后，8张非聚水潭数仓来源按北京时间08:20/09:10/10:10/10:50/13:10/15:10/16:10全部检查，飞书退款和GMV目标按08:20/10:10检查；当天已成功的表仍参与后续检查。具体来源映射见[调度范围](implementation/project-sync-implementation.md#source-daily-schedule-proposal-20261104)。数仓读取已验证表身份的可见网页“数据更新时间”（observation.basis=warehouse_web_page），飞书使用单行manifest表修订；与最后成功接收并复查稳定的摘要比较，变化、无接收标记或接收失败才下载。16:10作为普通变化检查。每周对账按[对账方案](implementation/weekly-reconciliation.md)独立安排，同轮与变化接收共用读取。资料、目标不要求昨日经营行；元信息失败保留旧观测，不伪造最新时间。聚水潭4来源（含product_regions）、天气2来源及售后派生保留原路径。新旧调度按来源排除；来源状态、接收状态和评分/报告状态独立。
 
 手动补跑和固定检查共用来源状态与稳定接收标记；手动不消耗固定逻辑槽。已有商品输入时各变化来源独立接收并复用其他已发布版本；首次缺输入时，仅本轮全部必需输入可用才原子建立基线，不扩大指定下载。派生失败后重算已有输入。上游时间不是完整交付标记。API只读平台状态，包含每源计划与下一检查时刻；固定来源按到期槽判断过期，夜间不因超过15分钟误报。启用须先验证后台元数据认证，浏览器可访问不能推定服务凭据可用。
 
-启用固定策略的八张数仓来源在 `GET /api/v1/data-status` 的来源项另有 `reconciliation` 对象。它返回已登记周期 `cycle_at`、`status`（waiting/running/failed/deferred/succeeded）、`last_attempt_at`、`last_finished_at`、`last_success_at`、`next_retry_at`、`next_scheduled_at` 及固定 `error_code`。时间带时区，未发生的时间留空；重试时刻是最早可再次开始的时间，实际取决于后台轮询和互斥。未纳入对账的来源该对象为空。监测配置另含 `reconciliation_time` 及 `reconciliation_retry_seconds`。普通检查与 `platform_state` 按自身证据计算，附加对账失败单独告警，保留已有数据日期和可用状态。
+纳入对账的原八张数仓来源及商品地区实发实退在 `GET /api/v1/data-status` 的来源项另有 `reconciliation` 对象。它返回已登记周期 `cycle_at`、`status`（waiting/running/failed/deferred/succeeded）、`last_attempt_at`、`last_finished_at`、`last_success_at`、`next_retry_at`、`next_scheduled_at` 及固定 `error_code`。时间带时区，未发生的时间留空；重试时刻是最早可再次开始的时间，实际取决于后台轮询和互斥。未纳入对账的来源该对象为空。监测配置另含 `reconciliation_time` 及 `reconciliation_retry_seconds`。普通检查与 `platform_state` 按自身证据计算，附加对账失败单独告警，保留已有数据日期和可用状态。
 
 中心不新增`/overview/*`业务计算接口，直接复用以下已发布域结果。每域独立meta→固定data_version查询；中心和四子页共享`GET /api/v1/published-versions`轻量发布指纹，页面可见时每5分钟检查，后台暂停，恢复可见时检查。响应data含products/promotion/sales/aftersales四个字符串token，由实际发布输入头、定义指纹、售后已发布报告目录身份及推广/销售上海业务日生成，不查经营事实。首次进入正常读取；随后token变化才重读对应域meta，手动刷新保留，取消45秒完整meta及聚焦重复刷新。事实键还包括观察日，M3包括default_month及calendar_through，M5包括default_report_id。变版/范围变化取消旧请求、拒绝晚到覆盖，409每版/范围最多自动重读一次。GET不启动上游、模型或业务消息。
 
@@ -1884,6 +1897,7 @@ M6-01已确认去重对象数且售后总览/品类分别计项。推广/售后�
 - document固定字段为title/issue_time/focus_regions/today_rain/today_temperature/next_7_days/sources/forecast_url/reference_url/group_card_link/note；两来源各存name/url/issue_time/text，group_card_link=NULL。块为regions/detail/status=parsed|unidentified|boundary|not_mentioned，未来过程另含period。详细Pydantic为封闭结构，不传任意业务JSON。
 - 公报issue_date不能用抓取日代替；相对过程按其所属文档发布日期解析。下一7日为公报发布日起+6日与原中期过程相交，宽于窗口的保留原文标boundary，不伪造七条逐日预报。今日气温读取国内重点预报、国内三天预报和中期主要过程，仅取时段覆盖发布日的气温句；结构完整、已识别时段均不含当日时为not_mentioned（本期未提及），结构缺失或时段不明为unidentified，均不表示无天气风险。旧归档按当前解释定义只读投影气温字段，定义哈希纳入data_version；原始发布ID、原文和存储不改，查询不触发上游接收。历史不套当前图片，外链明确“当前官方预报”。
 - 必要原文私有归档与固定document经SHA校验，真实dataset_versions父版本draft→validated→published，task_runs成功绑定父版本；同语义重跑复用发布，同日更正新修订，旧日补报不倒退current。180秒租约在接收后、发布事务和任务结束都核DB时钟，过期失败不推进；触发器阻止封版增改删及TRUNCATE，pdd_app只读，pdd_ingest仅插天气表。具体DB设计唯一见[m6方案](implementation/m6-overview-implementation.md)。
+- 2026-11-13本地修复：同内容先核对既有document摘要和manifest版本绑定，复用同一证据，不为每次检查创建文件或空目录；成功尝试时间仍更新、data_version保持。归档缺失或损坏不能假报成功；接收失败只记录真实失败，不遮蔽旧可用数据。真实发布时间更新、任一原文修订或解释版本变化仍保存必要新版，不限制为每天首次一次；目录按天显示最高有效修订，旧ID不失效。没有新增表或改变调度频率，待用户同意后上线。
 - 独立weather步骤加入现有10/14/18项目串行调度，天气不读取数仓凭据、不读群、不发卡；API和用户天气切日不拉来源，也不影响四域经营请求。历史从真实接入起积累，无原60天fallback。
 
 ### 已授权历史推广补齐（2026-10-30）

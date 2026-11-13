@@ -267,7 +267,7 @@ def test_upgrade_rolls_back_versions_tables_and_data_after_late_ddl_failure(
         DO $$ BEGIN
           IF to_regclass('public.source_reconciliations') IS NULL OR
              NOT EXISTS (SELECT 1 FROM public.alembic_version_v2
-                         WHERE version_num='20261111_16') THEN
+                         WHERE version_num='20261114_18') THEN
             RAISE EXCEPTION 'injection point did not reach final migration';
           END IF;
           RAISE EXCEPTION 'injected final migration failure';
@@ -280,7 +280,7 @@ def test_upgrade_rolls_back_versions_tables_and_data_after_late_ddl_failure(
         c.exec_driver_sql("SET ROLE pdd_app")
         raw = c.connection.driver_connection
         with monkeypatch.context() as patch:
-            patch.setattr(upgrade.renderer, "render_upgrade_sql", lambda: fault_sql)
+            patch.setattr(upgrade.renderer, "render_upgrade_sql", lambda start: fault_sql)
             with pytest.raises(psycopg.Error, match="injected final migration failure"):
                 upgrade.upgrade(raw, apply=True)
         assert c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar() == (
@@ -357,7 +357,7 @@ def test_index_timeout_rolls_back_direct_12_to_16(deployed12, monkeypatch):
         assert c.exec_driver_sql("SELECT count(*) FROM aftersales_reports_rpa").scalar() == 1
 
 
-@pytest.mark.parametrize("start", ["20261110_13", "20261110_14", "20261111_16", "head", "unknown"])
+@pytest.mark.parametrize("start", ["20261110_13", "20261110_14", "20261114_18", "head", "unknown"])
 def test_increment_renderer_refuses_unreviewed_start(start):
     renderer = load_script("bounded_index_renderer", "render-db-schema.py")
     with pytest.raises(RuntimeError, match="DEPLOY_MIGRATION_START_INVALID"):

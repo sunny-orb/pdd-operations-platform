@@ -162,6 +162,7 @@ def execute_source_schedule(
     )
     feishu = SourceProbes(warehouse_password, paths.feishu_root)
     probes = {code: lambda code=code: metadata.read(code) for code in WAREHOUSE_SOURCES}
+    probes["product_regions"] = lambda: feishu.read("product_regions")
     probes.update({code: lambda code=code: feishu.read(code) for code in FEISHU_SOURCES})
 
     if source_ids is not None:
@@ -180,6 +181,19 @@ def execute_source_schedule(
             heads = set(
                 connection.execute(sa.text("SELECT dataset_code FROM current_datasets")).scalars()
             )
+            # 调度已在同一项目锁内登记本轮周任务；普通补跑不消费周对账状态。
+            running_reconciliations = (
+                set(
+                    connection.execute(
+                        sa.text(
+                            "SELECT source_id FROM source_reconciliations WHERE status='running'"
+                        )
+                    ).scalars()
+                )
+                if not force
+                else set()
+            )
+            reconcile_sources = tuple(code for code in sources if code in running_reconciliations)
         bootstrap = bool(products) and not set(TABLES) <= heads
         product_steps = ("products",) if bootstrap else products
         steps = tuple(
@@ -202,6 +216,7 @@ def execute_source_schedule(
             only=steps,
             lock_connection=connection,
             product_sources=products or None,
+            **({"reconcile_sources": reconcile_sources} if reconcile_sources else {}),
         )
         outputs = result.get("datasets", {})
         states = {

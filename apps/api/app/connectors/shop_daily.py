@@ -8,7 +8,6 @@ import pymysql
 
 from app.connectors.retry import RetryBudget, execute_read
 from app.modules.sales.contracts import SalesError
-from app.modules.sales.normalization import normalize_shop_daily
 from app.modules.sales.source_policy import (
     MAX_ATTEMPTS,
     MAX_ROWS,
@@ -17,6 +16,7 @@ from app.modules.sales.source_policy import (
     SOURCE_TABLE,
     validate_read_window,
 )
+from app.modules.sales.window_incremental import normalize_sales_window
 
 
 class ShopDailyReader:
@@ -84,12 +84,16 @@ class ShopDailyReader:
             start = end
         return records
 
-    def read_stable(self, window):
+    def read_stable(self, window, *, allow_empty=False):
         """两遍完整必要投影相同才返回候选；不是上游快照或完整性保证。"""
         validate_read_window(window)
         for _ in range(MAX_ATTEMPTS):
-            before = normalize_shop_daily(self.read(window), window)
-            after = normalize_shop_daily(self.read(window), window)
+            before = normalize_sales_window(
+                "shop_daily", self.read(window), window, allow_empty=allow_empty
+            )
+            after = normalize_sales_window(
+                "shop_daily", self.read(window), window, allow_empty=allow_empty
+            )
             if before.fingerprint == after.fingerprint:
                 return after
         raise SalesError("SOURCE_CHANGED_DURING_READ", 503)

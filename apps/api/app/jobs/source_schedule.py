@@ -13,8 +13,8 @@ from app.modules.data_status.schedule_policy import (
     FEISHU_SOURCES,
     FEISHU_TIMES,
     RECONCILIATION_RETRY_SECONDS,
+    RECONCILIATION_SOURCES,
     RECONCILIATION_TIME,
-    WAREHOUSE_SOURCES,
     WAREHOUSE_TIMES,
     due_sources,
     first_reconciliation,
@@ -144,7 +144,7 @@ def run_scheduled_sources(
     clock = clock or (lambda: now or datetime.now(UTC))
     started = clock()
     slots = due_sources(started, warehouse_times, feishu_times)
-    if not probes.keys() <= set((*WAREHOUSE_SOURCES, *FEISHU_SOURCES)):
+    if not probes.keys() <= set((*RECONCILIATION_SOURCES, *FEISHU_SOURCES)):
         raise ValueError("INVALID_SCHEDULE_SCOPE")
     store = CheckpointStore(engine)
     with store.locked() as c:
@@ -205,7 +205,7 @@ def run_scheduled_sources(
                     reconciliation_time,
                     reconciliation_retry_seconds,
                 )
-                if not force and not cooling_down and code in WAREHOUSE_SOURCES
+                if not force and not cooling_down and code in RECONCILIATION_SOURCES
                 else None
             )
             if not regular and weekly_slot is None:

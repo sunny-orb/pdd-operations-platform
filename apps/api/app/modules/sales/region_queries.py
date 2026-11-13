@@ -27,13 +27,29 @@ PRODUCT_CTE_TEMPLATE = """WITH labeled AS (
  AND position('未设置' in source_product_code)=0
  THEN btrim(source_product_code)
  ELSE NULL END AS code
- FROM public.read_product_region_records WHERE dataset_version_id=:v
+ FROM {records} WHERE dataset_version_id=:v
  AND regexp_replace(coalesce(source_product_category,''),'[[:space:]_－—-]','','g')
  NOT IN ('包材','儿童赠品','分类未设置')
 ) """
-PRODUCT_CTE = PRODUCT_CTE_TEMPLATE.format(columns="*")
-# 候选目录只需名称与派生身份，避免物化全部金额/时间/原始列。
-PRODUCT_OPTIONS_CTE = PRODUCT_CTE_TEMPLATE.format(columns="source_product_name")
+PRODUCT_CTE = PRODUCT_CTE_TEMPLATE.format(columns="*", records="public.read_product_region_records")
+# 候选不依赖地区、日期、店铺和金额；只压缩本请求的完全相同资料文本。
+# MATERIALIZED阻止分类正则下推到每条经营事实；C只用于字节相同的早期去重，
+# 之后恢复来源列的default排序规则，保持名称聚合、搜索和最终分页顺序。
+PRODUCT_OPTIONS_CTE = """WITH descriptors AS MATERIALIZED (
+ SELECT DISTINCT source_product_category COLLATE "C" AS source_product_category,
+ source_style_code COLLATE "C" AS source_style_code,
+ source_product_code COLLATE "C" AS source_product_code,
+ source_product_name COLLATE "C" AS source_product_name
+ FROM public.read_product_region_records WHERE dataset_version_id=:v
+), """ + PRODUCT_CTE_TEMPLATE.removeprefix("WITH ").format(
+    columns="source_product_name",
+    records="""(SELECT CAST(:v AS text) AS dataset_version_id,
+        source_product_category COLLATE "default" AS source_product_category,
+        source_style_code COLLATE "default" AS source_style_code,
+        source_product_code COLLATE "default" AS source_product_code,
+        source_product_name COLLATE "default" AS source_product_name
+        FROM descriptors) original_collation""",
+)
 
 
 def validate_scope(q):

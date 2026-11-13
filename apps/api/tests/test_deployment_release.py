@@ -375,6 +375,7 @@ def test_deploy_uses_fixed_destination_and_whitelisted_payload(tmp_path, monkeyp
         "manage.py",
         "release.sh",
         "rollback.sh",
+        "storage.py",
     }
     assert payload["manifest"] == manifest()
 

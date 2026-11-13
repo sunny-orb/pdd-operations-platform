@@ -1,6 +1,6 @@
 """完整版本引用不可变事实块；不改变来源接收、版本身份或指标规则。
 
-写入口只接受随机本机测试库。调用者持有业务锁并在同一事务中完成验证与发布；
+写入口按本机或固定公司项目的显式策略验证。调用者持业务锁并在同一事务中验证与发布；
 既有物理事实保留，通过 read_* 视图同时读取两种表示。
 """
 
@@ -26,14 +26,19 @@ FACTS = {
 _BASE = build_metadata()
 
 
-def enabled(c):
-    """默认关闭；显式开启也不能对生产或普通本地项目库启用新写入。"""
-    if not Settings(_env_file=None).content_reuse_enabled:
-        return False
+def enabled(c, table_name=None):
+    """测试总开关不扩权；实际运行通过本机/公司策略逐表启用，不联动售后。"""
     from app.modules.database_retention import require_local_test
+    from app.modules.local_storage import content_enabled
 
-    require_local_test(c.engine)
-    return True
+    if Settings(_env_file=None).content_reuse_enabled:
+        require_local_test(c.engine)
+        return True
+    from app.modules import deployment_storage
+
+    return deployment_storage.content_enabled(c.engine, table_name) or content_enabled(
+        c.engine, table_name
+    )
 
 
 def read_name(name):
@@ -138,9 +143,9 @@ def write_version(c, table_name, version_id, rows):
     返回物理新增/复用块数及逻辑行数。所有块按同一顺序争用唯一键，避免并发
     相互等待；已提交块必须 sealed，不能先发布半成品再补写。
     """
-    from app.modules.database_retention import require_local_test
+    from app.modules.local_storage import require_content_write
 
-    require_local_test(c.engine)
+    require_content_write(c, table_name)
     if table_name not in FACTS:
         raise ValueError("CONTENT_TABLE")
     version = (

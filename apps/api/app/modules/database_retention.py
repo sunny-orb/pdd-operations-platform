@@ -1,4 +1,4 @@
-"""数据库整版保留：只读计划；写操作另加随机本机测试库硬边界。"""
+"""数据库整版保留：只读计划；写操作限定本机项目管理员或随机测试库。"""
 
 import hashlib
 import json
@@ -12,9 +12,10 @@ from pathlib import Path
 import sqlalchemy as sa
 from psycopg import sql
 
+from app.modules.local_storage import require_local_maintenance, verify_connection
 from migrations_v2.baseline_20261028.schema import build_metadata
 
-HEAD = "20261111_16"
+HEAD = "20261114_18"
 RECONCILIATIONS = "source_reconciliations"
 RECONCILIATION_COLUMNS = (
     "source_id",
@@ -87,6 +88,10 @@ def require_local_test(engine):
 def validate_schema(c):
     if c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2")) != HEAD:
         raise ValueError("RETENTION_SCHEMA_HEAD")
+    from app.modules import deployment_storage
+
+    if c.engine.url.database == deployment_storage.DATABASE:
+        return deployment_storage.verify_catalog(c)
     expected = {t.name for t in build_metadata().tables.values()} | {
         "weather_publications",
         "source_checkpoints",
@@ -310,7 +315,7 @@ def maintenance(engine):
     """固定顺序抢锁，整版30秒预算，任何失败整版回滚且不杀任务。"""
     from app.modules.sales.datasets import SPECS
 
-    require_local_test(engine)
+    require_local_maintenance(engine)
     limits = policy()
     keys = [
         "project-source-sync",
@@ -321,6 +326,7 @@ def maintenance(engine):
         "pdd-database-maintenance",
     ]
     with engine.connect().execution_options(isolation_level="READ COMMITTED") as c, c.begin():
+        verify_connection(c)
         c.execute(
             sa.text(
                 "SELECT set_config('lock_timeout',:lock,true), "
@@ -386,7 +392,14 @@ def _operation(c, manifest, receipt, kind):
                 "manifest": receipt["manifest_sha256"],
                 # 明确是测试证据，绝不声称本机两目录为生产独立双副本。
                 "locations": json.dumps(
-                    [{"kind": "local-test-bundle"}, {"kind": "isolated-pg-drill"}]
+                    [
+                        {
+                            "kind": "local-project-bundle"
+                            if manifest["database"] == "pdd_operations"
+                            else "local-test-bundle"
+                        },
+                        {"kind": "isolated-pg-drill"},
+                    ]
                 ),
                 "at": receipt["restored_at"],
             },
@@ -427,8 +440,8 @@ def _finish(c, ident):
 
 
 def apply(engine, selected, bundle, key):
-    """仅隔离本机库，一个已恢复验证完整版本；未知/过期/新增引用拒绝整次操作。"""
-    require_local_test(engine)
+    """仅授权本机库，一个已恢复验证完整版本；未知/过期/新增引用拒绝整次操作。"""
+    require_local_maintenance(engine)
     manifest, receipt = _receipt(bundle, key)
     if (
         manifest["database"] != engine.url.database
@@ -474,7 +487,7 @@ def restore(engine, bundle, key):
     """原ID/原值回填指定离线版本；不移动current，不回放包内DDL或覆盖已有业务行。"""
     from app.modules.database_archive import decrypt, restore_copy
 
-    require_local_test(engine)
+    require_local_maintenance(engine)
     manifest, receipt = _receipt(bundle, key)
     if manifest["database"] != engine.url.database or manifest["schema_head"] != HEAD:
         raise ValueError("ARCHIVE_SCHEMA_ADAPTER_REQUIRED")

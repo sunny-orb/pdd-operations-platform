@@ -1,4 +1,4 @@
-"""公司PG17现有库的12→16升级。默认只读核验，--apply执行固定增量。"""
+"""公司PG17现有库的12/16/17→18升级。默认只读核验，--apply执行固定增量。"""
 
 import argparse
 import importlib.util
@@ -20,8 +20,8 @@ renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
 
 from migrations_v2.company_db_objects import (
-    START_REVISION,
     TARGET_REVISION,
+    UPGRADE_STARTS,
     application_acl,
     protected_catalog,
     rpa_manifest,
@@ -95,7 +95,7 @@ def check_revision(connection):
     versions = connection.execute(
         "SELECT version_num FROM public.alembic_version_v2"
     ).fetchall()
-    if versions not in ([(START_REVISION,)], [(TARGET_REVISION,)]):
+    if len(versions) != 1 or versions[0][0] not in (*UPGRADE_STARTS, TARGET_REVISION):
         raise ValueError("DEPLOY_REVISION_MISMATCH")
     return versions[0][0]
 
@@ -168,15 +168,15 @@ def upgrade(connection, *, apply=False) -> str:
         require_idle_tasks(connection)
     if not apply:
         return "ready"
-    sql = renderer.render_upgrade_sql()
+    sql = renderer.render_upgrade_sql(revision)
     with connection.transaction():
         prepare_transaction(connection, read_only=False)
         if target_rpa_owner(connection) != owner:
             raise ValueError("DEPLOY_TARGET_MISMATCH")
         acquire_locks(connection)
-        if check_revision(connection) != START_REVISION:
+        if check_revision(connection) != revision:
             raise ValueError("DEPLOY_REVISION_MISMATCH")
-        before_rpa = verify_objects(connection, START_REVISION, owner)
+        before_rpa = verify_objects(connection, revision, owner)
         connection.execute("""
             LOCK TABLE public.alembic_version_v2, public.task_runs, public.dataset_versions,
                 public.current_datasets, public.aftersales_reports, public.version_inputs

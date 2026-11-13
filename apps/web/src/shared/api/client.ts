@@ -101,7 +101,11 @@ export async function getJson(path: string, signal?: AbortSignal): Promise<unkno
       } catch {
         // 网关可能返回HTML；状态码仍保留供有界恢复使用。
       }
-      throw new ApiError((code && messages[code]) || unavailable, response.status, code);
+      const message =
+        response.status === 409
+          ? "数据版本已更新，请重新读取。"
+          : (code && messages[code]) || unavailable;
+      throw new ApiError(message, response.status, code);
     }
     return await response.json();
   } catch (error) {

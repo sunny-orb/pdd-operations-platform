@@ -58,6 +58,8 @@ def describe_range(row, current):
 
 def publish_targets(engine, config, archive_root):
     """已确认配置→不可变两条范围目标及真实父版；失败保旧、同内容复用。"""
+    from app.modules.archive_store import require_archive
+
     from .publisher import canonical, fingerprint, private
 
     m = sa.MetaData()
@@ -104,10 +106,6 @@ def publish_targets(engine, config, archive_root):
                 raw = config() if callable(config) else config
                 rows = normalize_config(raw)
                 digest = fingerprint(dict(revision=REVISION, config=raw))
-                manifest = private(
-                    Path(archive_root) / run / "targets.json",
-                    canonical(dict(revision=REVISION, config=raw, rows=rows)),
-                )
                 with c.begin():
                     active = c.scalar(
                         sa.select(tasks.c.id)
@@ -121,14 +119,22 @@ def publish_targets(engine, config, archive_root):
                     )
                     if active is None:
                         raise ValueError("TASK_LEASE_LOST")
-                    existing = c.scalar(
-                        sa.select(v.c.id).where(
+                    existing = c.execute(
+                        sa.select(v.c.id, v.c.retained_input_ref, v.c.interpretation_ref).where(
                             v.c.dataset_code == "refund_targets",
                             v.c.content_fingerprint == digest,
                             v.c.state == "published",
                         )
-                    )
-                    vid = existing or str(uuid4())
+                    ).one_or_none()
+                    vid = existing.id if existing else str(uuid4())
+                    if existing:
+                        require_archive(existing.retained_input_ref)
+                        manifest = require_archive(existing.interpretation_ref)
+                    else:
+                        manifest = private(
+                            Path(archive_root) / run / "targets.json",
+                            canonical(dict(revision=REVISION, config=raw, rows=rows)),
+                        )
                     if not existing:
                         c.execute(
                             v.insert().values(

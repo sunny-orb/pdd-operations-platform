@@ -133,39 +133,44 @@ def publish_source(engine, code, receive, root):
             digest = fingerprint(
                 dict(revision=REVISION, producer=code_hash, end=end, raw=raw, rows=rows)
             )
-            evidence = private(
-                Path(root) / run / "interpretation.json",
-                canonical(
-                    dict(
-                        revision=REVISION,
-                        source=TABLES[code],
-                        period_start=end - timedelta(days=59),
-                        period_end=end,
-                        rows=len(rows),
-                        fingerprint=digest,
-                        note=NOTE,
-                        source_shop_aliases=SHOPS,
-                        quantity_evidence="1119 historical nonnull groups equal; finite scope only",
-                        amount_gate="blocked: platform subsidy and two material counterexamples",
-                        deletion_policy="stable double read; old versions retained",
-                    )
-                ),
-            )
+            # 完整内容校验后先核验旧输入与解释；同内容接收不创建空归档。
             with c.begin():
                 previous = c.execute(
-                    sa.select(v.c.retained_input_ref).where(
+                    sa.select(v.c.retained_input_ref, v.c.interpretation_ref).where(
                         v.c.dataset_code == code,
                         v.c.content_fingerprint == digest,
                         v.c.state == "published",
                     )
-                ).scalar_one_or_none()
-            archive = (
-                require_archive(previous)
-                if previous
-                else private(
+                ).one_or_none()
+            if previous:
+                archive = require_archive(previous.retained_input_ref)
+                evidence = require_archive(previous.interpretation_ref)
+            else:
+                evidence = private(
+                    Path(root) / run / "interpretation.json",
+                    canonical(
+                        dict(
+                            revision=REVISION,
+                            source=TABLES[code],
+                            period_start=end - timedelta(days=59),
+                            period_end=end,
+                            rows=len(rows),
+                            fingerprint=digest,
+                            note=NOTE,
+                            source_shop_aliases=SHOPS,
+                            quantity_evidence=(
+                                "1119 historical nonnull groups equal; finite scope only"
+                            ),
+                            amount_gate=(
+                                "blocked: platform subsidy and two material counterexamples"
+                            ),
+                            deletion_policy="stable double read; old versions retained",
+                        )
+                    ),
+                )
+                archive = private(
                     Path(root) / run / "input.ndjson", "\n".join(canonical(r) for r in raw) + "\n"
                 )
-            )
             with c.begin():
                 reuse = c.execute(
                     sa.select(v.c.id).where(

@@ -14,6 +14,20 @@
 
 本地API核验脚本使用Vite中间件实例时，配置会自动使用按进程隔离的`node_modules/.vite-verification/<pid>`缓存，避免覆盖5173页面服务的预构建依赖；调用方已显式指定缓存时沿用其目录，该目录也必须与页面服务隔离。额外启动普通浏览器测试服务也应指定独立`cacheDir`。如旧会话因缓存混用出现`Invalid hook call`白屏，先停止共用缓存的核验实例，重启前端（必要时在项目根目录执行`npm run dev --workspace @pdd/web -- --force`）并刷新页面；不要删除经营归档或重装依赖来处理。验证见跳转白屏修复（2026-11-10本地验收记录）。
 
+### 只运行前端
+
+默认不需要额外配置，`npm run dev` 会启动前后端，Vite 将 `/api` 转发到本机 `http://127.0.0.1:8000`。
+
+只改前端的同事安装项目要求的 Node.js 后，在项目根目录执行 `npm ci`，再创建 `apps/web/.env.development.local`，填入已获准访问的生产 API 域名：
+
+```dotenv
+PDD_DEV_API_TARGET=https://dashboard.example.com
+```
+
+用实际的 HTTPS 域名替换示例。地址只填协议和域名（如有非默认端口也填上）；前端会自行请求 `/api/v1/...`。然后在项目根目录运行 `npm run dev:web`，打开 <http://127.0.0.1:5173>。不需要安装 Python、启动 FastAPI 或配置数据库。代理沿用线上 API 的访问控制。
+
+该文件已被 Git 忽略；配置中只填写地址，不写账号或密码。修改配置后重启 Vite。此配置只影响开发服务器的 `/api` 代理，`/health` 仍指向本机后端，构建和部署不使用该地址。
+
 ## 本地 PostgreSQL
 
 沿用现有 PG17 容器、`pdd_operations` 项目库和独立 v2 迁移链。本机默认API 使用只读 `pdd_app`，接收使用 `pdd_ingest`，结构迁移由 `pdd_admin` 执行。公司部署的账号选择按[架构中的用户决定](architecture.md)：允许使用songbing及其现有读写权限；连接配置及独立初始化入口已按[部署方案](implementation/deployment.md)适配，本轮仅本地验证。

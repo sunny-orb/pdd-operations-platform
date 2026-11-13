@@ -173,6 +173,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 first_reconciliation,
                 next_check,
                 next_reconciliation,
+                source_retry_at,
                 source_times,
                 unconfirmed_receipt,
             )
@@ -229,6 +230,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 p = checkpoints.get(source.id, {})
                 datasets = [dataset(code, p, source_id=source.id) for code in source.datasets]
                 fixed_times = source_times(source.id, *schedule_args) if scheduled else ()
+                retry_at = source_retry_at(p) if fixed_times else None
                 sync_status = p.get("sync_status")
                 if fixed_times and sync_status:
                     # 该来源已有独立普通接收结果，优先于首轮对账前的旧任务证据。
@@ -326,7 +328,7 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                             observed_at=p.get("observed_at"),
                             web_updated_at=p.get("web_updated_at"),
                             web_checked_at=p.get("web_checked_at"),
-                            next_check_at=next_check(source.id, now, *schedule_args)
+                            next_check_at=(retry_at or next_check(source.id, now, *schedule_args))
                             if fixed_times
                             else None,
                             check_times=list(fixed_times),

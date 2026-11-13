@@ -220,7 +220,7 @@ def test_cli_status_works_from_other_cwd_without_engine_or_credentials(
         "monitor_enabled": False,
         "monitor_interval_seconds": 900,
         "source_schedule_enabled": False,
-        "warehouse_times": ["08:20", "09:10", "10:10", "10:50", "13:10", "15:10", "16:10"],
+        "warehouse_times": ["08:30", "09:40", "10:10", "10:50", "13:10", "15:10", "16:10"],
         "feishu_times": ["08:20", "10:10"],
         "reconciliation_time": "17:00",
         "reconciliation_retry_seconds": 300,

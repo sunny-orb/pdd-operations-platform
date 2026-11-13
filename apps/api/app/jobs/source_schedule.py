@@ -19,6 +19,7 @@ from app.modules.data_status.schedule_policy import (
     due_sources,
     first_reconciliation,
     next_reconciliation,
+    source_retry_at,
     unconfirmed_receipt,
 )
 from app.modules.database_residency import deferred_reason
@@ -30,9 +31,7 @@ def _ordinary_slot(prior, slot, started):
     if prior.get("scheduled_slot_at") != slot:
         return True
     interrupted = (
-        prior.get("sync_status") == "running"
-        or prior.get("check_status") == "checking"
-        or prior.get("error_code") == "MAINTENANCE_DEFERRED"
+        prior.get("check_status") == "checking" or prior.get("error_code") == "MAINTENANCE_DEFERRED"
     )
     return (
         interrupted
@@ -173,8 +172,29 @@ def run_scheduled_sources(
         for code in probes:
             slot = slots.get(code)
             prior = previous.get(code, {})
-            regular = force or _ordinary_slot(prior, slot, started)
+            if not force and prior.get("sync_status") == "running":
+                # 拿到项目锁后，遗留运行态的执行者已中断。以发现时刻作为重试起点。
+                with c.begin():
+                    store.write(
+                        c,
+                        code,
+                        sync_status="failed",
+                        sync_finished_at=started,
+                        error_code="SYNC_FAILED",
+                    )
+                prior = dict(prior, sync_status="failed", sync_finished_at=started)
+            fixed = _ordinary_slot(prior, slot, started)
+            retry_at = source_retry_at(prior)
             cycle = cycles.get(code)
+            weekly_retry_at = (
+                next_reconciliation(cycle, reconciliation_time, reconciliation_retry_seconds)
+                if cycle and cycle["status"] == "failed"
+                else None
+            )
+            cooling_down = any(
+                due_at is not None and started < due_at for due_at in (retry_at, weekly_retry_at)
+            )
+            regular = force or (not cooling_down and (fixed or retry_at is not None))
             weekly_slot = (
                 _reconciliation_slot(
                     store,
@@ -185,7 +205,7 @@ def run_scheduled_sources(
                     reconciliation_time,
                     reconciliation_retry_seconds,
                 )
-                if not force and code in WAREHOUSE_SOURCES
+                if not force and not cooling_down and code in WAREHOUSE_SOURCES
                 else None
             )
             if not regular and weekly_slot is None:
@@ -193,7 +213,7 @@ def run_scheduled_sources(
             if regular:
                 regular_codes.add(code)
             with c.begin():
-                if regular and not force:
+                if regular and fixed and not force:
                     same = prior.get("scheduled_slot_at") == slot
                     store.write(
                         c,

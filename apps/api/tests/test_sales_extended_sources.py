@@ -2,10 +2,13 @@
 
 from datetime import date
 from decimal import Decimal
+from unittest.mock import MagicMock
 
 import pytest
 
+from app.connectors import sales_sources
 from app.modules.sales.contracts import ReadWindow, SalesError
+from app.modules.sales.datasets import SPECS
 from app.modules.sales.source_normalization import normalize_source
 from app.modules.sales.source_policy import SHOPS
 
@@ -80,6 +83,29 @@ def sample(code, **changes):
 
 def window():
     return ReadWindow(date(2026, 2, 1), date(2026, 10, 27), tuple(SHOPS))
+
+
+def test_product_regions_uses_larger_limit_without_changing_other_sources(monkeypatch):
+    monkeypatch.setattr(sales_sources, "SOURCE_MAX_ROWS", 2)
+    monkeypatch.setattr(sales_sources, "PRODUCT_REGION_SOURCE_MAX_ROWS", 4)
+    monkeypatch.setattr(sales_sources, "SOURCE_PAGE_SIZE", 2)
+    monkeypatch.setattr(sales_sources, "execute_read", lambda *_: None)
+    one_day = ReadWindow(date(2026, 10, 26), date(2026, 10, 26), tuple(SHOPS))
+
+    def scan(code, count):
+        reader = sales_sources.SalesSourceReader.for_test(None)
+        reader.retry_budget = None
+        reader.connection = MagicMock()
+        cursor = reader.connection.cursor.return_value.__enter__.return_value
+        rows = [{"id": str(i)} for i in range(count)]
+        cursor.fetchall.side_effect = [rows[i : i + 2] for i in range(0, count + 1, 2)]
+        return reader._scan(SPECS[code], one_day)
+
+    assert len(scan("product_regions", 4)) == 4
+    with pytest.raises(SalesError, match="SOURCE_ROW_LIMIT"):
+        scan("product_regions", 5)
+    with pytest.raises(SalesError, match="SOURCE_ROW_LIMIT"):
+        scan("shop_regions", 3)
 
 
 @pytest.mark.parametrize(

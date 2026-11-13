@@ -9,7 +9,13 @@ from pymysql.constants import FIELD_TYPE
 
 from app.connectors.retry import RetryBudget, execute_read
 from app.modules.sales.contracts import SalesError
-from app.modules.sales.datasets import PROMOTION_METRICS, SOURCE_MAX_ROWS, SOURCE_PAGE_SIZE, SPECS
+from app.modules.sales.datasets import (
+    PRODUCT_REGION_SOURCE_MAX_ROWS,
+    PROMOTION_METRICS,
+    SOURCE_MAX_ROWS,
+    SOURCE_PAGE_SIZE,
+    SPECS,
+)
 from app.modules.sales.source_normalization import normalize_source
 from app.modules.sales.source_policy import MAX_ATTEMPTS, validate_read_window
 
@@ -46,6 +52,9 @@ class SalesSourceReader:
         self.connection.close()
 
     def _scan(self, spec, window):
+        max_rows = (
+            PRODUCT_REGION_SOURCE_MAX_ROWS if spec.code == "product_regions" else SOURCE_MAX_ROWS
+        )
         rows, start = [], window.start
         while start <= window.end:
             stop = min(start + timedelta(days=7), window.end + timedelta(days=1))
@@ -74,7 +83,7 @@ class SalesSourceReader:
                             raise SalesError("SOURCE_JSON_INVALID") from exc
                         row["metrics"] = {key: data.get(key) for key in PROMOTION_METRICS}
                     rows.append(row)
-                if len(rows) > SOURCE_MAX_ROWS:
+                if len(rows) > max_rows:
                     raise SalesError("SOURCE_ROW_LIMIT")
                 if len(page) < SOURCE_PAGE_SIZE:
                     break

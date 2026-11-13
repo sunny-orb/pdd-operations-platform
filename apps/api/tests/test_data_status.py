@@ -142,11 +142,28 @@ def test_failed_sync_keeps_accepted_marker_and_retries(sales_pg):
         row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
         assert row["observed_fingerprint"] != row["accepted_fingerprint"]
         assert row["error_code"] == "SYNC_FAILED"
+    early = run_monitor(
+        sales_pg,
+        probes,
+        lambda groups, c: {},
+        now=stamp + timedelta(minutes=20, seconds=59),
+    )
+    assert early["checked"] == 0
+
+    def temporarily_unavailable():
+        raise ValueError("synthetic probe failure")
+
+    run_monitor(
+        sales_pg,
+        {"shop_daily": temporarily_unavailable},
+        lambda groups, c: {},
+        now=stamp + timedelta(minutes=21),
+    )
     run_monitor(
         sales_pg,
         probes,
         lambda groups, c: dict.fromkeys(groups, True),
-        now=stamp + timedelta(minutes=32),
+        now=stamp + timedelta(minutes=26),
     )
     with sales_pg.connect() as c:
         row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()

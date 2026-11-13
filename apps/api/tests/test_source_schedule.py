@@ -16,10 +16,14 @@ def test_source_policy_checks_every_slot_and_preserves_legacy_scope():
     from app.modules.data_status.schedule_policy import LEGACY_SOURCES, LEGACY_STEPS, due_sources
 
     assert due_sources(at("08:19")) == {}
-    first = due_sources(at("08:20"))
+    assert set(due_sources(at("08:20"))) == {"shop_refunds", "sales_targets"}
+    assert "shop_daily" not in due_sources(at("08:29"))
+    assert due_sources(at("09:39"))["shop_daily"] == at("08:30")
+    assert due_sources(at("09:40"))["shop_daily"] == at("09:40")
+    first = due_sources(at("08:30"))
     assert len(first) == 10
-    assert len(due_sources(at("09:10"))) == 10  # 飞书最近到期槽仍08:20，仓储负责去重
-    assert first["shop_refunds"] == due_sources(at("09:10"))["shop_refunds"]
+    assert len(due_sources(at("09:40"))) == 10  # 飞书最近到期槽仍08:20，仓储负责去重
+    assert first["shop_refunds"] == due_sources(at("09:40"))["shop_refunds"]
     assert due_sources(at("10:10"))["shop_refunds"] != first["shop_refunds"]
     assert due_sources(at("16:10"))["shop_daily"].strftime("%H:%M") == "16:10"
     assert set(LEGACY_SOURCES) == {
@@ -49,9 +53,9 @@ def test_success_does_not_stop_later_checks_and_same_slot_deduplicates(sales_pg)
             sales_pg, {"shop_daily": lambda: {"revision": revision[0]}}, sync, now=at(t)
         )
 
-    assert run("08:20")["checked"] == 1
-    assert run("08:21")["checked"] == 0
-    assert run("09:10")["checked"] == 1
+    assert run("08:30")["checked"] == 1
+    assert run("08:31")["checked"] == 0
+    assert run("09:40")["checked"] == 1
     assert calls == ["shop_daily"]
     revision[0] = "v2"
     run("10:10")
@@ -61,25 +65,84 @@ def test_success_does_not_stop_later_checks_and_same_slot_deduplicates(sales_pg)
     assert calls == ["shop_daily"] * 2
 
 
-def test_failed_reception_retries_next_slot_and_processing_failure_does_not_redownload(sales_pg):
+def test_failed_reception_retries_after_each_finish_until_success(sales_pg):
     from app.jobs.source_schedule import run_scheduled_sources
 
-    outcomes = [False, True, True]
+    outcomes = iter((False, False, False, True))
     calls = []
+    now = at("08:30")
 
     def sync(sources, c):
-        calls.append(sources)
-        return {**dict.fromkeys(sources, outcomes.pop(0)), "_processing_failed": True}
+        nonlocal now
+        if not sources:
+            return {}
+        calls.append((now, sources))
+        now += timedelta(minutes=2)
+        return {**dict.fromkeys(sources, next(outcomes)), "_processing_failed": True}
 
     probes = {"shop_daily": lambda: {"revision": "same"}}
-    for stamp in ("08:20", "09:10", "10:10"):
-        run_scheduled_sources(sales_pg, probes, sync, now=at(stamp))
-    assert calls == [("shop_daily",), ("shop_daily",), ()]
+
+    def clock():
+        return now
+
+    for stamp in ("08:30", "08:36:59", "08:37", "08:43:59", "08:44", "08:51", "08:58", "09:40"):
+        now = at(stamp)
+        run_scheduled_sources(sales_pg, probes, sync, clock=clock)
+    assert calls == [(at(t), ("shop_daily",)) for t in ("08:30", "08:37", "08:44", "08:51")]
     with sales_pg.connect() as c:
         p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
         assert p["accepted_fingerprint"] == p["observed_fingerprint"]
         assert p["sync_status"] == "succeeded"
-        assert p["accepted_at"] == at("09:10")
+        assert p["accepted_at"] == at("08:53")
+        assert p["scheduled_attempts"] == 1
+
+
+def test_retry_waits_across_fixed_slot_and_status_shows_retry_time(sales_pg):
+    from app.jobs.project_sync import Schedule
+    from app.jobs.source_schedule import run_scheduled_sources
+    from app.modules.data_status.repository import read_status
+
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    finish = (now - timedelta(minutes=2)).replace(second=0, microsecond=0)
+    start = finish - timedelta(minutes=2)
+    regular_slots = (start.strftime("%H:%M"), finish.strftime("%H:%M"))
+    probe = {"shop_daily": lambda: {"revision": "new"}}
+    run_scheduled_sources(
+        sales_pg,
+        probe,
+        lambda ids, c: dict.fromkeys(ids, False),
+        now=start,
+        warehouse_times=regular_slots,
+    )
+    with sales_pg.begin() as c:
+        c.execute(sa.text("UPDATE source_checkpoints SET sync_finished_at=:at"), {"at": finish})
+    skipped = run_scheduled_sources(
+        sales_pg,
+        probe,
+        lambda ids, c: dict.fromkeys(ids, True),
+        now=finish + timedelta(minutes=4),
+        warehouse_times=regular_slots,
+    )
+    assert skipped["checked"] == 0
+    status = read_status(
+        sales_pg,
+        source_schedule=Schedule(
+            source_schedule_enabled=True,
+            warehouse_times=regular_slots,
+        ),
+    )["data"]
+    source = next(row for row in status["sources"] if row["id"] == "shop_daily")
+    assert source["upstream"]["next_check_at"] == finish + timedelta(minutes=5)
+    resumed = run_scheduled_sources(
+        sales_pg,
+        probe,
+        lambda ids, c: dict.fromkeys(ids, True),
+        now=finish + timedelta(minutes=5),
+        warehouse_times=regular_slots,
+    )
+    assert resumed["sources"] == ["shop_daily"]
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT scheduled_slot_at FROM source_checkpoints")) == finish
 
 
 def test_metadata_failure_preserves_observation_and_next_slot_retries(sales_pg):
@@ -88,7 +151,7 @@ def test_metadata_failure_preserves_observation_and_next_slot_retries(sales_pg):
     def fail():
         raise ValueError("secret must never persist")
 
-    run_scheduled_sources(sales_pg, {"shop_daily": fail}, lambda ids, c: {}, now=at("08:20"))
+    run_scheduled_sources(sales_pg, {"shop_daily": fail}, lambda ids, c: {}, now=at("08:30"))
     with sales_pg.connect() as c:
         p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
         assert p["check_status"] == "failed" and p["accepted_at"] is None
@@ -100,18 +163,18 @@ def test_policy_config_is_validated_and_survives_legacy_time_edits(tmp_path):
 
     path = tmp_path / "sync.toml"
     path.write_text(
-        'times=["10:00"]\nsource_schedule_enabled=true\nwarehouse_times=["08:20","16:10"]\nfeishu_times=["08:20","10:10"]\n'
+        'times=["10:00"]\nsource_schedule_enabled=true\nwarehouse_times=["08:30","16:10"]\nfeishu_times=["08:20","10:10"]\n'
     )
     config = read_schedule(path)
     assert config.source_schedule_enabled is True
-    assert config.warehouse_times == ("08:20", "16:10")
+    assert config.warehouse_times == ("08:30", "16:10")
 
 
 def test_selected_product_reader_only_projects_requested_table():
     from app.connectors.product_board import ProductBoardReader
 
     reader = object.__new__(ProductBoardReader)
-    reader.latest = lambda selected=None: at("08:20").date()
+    reader.latest = lambda selected=None: at("08:30").date()
     calls = []
     reader.projection = lambda code, end: calls.append(code) or []
     reader.read_stable(("product_promotion",))
@@ -134,7 +197,7 @@ def test_check_change_during_receipt_is_not_accepted_and_other_source_succeeds(s
             "shop_ratings": lambda: {"revision": "stable"},
         },
         sync,
-        now=at("08:20"),
+        now=at("08:30"),
     )
     assert result["pending"] == 1
     with sales_pg.connect() as c:
@@ -154,7 +217,7 @@ def test_project_lock_prevents_scheduled_probe(sales_pg):
         c.commit()
         try:
             result = run_scheduled_sources(
-                sales_pg, {"shop_daily": lambda: 1 / 0}, lambda ids, c: 1 / 0, now=at("08:20")
+                sales_pg, {"shop_daily": lambda: 1 / 0}, lambda ids, c: 1 / 0, now=at("08:30")
             )
             assert result["status"] == "already_running"
         finally:
@@ -168,7 +231,7 @@ def test_fixed_schedule_status_has_next_slot_and_source_specific_sync(sales_pg):
     from app.modules.data_status.repository import read_status
 
     stamp = datetime.now(ZoneInfo("Asia/Shanghai")).replace(
-        hour=8, minute=20, second=0, microsecond=0
+        hour=8, minute=30, second=0, microsecond=0
     ) - timedelta(days=1)
     run_scheduled_sources(
         sales_pg,
@@ -188,7 +251,7 @@ def test_fixed_schedule_status_has_next_slot_and_source_specific_sync(sales_pg):
     assert data["monitor"]["source_schedule_enabled"] is True
 
 
-def test_interrupted_slot_recovery_is_bounded_and_next_day_is_new(sales_pg):
+def test_interrupted_receipt_recovers_after_five_minutes_without_using_fixed_slot(sales_pg):
     from app.jobs.source_schedule import run_scheduled_sources
 
     calls = []
@@ -198,20 +261,23 @@ def test_interrupted_slot_recovery_is_bounded_and_next_day_is_new(sales_pg):
         calls.append(ids)
         return dict.fromkeys(ids, True)
 
-    run_scheduled_sources(sales_pg, probe, sync, now=at("08:20"))
+    run_scheduled_sources(sales_pg, probe, sync, now=at("08:30"))
     with sales_pg.begin() as c:
         c.execute(
             sa.text("UPDATE source_checkpoints SET sync_status='running',sync_finished_at=NULL")
         )
-    assert run_scheduled_sources(sales_pg, probe, sync, now=at("08:25"))["checked"] == 0
-    assert run_scheduled_sources(sales_pg, probe, sync, now=at("08:41"))["checked"] == 1
+    assert run_scheduled_sources(sales_pg, probe, sync, now=at("08:35"))["checked"] == 0
+    assert run_scheduled_sources(sales_pg, probe, sync, now=at("08:39:59"))["checked"] == 0
+    assert run_scheduled_sources(sales_pg, probe, sync, now=at("08:40"))["checked"] == 1
     with sales_pg.begin() as c:
         c.execute(
             sa.text("UPDATE source_checkpoints SET sync_status='running',sync_finished_at=NULL")
         )
-    assert run_scheduled_sources(sales_pg, probe, sync, now=at("09:01"))["checked"] == 0
+    assert run_scheduled_sources(sales_pg, probe, sync, now=at("09:11"))["checked"] == 0
+    assert run_scheduled_sources(sales_pg, probe, sync, now=at("09:16"))["checked"] == 1
+    assert calls == [("shop_daily",)] * 3
     assert (
-        run_scheduled_sources(sales_pg, probe, sync, now=at("08:20") + timedelta(days=1))["checked"]
+        run_scheduled_sources(sales_pg, probe, sync, now=at("08:30") + timedelta(days=1))["checked"]
         == 1
     )
 
@@ -225,7 +291,7 @@ def test_schedule_database_rejects_incomplete_sync_times(sales_pg):
         sales_pg,
         {"shop_daily": lambda: {"revision": "one"}},
         lambda ids, c: dict.fromkeys(ids, True),
-        now=at("08:20"),
+        now=at("08:30"),
     )
     with pytest.raises(sa.exc.IntegrityError), sales_pg.begin() as c:
         c.execute(sa.text("UPDATE source_checkpoints SET sync_status=NULL"))
@@ -252,7 +318,7 @@ def test_new_schedule_does_not_retry_legacy_aftersales_processing(sales_pg, tmp_
         paths=paths_for(tmp_path),
         warehouse_password=lambda: "unused",
         warehouse_headers=lambda: {},
-        now=at("08:20"),
+        now=at("08:30"),
     )
     assert "aftersales_report" not in selected
 
@@ -363,20 +429,20 @@ def test_page_reader_updates_web_evidence_and_login_failure_keeps_success(sales_
         sales_pg,
         {"shop_daily": lambda: observation},
         lambda ids, c: dict.fromkeys(ids, True),
-        now=at("08:20"),
+        now=at("08:30"),
     )
 
     def login_expired():
         raise WarehousePageError("WAREHOUSE_WEB_LOGIN_REQUIRED")
 
     run_scheduled_sources(
-        sales_pg, {"shop_daily": login_expired}, lambda ids, c: {}, now=at("09:10")
+        sales_pg, {"shop_daily": login_expired}, lambda ids, c: {}, now=at("09:40")
     )
     with sales_pg.connect() as c:
         row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
     assert row["web_updated_at"] == observation["updated_at"]
-    assert row["web_checked_at"] == at("08:20")
-    assert row["accepted_at"] == at("08:20")
+    assert row["web_checked_at"] == at("08:30")
+    assert row["accepted_at"] == at("08:30")
     assert row["error_code"] == "WAREHOUSE_WEB_LOGIN_REQUIRED"
 
 
@@ -405,7 +471,7 @@ def test_injected_page_reader_is_used_without_backend_auth(sales_pg, tmp_path, m
         paths=paths_for(tmp_path),
         warehouse_password=forbidden,
         warehouse_reader=Reader(),
-        now=at("08:20"),
+        now=at("08:30"),
         source_ids=("shop_daily",),
     )
     assert result["checked"] == 1
@@ -755,7 +821,7 @@ def test_first_weekly_attempt_preserves_legacy_failure_and_available_version(sal
     assert row()["datasets"][0]["last_attempt_at"] == legacy_at
     assert row()["reconciliation"]["status"] == "deferred"
 
-    monday = sunday + timedelta(hours=15, minutes=20)
+    monday = sunday + timedelta(hours=15, minutes=30)
     run_scheduled_sources(sales_pg, probes, lambda ids, c: dict.fromkeys(ids, True), now=monday)
     result = row()
     assert result["platform_state"] == "available"
@@ -785,9 +851,9 @@ def test_unconfirmed_ordinary_receipt_retries_when_marker_reverts_and_probe_fail
     def run(stamp):
         return run_scheduled_sources(sales_pg, {"shop_daily": probe}, sync, now=at(stamp))
 
-    run("08:20")
+    run("08:30")
     revision = "new"
-    assert run("09:10")["pending"] == 1
+    assert run("09:40")["pending"] == 1
     revision = None
     run("10:10")
     revision = "accepted"

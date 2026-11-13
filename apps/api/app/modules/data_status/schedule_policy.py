@@ -3,8 +3,9 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-WAREHOUSE_TIMES = ("08:20", "09:10", "10:10", "10:50", "13:10", "15:10", "16:10")
+WAREHOUSE_TIMES = ("08:30", "09:40", "10:10", "10:50", "13:10", "15:10", "16:10")
 FEISHU_TIMES = ("08:20", "10:10")
+SOURCE_RETRY_SECONDS = 300
 RECONCILIATION_TIME = "17:00"
 RECONCILIATION_RETRY_SECONDS = 300
 WAREHOUSE_SOURCES = (
@@ -104,3 +105,12 @@ def unconfirmed_receipt(checkpoint):
         return False
     accepted = checkpoint.get("accepted_at")
     return accepted is None or accepted < checkpoint["sync_finished_at"]
+
+
+def source_retry_at(checkpoint):
+    """从最近一次失败或待复核结果计算普通接收的下次重试时间。"""
+    if checkpoint.get("sync_status") != "failed" and not unconfirmed_receipt(checkpoint):
+        return None
+    finished = checkpoint["sync_finished_at"]
+    checked = checkpoint.get("checked_at") or finished
+    return max(finished, checked) + timedelta(seconds=SOURCE_RETRY_SECONDS)

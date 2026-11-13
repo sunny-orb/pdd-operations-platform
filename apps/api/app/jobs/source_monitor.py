@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import sqlalchemy as sa
 
 from app.modules.data_status.catalog import BY_ID, job_for
+from app.modules.data_status.schedule_policy import SOURCE_RETRY_SECONDS
 from app.modules.database_residency import deferred_reason
 
 
@@ -41,7 +42,7 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                 if not result.rowcount:
                     c.execute(table.insert().values(source_id=code, **values))
 
-        def observe(code):
+        def observe(code, *, retry_error=None):
             started = time.monotonic()
             write(code, checked_at=clock(), check_status="checking", error_code=None)
             try:
@@ -66,7 +67,7 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                     code,
                     checked_at=clock(),
                     check_status="failed",
-                    error_code="CHECK_FAILED",
+                    error_code=retry_error or "CHECK_FAILED",
                     duration_ms=int((time.monotonic() - started) * 1000),
                 )
                 return None
@@ -78,29 +79,65 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                     r["job_code"]: r
                     for r in c.execute(
                         sa.text("""
-                    SELECT DISTINCT ON(job_code) job_code,status,lease_expires_at FROM task_runs
+                    SELECT DISTINCT ON(job_code) job_code,status,lease_expires_at,finished_at
+                    FROM task_runs
                     ORDER BY job_code,queued_at DESC,id DESC
                 """)
                     ).mappings()
                 }
             observed, groups = {}, []
+            retry_groups = {}
+            retry_interval = timedelta(seconds=SOURCE_RETRY_SECONDS)
             for code in probes:
                 prior = previous.get(code)
-                if prior and started_at < prior["checked_at"] + timedelta(seconds=interval_seconds):
-                    continue
-                digest = observe(code)
-                observed[code] = digest
-                retry = any(
+                failed_tasks = [
                     task
+                    for job in (job_for(dataset) for dataset in BY_ID[code].datasets)
+                    if (task := tasks.get(job))
                     and (
                         task["status"] in ("failed", "abandoned", "cancelled")
                         or task["status"] == "running"
                         and task["lease_expires_at"] <= started_at
                     )
-                    for task in (tasks.get(job_for(code)) for code in BY_ID[code].datasets)
+                ]
+                retry_error = (prior or {}).get("error_code")
+                if not failed_tasks and retry_error not in (
+                    "SYNC_FAILED",
+                    "SOURCE_CHANGED_DURING_SYNC",
+                ):
+                    continue
+                checked = (prior or {}).get("checked_at")
+                stamps = [task["finished_at"] for task in failed_tasks if task["finished_at"]]
+                if checked:
+                    stamps.append(checked)
+                group = BY_ID[code].group
+                retry_groups[group] = max(
+                    max(stamps) + retry_interval if stamps else started_at,
+                    retry_groups.get(group, started_at),
                 )
-                if digest and (digest != (prior or {}).get("accepted_fingerprint") or retry):
-                    group = BY_ID[code].group
+
+            for code in probes:
+                prior = previous.get(code) or {}
+                group = BY_ID[code].group
+                retry_at = retry_groups.get(group)
+                checked = prior.get("checked_at")
+                if retry_at is not None:
+                    if started_at < retry_at:
+                        continue
+                elif checked and started_at < checked + timedelta(seconds=interval_seconds):
+                    continue
+                digest = observe(
+                    code,
+                    retry_error=(
+                        "SOURCE_CHANGED_DURING_SYNC"
+                        if prior.get("error_code") == "SOURCE_CHANGED_DURING_SYNC"
+                        else "SYNC_FAILED"
+                    )
+                    if retry_at is not None
+                    else None,
+                )
+                observed[code] = digest
+                if digest and (digest != prior.get("accepted_fingerprint") or retry_at is not None):
                     if group not in groups:
                         groups.append(group)
             # 同一一致性组只接收一次；先检查完所有来源，失败来源不误当已追平。
@@ -125,7 +162,7 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                         code, checked_at=clock(), check_status="succeeded", error_code="SYNC_FAILED"
                     )
                     continue
-                after = observe(code)
+                after = observe(code, retry_error="SOURCE_CHANGED_DURING_SYNC")
                 if after == digest:
                     write(
                         code,

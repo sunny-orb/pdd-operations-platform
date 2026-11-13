@@ -119,7 +119,7 @@
   display: grid;
   grid-template-columns: minmax(6.5em, 1fr) minmax(5.25em, auto) minmax(5em, auto);
   align-items: baseline;
-  gap: 8px;
+  gap: 3px 8px;
   margin-top: 4px;
 }
 
@@ -143,6 +143,12 @@
   display: block;
   color: #5d708a;
   font-weight: 400;
+}
+
+.m3-sales-scope .sales-performance-tooltip-day-change {
+  grid-column: 2 / -1;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .m3-sales-scope .sales-performance-keyboard-tooltip {

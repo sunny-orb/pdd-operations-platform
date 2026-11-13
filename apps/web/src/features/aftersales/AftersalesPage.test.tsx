@@ -60,20 +60,20 @@ const meta = {
   ],
 };
 const labels = [
-  "实退数量",
-  "实际入库金额",
-  "支付口径GMV",
-  "售前退款率",
-  "售后退款率",
-  "总退款率",
-  "售后记录",
-  "尺码问题",
-  "质量问题",
+  ["returned_qty", "实退数量"],
+  ["inbound_amount", "实际入库金额"],
+  ["gmv", "支付口径GMV"],
+  ["presale_rate", "售前退款率"],
+  ["aftersale_rate", "售后退款率"],
+  ["total_rate", "总退款率"],
+  ["records", "售后记录"],
+  ["size_qty", "尺码问题"],
+  ["quality_qty", "质量问题"],
 ];
 const overview = {
   report: null,
-  metrics: labels.map((label, i) => ({
-    key: String(i),
+  metrics: labels.map(([key, label]) => ({
+    key,
     label,
     type: "number",
     value: null,
@@ -81,8 +81,14 @@ const overview = {
     note: "非订单数",
     status: "source_unavailable",
   })),
-  risk_metrics: ["总退款率", "退款金额", "较上期变化", "目标差距", "预计损失"].map((label) => ({
-    key: label,
+  risk_metrics: [
+    ["total_rate", "总退款率"],
+    ["total_amount", "退款金额"],
+    ["change_pp", "较上期变化"],
+    ["target_gap", "目标差距"],
+    ["excess_estimate", "预计损失"],
+  ].map(([key, label]) => ({
+    key,
     label,
     type: "number",
     value: null,
@@ -110,7 +116,11 @@ const overview = {
     status: "待验证",
     note: "阶段字段待补",
   })),
-  size_breakdown: ["偏大", "偏小", "未说明"].map((name) => ({ name, qty: null, share: null })),
+  size_breakdown: ["尺码偏大", "尺码偏小", "尺码不合适未说明"].map((name) => ({
+    name,
+    qty: name === "尺码偏小" ? "0" : null,
+    share: name === "尺码偏小" ? "0" : null,
+  })),
   reasons: [],
   trend: [],
   scope_note: "当前报告范围",
@@ -222,7 +232,7 @@ it("同页链接PUSH后退回初始历史项也取消草稿", async () => {
 it("完整空态保留共享导航和正文筛选、九卡，缺数据不假零；重置保留标签与折叠", async () => {
   const user = userEvent.setup();
   mount();
-  await screen.findByText("没有来源，不生成经营判断");
+  await screen.findByRole("heading", { name: "数据待核对" });
   expect(screen.getByRole("navigation", { name: "本页目录" })).toBeTruthy();
   const filters = screen.getByRole("region", { name: "售后分析筛选条件" });
   expect(within(filters).getByRole("combobox", { name: "报告周期" })).toBeTruthy();
@@ -231,9 +241,23 @@ it("完整空态保留共享导航和正文筛选、九卡，缺数据不假零�
   );
   await user.click(screen.getByRole("button", { name: "指标与整改明细" }));
   await waitFor(() => expect(screen.getByRole("region", { name: "售后九项指标" })).toBeTruthy());
+  const risk = within(screen.getByRole("region", { name: "风险五项指标" }));
+  expect(risk.getAllByText("待核对")).toHaveLength(5);
+  const insights = screen.getByRole("region", { name: "本期售后风险与优化建议" });
+  expect(within(insights).getByText("总体趋势")).toBeTruthy();
   expect(
-    within(screen.getByRole("region", { name: "售后九项指标" })).getAllByText("—").length,
-  ).toBe(9);
+    within(insights)
+      .getAllByRole("heading", { level: 3 })
+      .map((item) => item.textContent),
+  ).toEqual(["异常品类 Top 5", "异常单款 Top 5", "品类优化 Top 3", "单款优化 Top 3"]);
+  const reading = screen.getByRole("region", { name: "管理层阅读口径" });
+  expect(within(reading).getByText("当前报告范围")).toBeTruthy();
+  expect(within(reading).getByText("来源尚不可用")).toBeTruthy();
+  const metrics = within(screen.getByRole("region", { name: "售后九项指标" }));
+  expect(metrics.getAllByText("—")).toHaveLength(9);
+  expect(metrics.getAllByText("来源待接入")).toHaveLength(9);
+  const smaller = screen.getByText("偏小").closest("article")!;
+  expect(within(smaller).getByText("0")).toBeTruthy();
   await user.click(screen.getByRole("tab", { name: "单款分析" }));
   await screen.findByText("style范围说明");
   await user.type(within(filters).getByRole("searchbox", { name: "单款/原因搜索" }), "ABC");
@@ -276,8 +300,24 @@ it("明细按后端页码请求并显示返回页，筛选改变重回第一页"
   expect(new URL(last, "http://localhost").searchParams.get("page")).toBe("1");
 });
 
-it("自定义30天报告明确滚动窗口且不冒称自然周", async () => {
+it("滚动30天周报对齐原版标题，并明确实际日期和非自然周", async () => {
   mount(false, true);
-  await screen.findByText("2026-09-28 至 2026-10-27（滚动30天，非自然周）");
-  expect(screen.getByRole("heading", { name: "近30天退货分析 · 滚动报告" })).toBeTruthy();
+  await screen.findByText("2026-09-28 至 2026-10-27（滚动 30 天，非自然周）");
+  expect(screen.getByRole("heading", { name: "近 30 天退货分析 · 周报" })).toBeTruthy();
+});
+
+it("缺少行动数据时保留三个卡位，整改入口仍展开明细", async () => {
+  const user = userEvent.setup();
+  mount(false, true);
+  await screen.findByRole("heading", { name: "数据待核对" });
+  const brief = within(screen.getByRole("region", { name: "主风险与优先行动" }));
+  expect(brief.getByText("总退款率 · 影响金额 —")).toBeTruthy();
+  for (const slot of [1, 2, 3]) {
+    expect(brief.getByText(`优先行动 ${slot}`)).toBeTruthy();
+  }
+  await user.click(brief.getAllByRole("button", { name: /查看整改清单/ })[0]);
+  expect(screen.getByRole("button", { name: "指标与整改明细" }).getAttribute("aria-expanded")).toBe(
+    "true",
+  );
+  expect(screen.getByRole("heading", { name: "整改行动清单" })).toBeTruthy();
 });

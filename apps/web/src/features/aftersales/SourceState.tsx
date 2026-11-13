@@ -9,7 +9,13 @@ const statusLabels: Record<string, string> = {
   observed: "已接入，口径待核",
   new_input_pending_report: "新输入已接收，报告待重算",
 };
-export function SourceState({ meta }: { meta: Meta | undefined }) {
+export function SourceState({
+  meta,
+  reportGeneratedAt,
+}: {
+  meta: Meta | undefined;
+  reportGeneratedAt?: string | null;
+}) {
   return (
     <details className="m5-source-state">
       <summary>
@@ -20,6 +26,7 @@ export function SourceState({ meta }: { meta: Meta | undefined }) {
         最近成功：{localTime(meta?.last_success_at)}；最近尝试：{localTime(meta?.last_attempt_at)}
         。页面刷新只读本地已发布结果。
       </p>
+      {reportGeneratedAt && <p>报告生成：{localTime(reportGeneratedAt)}</p>}
       <ul>
         {meta?.sources.map((source) => (
           <li key={source.code}>

@@ -158,6 +158,8 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
     );
   const formatted = (field: string, value: string | null | undefined) =>
     product ? productValue(value, field.includes("amount")) : count(value);
+  const productTotal = (field: string) =>
+    partial(total?.[field], d?.null_counts[field] ?? 0, formatted(field, total?.[field]));
   return (
     <section
       className={`dashboard-section region-section ${product ? "product-region-section" : ""}`}
@@ -350,7 +352,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
         <div className="region-overview">
           <div>
             <span>{product ? "实发金额（已知值合计）" : "地区成交金额"}</span>
-            <strong>{product ? productValue(total?.[main], true) : money(total?.[main])}</strong>
+            <strong>{product ? productTotal(main) : money(total?.[main])}</strong>
             <small>
               {product ? (
                 <>
@@ -383,7 +385,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                 <dt>
                   {product ? ["实发件数", "实退金额", "实退件数"][i] : ["成交订单", "成交买家"][i]}
                 </dt>
-                <dd>{formatted(f, total?.[f])}</dd>
+                <dd>{product ? productTotal(f) : formatted(f, total?.[f])}</dd>
               </div>
             ))}
           </dl>

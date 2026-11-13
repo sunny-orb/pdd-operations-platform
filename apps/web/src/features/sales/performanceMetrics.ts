@@ -27,20 +27,38 @@ export function dailyMetricValue(metric: SalesTrendMetric, value: string | null)
   }
 }
 
-/** 用首日原值比较，缺值或零基准返回空；只在输出图表比例时转换为数值。 */
-export function dailyRelativeChange(value: string | null, baseline: string | null) {
+function dailyDifference(value: string | null, baseline: string | null) {
   const point = decimalParts(value);
   const base = decimalParts(baseline);
-  if (!point || !base || base.coefficient === 0n) return null;
+  if (!point || !base) return null;
   const scale = Math.max(point.scale, base.scale);
   const amount = point.coefficient * 10n ** BigInt(scale - point.scale);
   const denominator = base.coefficient * 10n ** BigInt(scale - base.scale);
   const delta = (point.negative ? -amount : amount) - (base.negative ? -denominator : denominator);
+  return { delta, denominator, scale };
+}
+
+/** 用首日原值比较，缺值或零基准返回空；只在输出图表比例时转换为数值。 */
+export function dailyRelativeChange(value: string | null, baseline: string | null) {
+  const difference = dailyDifference(value, baseline);
+  if (!difference || difference.denominator === 0n) return null;
+  const { delta, denominator } = difference;
   const precision = 1_000_000_000_000n;
   const magnitude = delta < 0n ? -delta : delta;
   const rounded = (magnitude * precision + denominator / 2n) / denominator;
   const change = Number(delta < 0n ? -rounded : rounded) / Number(precision);
   return Number.isFinite(change) ? change : null;
+}
+
+/** 两期原始比率直接相减，乘 100 得到百分点。 */
+export function percentagePointChange(value: string | null, previous: string | null) {
+  const difference = dailyDifference(value, previous);
+  if (!difference) return "—";
+  const { delta, scale } = difference;
+  const points = formatFixedDecimal(`${delta}e${-scale}`, 2, 2);
+  if (points === null) return "—";
+  const sign = delta > 0n && points !== "0.00" ? "+" : "";
+  return `${sign}${points} 个百分点`;
 }
 
 export function baselineMetricState(value: string | null) {

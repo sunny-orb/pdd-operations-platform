@@ -37,10 +37,10 @@ export function AftersalesPage() {
     state.overview.error,
     state.analysis.error,
   ].filter(Boolean);
-  const openDetails = () => {
+  const openDetails = (target: string) => {
     setExpanded(true);
     requestAnimationFrame(() =>
-      document.getElementById("aftersales-details")?.scrollIntoView({
+      document.getElementById(target)?.scrollIntoView?.({
         behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
         block: "start",
       }),
@@ -69,7 +69,7 @@ export function AftersalesPage() {
             <span>最近成功：{localTime(meta?.last_success_at)}</span>
           </div>
         </section>
-        <SourceState meta={meta} />
+        <SourceState meta={meta} reportGeneratedAt={report?.generated_at} />
         <Filters state={state} />
         <div className="m5-request-status" aria-live="polite">
           {state.meta.isPending && <Spin size="small" aria-label="正在读取售后来源" />}
@@ -103,42 +103,40 @@ export function AftersalesPage() {
             description="保留原展示字段；缺少可核来源的金额、数量和退款率显示为不可用，不以历史快照或其他看板金额替代。"
           />
         )}
-        <section className="m5-report-heading">
-          <div>
-            <h2>
-              {report
-                ? rolling
-                  ? `近30天退货分析 · ${report.report_type === "weekly" ? "周报" : "滚动报告"}`
-                  : report.label
-                : "等待可核售后报告"}
-            </h2>
-            <p>
-              {report
-                ? `${report.period_start} 至 ${report.period_end}${rolling ? "（滚动30天，非自然周）" : ""}`
-                : "尚无已发布的相容报告期间"}
-            </p>
-            <small>报告生成：{localTime(report?.generated_at)}</small>
-          </div>
-          <div className="m5-report-links">
-            {[
-              { label: "飞书文档", url: report?.document_url },
-              { label: "分析表格", url: report?.sheet_url },
-            ].map((link) => (
-              <Button
-                key={link.label}
-                href={link.url || undefined}
-                target="_blank"
-                rel="noreferrer"
-                disabled={!link.url}
-              >
-                {link.label}
-              </Button>
-            ))}
-          </div>
-        </section>
-        <Brief data={data} openDetails={openDetails} />
+        <div className="m5-report-summary">
+          <section className="m5-report-heading">
+            <div>
+              <h2>
+                {report ? (rolling ? "近 30 天退货分析 · 周报" : report.label) : "等待可核售后报告"}
+              </h2>
+              <p>
+                {report
+                  ? `${report.period_start} 至 ${report.period_end}${rolling ? "（滚动 30 天，非自然周）" : ""}`
+                  : "尚无已发布的相容报告期间"}
+              </p>
+            </div>
+            <div className="m5-report-links">
+              {[
+                { label: "飞书文档", url: report?.document_url },
+                { label: "分析表格", url: report?.sheet_url },
+              ].map((link) => (
+                <Button
+                  key={link.label}
+                  href={link.url || undefined}
+                  target="_blank"
+                  rel="noreferrer"
+                  disabled={!link.url}
+                >
+                  {link.label}
+                </Button>
+              ))}
+            </div>
+          </section>
+          <Brief data={data} openDetails={openDetails} />
+        </div>
         <section id="aftersales-details" className="m5-details">
           <Collapse
+            ghost
             activeKey={expanded ? ["details"] : []}
             onChange={(keys) => setExpanded(keys.includes("details"))}
             items={[{ key: "details", label: "指标与整改明细", children: <Details data={data} /> }]}

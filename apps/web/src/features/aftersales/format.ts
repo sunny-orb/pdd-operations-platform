@@ -24,3 +24,20 @@ export function localTime(value: string | null | undefined) {
       ? value
       : new Date(value).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false });
 }
+
+/** 摘要卡和图表沿用周报的一位百分比及两位金额精度。 */
+export function formatReportValue(value: string | null | undefined, type?: string) {
+  if (type === "currency") return formatFixedDecimal(value, 2, 0, true) ?? "—";
+  if (type === "percent") {
+    const text = formatFixedDecimal(value, 1, 2);
+    return text === null ? "—" : `${text}%`;
+  }
+  return formatValue(value, type);
+}
+
+export function formatRateChange(value: string | null | undefined) {
+  const points = formatFixedDecimal(value, 1);
+  if (points === null) return "暂无可比较上期";
+  if (points === "0.0") return "较上期持平";
+  return points.startsWith("-") ? `较上期下降 ${points.slice(1)}pct` : `较上期上升 ${points}pct`;
+}

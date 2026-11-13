@@ -127,6 +127,19 @@ it("后台地区金额恢复原型行内占比条", async () => {
   expect(bar).not.toBeNull();
   expect(bar.style.width).toBe("50%");
 });
+it("产品地区合计就地标出部分有值，全空与真实零保持不同", async () => {
+  const { container } = render(<SalesRegions filters={filters} onConflict={onConflict} />);
+  const overview = within(
+    container.querySelector<HTMLElement>("#product-regions .region-overview")!,
+  );
+  expect(await overview.findByText("¥100.00*")).toHaveProperty(
+    "title",
+    "仅已知值合计，1条来源记录缺此字段",
+  );
+  expect(overview.getByText("实发件数").nextElementSibling?.textContent).toBe("2*");
+  expect(overview.getByText("实退金额").nextElementSibling?.textContent).toBe("—");
+  expect(overview.getByText("实退件数").nextElementSibling?.textContent).toBe("0");
+});
 it("各来源失败明确保留上次成功值及日期，退款也独立显示", async () => {
   const { container } = render(
     <>

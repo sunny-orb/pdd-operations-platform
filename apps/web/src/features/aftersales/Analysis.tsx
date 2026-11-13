@@ -11,7 +11,14 @@ export function Analysis({ state }: { state: AftersalesState }) {
     (column) => ({
       key: column.key,
       title: column.label,
-      width: column.type === "list" ? 260 : column.type === "text" ? 170 : 145,
+      width:
+        column.type === "list"
+          ? 205
+          : column.key === "category"
+            ? 88
+            : column.type === "text"
+              ? 145
+              : 98,
       render: (_, row) => {
         const cell = row.cells[column.key];
         return (
@@ -42,16 +49,19 @@ export function Analysis({ state }: { state: AftersalesState }) {
   return (
     <section className="m5-analysis" id="aftersales-analysis">
       <Tabs
+        type="card"
         activeKey={scope.view}
         onChange={(view) => state.change({ view: view as View })}
         items={views.map((view) => ({ key: view.key, label: view.label }))}
       />
-      <div className="m5-panel">
+      <div className="m5-panel m5-analysis-panel">
         <div className="m5-panel-heading">
-          <h2>{views.find((v) => v.key === scope.view)?.label}</h2>
+          <div>
+            <h2>{views.find((v) => v.key === scope.view)?.label}</h2>
+            <p className="m5-scope-note">{data?.scope_note ?? "等待报告查询"}</p>
+          </div>
           <span>{data?.total ?? 0} 条</span>
         </div>
-        <p className="m5-scope-note">{data?.scope_note ?? "等待报告查询"}</p>
         <Table
           className="m5-analysis-table"
           rowKey="id"
@@ -59,7 +69,13 @@ export function Analysis({ state }: { state: AftersalesState }) {
           dataSource={data?.rows ?? []}
           loading={state.analysis.isFetching}
           size="small"
-          scroll={{ x: Math.max(650, columns.length * 155), y: 480 }}
+          scroll={{
+            x: Math.max(
+              650,
+              columns.reduce((total, column) => total + Number(column.width), 0),
+            ),
+            y: 480,
+          }}
           locale={{
             emptyText: (
               <Empty

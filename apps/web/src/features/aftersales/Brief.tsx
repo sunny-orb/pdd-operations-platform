@@ -1,52 +1,66 @@
-import { Button, Empty, Tag } from "antd";
+import { Button } from "antd";
+import { formatFixedDecimal, isNegative } from "../../shared/format/decimal";
 import type { Overview } from "./contracts";
-import { formatValue } from "./format";
+
+type DetailTarget = "aftersales-risk-overview" | "aftersales-action-list";
+
 export function Brief({
   data,
   openDetails,
 }: {
   data: Overview | undefined;
-  openDetails: () => void;
+  openDetails: (target: DetailTarget) => void;
 }) {
+  const decision = data?.decision;
+  const rate = formatFixedDecimal(decision?.rate, 1, 2);
+  const amount = formatFixedDecimal(decision?.amount, 2, 0, true);
+  const amountShare = formatFixedDecimal(decision?.amount_share, 1, 2);
+  const change = formatFixedDecimal(decision?.change_pp, 1);
+  const status =
+    !decision?.status || decision.status === "pending_validation" ? "待验证" : decision.status;
+
   return (
     <section className="m5-decision" id="aftersales-decision" aria-label="主风险与优先行动">
       <article className="m5-decision-card m5-main-risk">
         <div className="m5-card-caption">
-          主风险 <Tag>{data?.decision.status ?? "待核验"}</Tag>
+          <span>主风险</span>
+          <span className={`m5-decision-badge${status === "待整改" ? " is-risk" : ""}`}>
+            {status}
+          </span>
         </div>
-        <h2>{data?.decision.title ?? "等待售后报告"}</h2>
-        <strong>{formatValue(data?.decision.rate, "percent")}</strong>
-        <p>
-          实际入库金额 {formatValue(data?.decision.amount, "currency")} · 金额占比{" "}
-          {formatValue(data?.decision.amount_share, "percent")}
+        <h3>{decision?.title ?? "等待售后报告"}</h3>
+        <strong>{rate === null ? "—" : `${rate}%`}</strong>
+        <p>总退款率 · 影响金额 {amount ?? "—"}</p>
+        <p title={decision?.note}>
+          {change === null
+            ? "较上期 —"
+            : change === "0.0"
+              ? "较上期持平"
+              : `较上期${isNegative(decision?.change_pp) ? "下降" : "上升"} ${change.replace(/^-/, "")} 个百分点`}
+          {"，退款金额占比 "}
+          {amountShare === null ? "—" : `${amountShare}%`}
         </p>
-        <p>较上期 {formatValue(data?.decision.change_pp, "points")}</p>
-        <small>{data?.decision.note ?? "正在读取本地报告状态"}</small>
-        <Button type="link" onClick={openDetails}>
+        <Button type="link" onClick={() => openDetails("aftersales-risk-overview")}>
           查看风险明细 →
         </Button>
       </article>
-      {data?.priorities.length ? (
-        data.priorities.slice(0, 3).map((item, index) => (
-          <article className="m5-decision-card m5-priority" key={item.id}>
+      {[1, 2, 3].map((slot) => {
+        const item = data?.priorities[slot - 1];
+        return (
+          <article className="m5-decision-card m5-priority" key={slot}>
             <div className="m5-card-caption">
-              优先行动 {index + 1} · {item.kind}
+              <span>优先行动 {slot}</span>
+              <span className="m5-decision-badge">{item ? "待验证" : "待补充"}</span>
             </div>
-            <h3>{item.title}</h3>
-            <p>{item.detail}</p>
-            <small>{item.verification}</small>
-            <Button type="link" onClick={openDetails}>
+            <h3>{item?.title || "暂无可核查行动"}</h3>
+            <p>{item?.detail || "—"}</p>
+            <small>验证：{item?.verification || "—"}</small>
+            <Button type="link" onClick={() => openDetails("aftersales-action-list")}>
               查看整改清单 →
             </Button>
           </article>
-        ))
-      ) : (
-        <article className="m5-decision-card m5-empty-action">
-          <h3>优先行动</h3>
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可核查行动" />
-          <p>缺少相容来源时不生成风险分、根因或人工处理进度。</p>
-        </article>
-      )}
+        );
+      })}
     </section>
   );
 }

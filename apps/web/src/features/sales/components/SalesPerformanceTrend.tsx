@@ -23,6 +23,7 @@ import {
   dailyMetricState,
   dailyMetricValue,
   dailyRelativeChange,
+  percentagePointChange,
   performanceMetrics,
 } from "../performanceMetrics";
 import "./sales-performance-trend.css";
@@ -42,6 +43,7 @@ type TrendDay = {
   date: string;
   point: SalesTrendPoint;
   changes: Partial<Record<SalesTrendMetric, number | null>>;
+  rateDayChanges: Partial<Record<SalesTrendMetric, string>>;
 };
 
 /** 按可见曲线的极值向外取整到最近刻度，包含 0% 基准。 */
@@ -98,6 +100,11 @@ function PointTooltip({ day, metrics }: { day: TrendDay; metrics: SalesTrendMetr
               {state && <small>{state}</small>}
             </strong>
             <strong>{displayedChange(day.changes[key])}</strong>
+            {day.rateDayChanges[key] !== undefined && (
+              <small className="sales-performance-tooltip-day-change">
+                较前一日 {day.rateDayChanges[key]}
+              </small>
+            )}
           </div>
         );
       })}
@@ -273,20 +280,30 @@ export function SalesPerformanceTrend({
   const [showDetails, setShowDetails] = useState(false);
   const points = data?.data.points;
   const baseline = points?.find(({ date }) => date === scope.from);
-  const series = useMemo<TrendDay[]>(
-    () =>
-      points?.map((point) => ({
+  const series = useMemo<TrendDay[]>(() => {
+    const rateMetrics = metrics.filter((key) => performanceMetrics[key].unit === "%");
+    return (
+      points?.map((point, index) => ({
         date: point.date,
         point,
+        rateDayChanges: Object.fromEntries(
+          rateMetrics.map((key) => [
+            key,
+            percentagePointChange(
+              point.metrics[key].value,
+              points[index - 1]?.metrics[key].value ?? null,
+            ),
+          ]),
+        ),
         changes: Object.fromEntries(
           metrics.map((key) => [
             key,
             dailyRelativeChange(point.metrics[key].value, baseline?.metrics[key].value ?? null),
           ]),
         ),
-      })) ?? [],
-    [points, baseline, metrics],
-  );
+      })) ?? []
+    );
+  }, [points, baseline, metrics]);
   const hasData = points?.some(({ metrics: values }) =>
     metrics.some((key) => values[key].value !== null),
   );
@@ -361,7 +378,7 @@ export function SalesPerformanceTrend({
                   </tr>
                 </thead>
                 <tbody>
-                  {series.map(({ date, point: { metrics: values }, changes }) => (
+                  {series.map(({ date, point: { metrics: values }, changes, rateDayChanges }) => (
                     <tr key={date}>
                       <th scope="row">{date}</th>
                       {metrics.map((key) => {
@@ -371,6 +388,9 @@ export function SalesPerformanceTrend({
                           <td key={key}>
                             {dailyMetricValue(key, point.value)}
                             {changes[key] != null && <small>{displayedChange(changes[key])}</small>}
+                            {rateDayChanges[key] !== undefined && (
+                              <small>较前一日 {rateDayChanges[key]}</small>
+                            )}
                             {state && <small>{state}</small>}
                           </td>
                         );

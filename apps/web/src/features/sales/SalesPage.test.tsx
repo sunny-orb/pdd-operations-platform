@@ -72,14 +72,21 @@ it("八卡按同一首日比较涨跌，保留零基准、缺基准及趋势重�
   const observed = (value: string) => ({ value, state: "observed", observed: 1, expected: 1 });
   const missing = { value: null, state: "no_records", observed: 0, expected: 1 };
   const points = [
-    { shop_revenue: "100.00", shop_visitors: "0", promotion_roi: "2.00" },
+    { shop_revenue: "100.00", shop_visitors: "0", promotion_roi: "2.00", promotion_ctr: "0.03" },
     {
       shop_revenue: "120.00",
       shop_visitors: "20",
       buyer_conversion: "0.06",
       promotion_roi: "3.00",
+      refund_rate: "0",
     },
-    { shop_revenue: "0.00", shop_visitors: "10", buyer_conversion: "0.05" },
+    {
+      shop_revenue: "0.00",
+      shop_visitors: "10",
+      buyer_conversion: "0.05",
+      refund_rate: "0.0125",
+      promotion_ctr: "0.04",
+    },
   ].map((values: Record<string, string | undefined>, index) => ({
     date: `2026-10-${25 + index}`,
     metrics: Object.fromEntries(
@@ -114,8 +121,16 @@ it("八卡按同一首日比较涨跌，保留零基准、缺基准及趋势重�
   expect(day.getByText("+20.00%")).toBeTruthy();
   expect(day.getByText("20 人")).toBeTruthy();
   expect(day.getByText("6.00%")).toBeTruthy();
+  expect(day.getByText("较前一日 —")).toBeTruthy();
+  const nextDay = within(within(compared).getByRole("row", { name: /2026-10-27/ }));
+  expect(nextDay.getByText("5.00%")).toBeTruthy();
+  expect(nextDay.getByText("较前一日 -1.00 个百分点")).toBeTruthy();
   expect(within(trend).getByText("首日为 0")).toBeTruthy();
   expect(within(trend).getByText("首日无值")).toBeTruthy();
+  fireEvent.click(kpis.getByRole("button", { name: "查看 退款金额占比 趋势" }));
+  fireEvent.click(kpis.getByRole("button", { name: "查看 点击率 趋势" }));
+  expect(nextDay.getByText("较前一日 +1.25 个百分点")).toBeTruthy();
+  expect(nextDay.getByRole("cell", { name: /4\.00%.*较前一日 —/ })).toBeTruthy();
   expect(within(compared).getByText("¥0.00")).toBeTruthy();
   expect(within(compared).getByText("-100.00%")).toBeTruthy();
   const roi = kpis.getByRole("button", { name: "查看 ROI 趋势" });

@@ -4,7 +4,7 @@
 
 ## 本地运行
 
-只做前端的同事可按[只运行前端](docs/development.md#只运行前端)配置，无需安装后端环境。
+只做前端的同事请看[前端协作手册](docs/frontend-collaboration.md)，从拉代码、启动页面到提交 PR，无需安装后端环境。
 
 要求 Node.js 22.13+（推荐 24 LTS）、Python 3.12+，本机 PostgreSQL 使用 Docker Desktop。
 

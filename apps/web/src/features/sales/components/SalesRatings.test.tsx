@@ -115,12 +115,15 @@ it.each([
 });
 
 it("选择日期后卡片仍是最新日，来源范围缩小时重新限制查询边界", async () => {
+  const user = userEvent.setup();
   const { rerender } = render(<SalesRatings filters={filters()} shop="" onConflict={onConflict} />);
   await screen.findByText("95.25 分");
   const end = screen.getByLabelText("评分趋势结束日期");
-  fireEvent.change(end, { target: { value: "2026-10-31" } });
-  fireEvent.keyDown(end, { key: "Enter", code: "Enter" });
-  fireEvent.blur(end);
+  // 日期组件先取得焦点再接受逐键输入，不能向未聚焦输入连续派发提交事件。
+  await user.click(end);
+  await user.clear(end);
+  await user.type(end, "2026-10-31{Enter}");
+  await user.tab();
   await waitFor(() => expect(calls.at(-1)?.searchParams.get("date_to")).toBe("2026-10-31"));
   await screen.findByText("95.25 分");
   expect(screen.getByText(/最新评分日期/).textContent).toContain("2026-11-01");

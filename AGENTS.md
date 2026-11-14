@@ -3,6 +3,7 @@
 ## 开始工作与文档职责
 
 - 本约定适用于整个独立重构仓库。先读 `README.md`、`TODO.md`、`docs/architecture.md`，再检查 `git status`；本轮任务范围以用户最新指令为准，TODO不是一次实施全部任务的授权。
+- 前端协作者在 `codex/ytsn-dev` 上启动、修改、提交或提 PR 前，先读[前端协作手册](docs/frontend-collaboration.md)，按其中的文件范围、分支及生产 API 边界执行。
 - 页面/功能变更先读 `docs/requirements.md` 当前模块；涉及指标、来源、关联、接口或数据表时读 `docs/data-contract.md`；追溯核查结论时再读 `docs/source-evidence.md`；完成工作前核对 `docs/validation.md`。
 - 涉及数据库对象关系、表字段、索引、事务或迁移时，先读[数据库设计流程](docs/database-design.md)，按流程重新形成专用设计与实施方案；`docs/architecture.md`只放全局架构选择与职责边界。
 - 当前结论更新正文，同一事实只在负责文档维护。进度只写TODO；将用户决定、未知项和证据写回对应文档，不依赖聊天记忆。不按每轮对话新建重复方案或在正文顶部不断堆纠正说明。

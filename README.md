@@ -1,8 +1,10 @@
 # 拼多多运营平台
 
-公司内部运营看板的独立重构项目：React / TypeScript / Vite 前端，FastAPI 后端，PostgreSQL 查询库，独立同步与评分任务。前端只通过 `/api/v1` 读取本地已发布数据。
+公司内部运营看板的独立重构项目：React / TypeScript / Vite 前端，FastAPI 后端，PostgreSQL 查询库，独立同步与评分任务。前端只通过 `/api/v1` 读取已发布数据。
 
 ## 本地运行
+
+只做前端的同事请看[前端协作手册](docs/frontend-collaboration.md)，从拉代码、启动页面到提交 PR，无需安装后端环境。
 
 要求 Node.js 22.13+（推荐 24 LTS）、Python 3.12+，本机 PostgreSQL 使用 Docker Desktop。
 

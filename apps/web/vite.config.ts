@@ -1,7 +1,17 @@
-import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
+import { defineConfig, loadEnv, type ConfigEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
-export default defineConfig({
+const localApiTarget = "http://127.0.0.1:8000";
+const webRoot = fileURLToPath(new URL(".", import.meta.url));
+
+function resolveApiProxy({ command, isPreview, mode }: ConfigEnv) {
+  if (command !== "serve" || isPreview || mode !== "development") return localApiTarget;
+  const target = loadEnv(mode, webRoot, "PDD_DEV_API_TARGET").PDD_DEV_API_TARGET?.trim();
+  return target ? { target, changeOrigin: true } : localApiTarget;
+}
+
+export default defineConfig((env) => ({
   plugins: [
     react(),
     {
@@ -35,8 +45,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8000",
-      "/health": "http://127.0.0.1:8000",
+      "/api": resolveApiProxy(env),
+      "/health": localApiTarget,
     },
   },
-});
+}));

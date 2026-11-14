@@ -44,7 +44,7 @@ def metric(value, key, status="observed", reason=None, **extra):
 
 def aggregate(rows, *, strict=False, cross=False, independent=False):
     """默认按原行配对；商品显式独立汇总已知分子/分母，不修改输入空值。"""
-    result = {}
+    result, field_totals = {}, {}
     for key, field in FIELDS.items():
         valid = [r for r in rows if r.get(field) is not None]
         state = (
@@ -57,6 +57,9 @@ def aggregate(rows, *, strict=False, cross=False, independent=False):
             else "no_records"
         )
         value = total(valid, field)
+        # 独立比率复用本次精确累计；保留strict门控前的原值及NULL，不能用展示值。
+        if independent:
+            field_totals[field] = value
         if strict and len(valid) != len(rows):
             value = None
         result[key] = metric(
@@ -77,9 +80,10 @@ def aggregate(rows, *, strict=False, cross=False, independent=False):
         paired = [
             r for r in rows if r.get(numerator) is not None and r.get(denominator) is not None
         ]
-        n_rows = [r for r in rows if r.get(numerator) is not None] if independent else paired
-        d_rows = [r for r in rows if r.get(denominator) is not None] if independent else paired
-        n, d = total(n_rows, numerator), total(d_rows, denominator)
+        if independent:
+            n, d = field_totals[numerator], field_totals[denominator]
+        else:
+            n, d = total(paired, numerator), total(paired, denominator)
         value = divide(n, d)
         state = (
             "observed"

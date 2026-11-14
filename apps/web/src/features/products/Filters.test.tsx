@@ -2,11 +2,96 @@
 import { act, cleanup, render, waitFor, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import { Filters } from "./Filters";
-import type { ProductsState } from "./data";
+import { useProducts, type ProductsState } from "./data";
 import { readScope } from "./scope";
 
 const clients: QueryClient[] = [];
+
+function renderLoadingFilters(name: "main" | "detail") {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise(() => {})),
+  );
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  clients.push(client);
+  function Harness() {
+    const state = useProducts();
+    const scope = state.scope(name);
+    return (
+      <>
+        <Filters name={name} scope={scope} state={state} />
+        <output>{scope.keyword}</output>
+        <button onClick={() => state.change(name, { from: "2026-11-01", to: "2026-11-10" })}>
+          选日期
+        </button>
+        <button onClick={() => state.reset(name)}>外部重置</button>
+      </>
+    );
+  }
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <Harness />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  const label = name === "main" ? "总览" : "明细";
+  const input = screen.getByRole("textbox", { name: `${label}搜索商品` }) as HTMLInputElement;
+  const publish = async (end = "2026-11-12") => {
+    await act(async () => {
+      client.setQueryData(["m1", "meta"], {
+        data_version: end,
+        date_from: "2026-08-01",
+        date_to: end,
+      });
+    });
+    await waitFor(() =>
+      expect(screen.getByLabelText(`${label}结束日期`).getAttribute("value")).toBe(end),
+    );
+  };
+  return { input, publish };
+}
+
+it.each(["main", "detail"] as const)("%s首次日期回填不能丢失正在输入的关键词", async (name) => {
+  const { input, publish } = renderLoadingFilters(name);
+  fireEvent.change(input, { target: { value: "糖豆" } });
+  await publish();
+  expect(input.value).toBe("糖豆");
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("糖豆"));
+});
+
+it("初始日期回填保留中文组词，确认后才提交最终关键词", async () => {
+  const { input, publish } = renderLoadingFilters("main");
+  fireEvent.compositionStart(input);
+  fireEvent.change(input, { target: { value: "tangdou" } });
+  await publish();
+  expect(input.value).toBe("tangdou");
+  expect(screen.getByRole("status").textContent).toBe("");
+  fireEvent.change(input, { target: { value: "糖豆" } });
+  fireEvent.compositionEnd(input, { data: "糖豆" });
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("糖豆"));
+});
+
+it("默认窗口推进保留后续输入，主动换日期仍取消草稿", async () => {
+  const { input, publish } = renderLoadingFilters("main");
+  await publish();
+  fireEvent.change(input, { target: { value: "糖豆" } });
+  await publish("2026-11-13");
+  expect(input.value).toBe("糖豆");
+  await waitFor(() => expect(screen.getByRole("status").textContent).toBe("糖豆"));
+  fireEvent.change(input, { target: { value: "帽子" } });
+  fireEvent.click(screen.getByRole("button", { name: "选日期" }));
+  expect(input.value).toBe("糖豆");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 550)));
+  expect(screen.getByRole("status").textContent).toBe("糖豆");
+  fireEvent.change(input, { target: { value: "未提交" } });
+  fireEvent.click(screen.getByRole("button", { name: "外部重置" }));
+  expect(input.value).toBe("");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 550)));
+  expect(screen.getByRole("status").textContent).toBe("");
+});
 beforeEach(() => {
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
@@ -38,6 +123,7 @@ it("总览和明细的中文组词不提交筛选，结束并停顿后只提交�
   clients.push(client);
   const change = vi.fn();
   const state = {
+    dateSelectionKey: () => "fixed-dates",
     version: "",
     metadata: {},
     change,
@@ -89,6 +175,7 @@ it("新品目录为空时不清除固定新品条件，不反复重置URL", asyn
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
   const state = {
+    dateSelectionKey: () => "fixed-dates",
     version: "v1",
     metadata: { data: { date_from: "2026-10-01", date_to: "2026-10-31" } },
     change: vi.fn(),
@@ -138,6 +225,7 @@ it("多等级选项合并显示，商品候选仍列出实际成员", async () =
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   clients.push(client);
   const state = {
+    dateSelectionKey: () => "fixed-dates",
     version: "v1",
     metadata: { data: { date_from: "2026-10-01", date_to: "2026-10-31" } },
     change: vi.fn(),
@@ -187,6 +275,7 @@ it.each(["main", "detail"] as const)(
       ],
     });
     const state = {
+      dateSelectionKey: () => "fixed-dates",
       version: "v1",
       metadata: { data: { date_from: scope.from, date_to: scope.to } },
       change: vi.fn(),

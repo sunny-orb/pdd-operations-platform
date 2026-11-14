@@ -278,8 +278,7 @@ export function Filters({
             resetKey={JSON.stringify([
               searchReset,
               state.searchRestoreKey,
-              scope.from,
-              scope.to,
+              state.dateSelectionKey(name),
               scope.shop,
               scope.operator,
               scope.category,

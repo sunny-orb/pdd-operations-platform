@@ -48,6 +48,7 @@ function Host({ name }: { name: "main" | "detail" }) {
   const [query, setQuery] = useSearchParams();
   const scope = readScope(query, name, "2026-10-01", "2026-10-31");
   const state = {
+    dateSelectionKey: () => "fixed-dates",
     version: "v1",
     metadata: { data: { date_from: scope.from, date_to: scope.to } },
     change: (name: ScopeName, patch: Partial<Scope>) =>

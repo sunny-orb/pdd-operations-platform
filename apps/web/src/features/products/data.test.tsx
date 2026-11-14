@@ -19,6 +19,34 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it.each(["main_from", "main_to", "detail_from", "detail_to"])(
+  "%s单日链接提交关键词不会被误判为日期重置",
+  async (key) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise(() => {})),
+    );
+    const name = key.startsWith("main") ? "main" : "detail";
+    const { result } = renderHook(() => useProducts(), {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[`/?${key}=2026-11-10`]}>{children}</MemoryRouter>
+        </QueryClientProvider>
+      ),
+    });
+    const before = result.current.dateSelectionKey(name);
+    await act(() => result.current.change(name, { keyword: "糖豆" }));
+    expect(result.current.scope(name).keyword).toBe("糖豆");
+    expect(result.current.scope(name).from).toBe("2026-11-10");
+    expect(result.current.scope(name).to).toBe("2026-11-10");
+    expect(result.current.dateSelectionKey(name)).toBe(before);
+    await act(() => result.current.change(name, { from: "2026-11-01" }));
+    expect(result.current.dateSelectionKey(name)).not.toBe(before);
+    client.clear();
+  },
+);
+
 it("评分仅翻页时保留上一页布局，响应后替换；失败不冒用旧页结果", async () => {
   const replies: ((response: unknown) => void)[] = [];
   vi.stubGlobal(

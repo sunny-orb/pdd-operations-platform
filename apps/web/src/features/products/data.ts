@@ -40,6 +40,11 @@ export function useProducts() {
   };
   const from = metadata.data ? defaultProductPeriod(metadata.data).start : "";
   const scope = (name: ScopeName) => readScope(search, name, from, metadata.data?.date_to ?? "");
+  // 只有用户显式选择日期才重置搜索草稿；首次meta回填/默认窗口推进不是用户重置。
+  const dateSelectionKey = (name: ScopeName) => {
+    const explicit = readScope(search, name, "", "");
+    return JSON.stringify([explicit.from, explicit.to]);
+  };
   const change = (name: ScopeName, patch: Partial<Scope>) =>
     setSearch((p) => patchScope(p, name, patch, from, metadata.data?.date_to ?? ""), {
       replace: true,
@@ -53,7 +58,7 @@ export function useProducts() {
       },
       { replace: true },
     );
-  return { metadata, version, scope, change, reset, stale, searchRestoreKey };
+  return { metadata, version, scope, change, reset, stale, searchRestoreKey, dateSelectionKey };
 }
 export type ProductsState = ReturnType<typeof useProducts>;
 export function useResource<T>(

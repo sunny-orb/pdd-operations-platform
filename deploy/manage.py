@@ -315,6 +315,17 @@ class Project:
         }
 
     def docker(self, args, env, *, binary=False):
+        capture = {"capture_output": True}
+        if args and args[0] == "logs":
+            require(
+                len(args) == 7
+                and args[:6]
+                == ["logs", "--since", "10m", "--tail", "1000", "--timestamps"]
+                and re.fullmatch("[0-9a-f]{64}", args[6]),
+                "UNAPPROVED_LOG_READ",
+            )
+            # 应用logger写stderr；仅固定有界logs读取合并，其他Docker调用保持隔离。
+            capture = {"stdout": subprocess.PIPE, "stderr": subprocess.STDOUT}
         if binary:
             require(
                 len(args) == 3
@@ -335,8 +346,8 @@ class Project:
             cwd=ROOT,
             env=env,
             check=True,
-            capture_output=True,
             text=not binary,
+            **capture,
         )
         if binary:
             require(len(result.stdout) <= 72 * 1024 * 1024, "STATIC_ARCHIVE_TOO_LARGE")

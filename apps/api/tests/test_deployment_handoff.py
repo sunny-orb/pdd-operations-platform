@@ -3,6 +3,8 @@
 import importlib.util
 import io
 import json
+import subprocess
+import tarfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -64,6 +66,52 @@ def test_generated_compose_only_uses_existing_networks_and_fixed_mounts(tmp_path
         == "pdd-operations-entry"
     )
     assert all(v["read_only"] and not v["bind"]["create_host_path"] for v in gateway["volumes"])
+
+
+@pytest.mark.parametrize("slot", ["blue", "green"])
+def test_non_entry_services_explicitly_disable_traefik_discovery(tmp_path, slot):
+    p = SimpleNamespace(
+        root=tmp_path, project_name="pdd-operations-production", domain="pdd-operations.kktree.cn"
+    )
+    config = module().compose_config(p, manifest(), slot=slot, gateway_image=manifest()["web"])
+    for service in ("api_" + slot, "database"):
+        assert config["services"][service].get("labels", {}).get("traefik.enable") == "false"
+    assert config["services"]["gateway"]["labels"]["traefik.enable"] == "true"
+
+
+def test_static_extraction_container_explicitly_disables_traefik_discovery():
+    m = module()
+    runtime = m.Runtime.__new__(m.Runtime)
+    runtime.project = FakeProject()
+    runtime.project.project_name = "pdd-operations-production"
+    runtime.recover_extraction = lambda: None
+    calls = []
+
+    def docker(args, *, binary=False):
+        calls.append(args)
+        if args[0] == "create":
+            return "e" * 64
+        if args[0] == "inspect":
+            return json.dumps(
+                [
+                    {
+                        "Config": {
+                            "Image": manifest()["web"],
+                            "Labels": {"pdd.release.project": runtime.project.project_name},
+                        },
+                        "State": {"Running": False},
+                        "Mounts": [],
+                    }
+                ]
+            )
+        assert binary and args[0] == "cp"
+        return b"public-static-tar"
+
+    runtime.docker = docker
+    runtime.archive(manifest()["web"])
+    create = next(args for args in calls if args[0] == "create")
+    labels = [create[index + 1] for index, value in enumerate(create) if value == "--label"]
+    assert "traefik.enable=false" in labels
 
 
 @pytest.mark.parametrize("slot", ["legacy", "../outside", "blue; id", "other"])
@@ -498,3 +546,245 @@ def test_business_prewarm_retries_only_one_version_conflict(
         with pytest.raises(urllib.error.HTTPError):
             exec(m.BUSINESS_PROBE, {})
     assert calls.count("/api/v1/products/meta") == expected_meta_calls
+
+
+def bootstrap_runtime(tmp_path, *, previous=True):
+    """真实静态目录与发布快照校验；仅Docker边界用已知公开tar替代。"""
+    m = module()
+    spec = importlib.util.spec_from_file_location("bootstrap_assets", ROOT / "deploy/assets.py")
+    asset_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(asset_module)
+    p = FakeProject()
+    p.write(
+        ".release.json",
+        json.dumps({"version": 1, "manifest": manifest("b"), "compose": "e30="}).encode(),
+    )
+    if previous:
+        p.write(
+            ".release.previous.json",
+            json.dumps({"version": 1, "manifest": manifest("a"), "compose": "e30="}).encode(),
+        )
+    validated = []
+    controller_spec = importlib.util.spec_from_file_location(
+        "bootstrap_controller", ROOT / "deploy/manage.py"
+    )
+    controller = importlib.util.module_from_spec(controller_spec)
+    controller_spec.loader.exec_module(controller)
+
+    def state(name):
+        result = controller.Project.state(p, name)
+        validated.append(name)
+        return result
+
+    p.state = state
+    runtime = m.Runtime.__new__(m.Runtime)
+    runtime.project = p
+    runtime.assets = asset_module.AssetStore(tmp_path)
+    runtime.use = lambda _: None
+    runtime.networks = lambda: {}
+    runtime.one = lambda service, _: ("1" if service == "api" else "2") * 64
+    calls = []
+
+    def archive(image, identifier=None):
+        calls.append(("archive", image, identifier))
+        digit = "a" if image == manifest("a")["web"] else "b"
+        data = io.BytesIO()
+        with tarfile.open(fileobj=data, mode="w") as stream:
+            for name, body in {
+                "index.html": digit.encode(),
+                f"assets/Page-{digit * 8}.js": digit.encode(),
+            }.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(body)
+                stream.addfile(member, io.BytesIO(body))
+        return data.getvalue()
+
+    runtime.archive = archive
+    runtime.docker = lambda args: calls.append(tuple(args)) or ""
+    return runtime, p, calls, validated, asset_module
+
+
+def test_first_handoff_imports_previous_snapshot_assets_before_new_html(tmp_path):
+    runtime, _, calls, validated, _ = bootstrap_runtime(tmp_path)
+    state = runtime.bootstrap()
+    assert ".release.previous.json" in validated
+    assert (tmp_path / "public/assets/Page-aaaaaaaa.js").read_bytes() == b"a"
+    assert (tmp_path / "public/assets/Page-bbbbbbbb.js").read_bytes() == b"b"
+    assert ("archive", manifest("b")["web"], "2" * 64) in calls
+    assert ("archive", manifest("a")["web"], None) in calls
+    assert ("pull", manifest("a")["web"]) in calls
+    assert state["active"]["manifest"] == manifest("b")
+    assert state["previous"] is None
+
+
+def test_first_handoff_without_previous_snapshot_still_imports_active(tmp_path):
+    runtime, _, calls, _, _ = bootstrap_runtime(tmp_path, previous=False)
+    runtime.bootstrap()
+    assert calls == [("archive", manifest("b")["web"], "2" * 64)]
+
+
+def test_invalid_previous_snapshot_stops_bootstrap_before_container_reads(tmp_path):
+    runtime, p, calls, _, _ = bootstrap_runtime(tmp_path)
+    p.write(".release.previous.json", b'{"version": 2}')
+    with pytest.raises((ValueError, AssertionError)):
+        runtime.bootstrap()
+    assert not calls
+
+
+def test_previous_asset_import_obeys_shared_store_budget(tmp_path, monkeypatch):
+    runtime, _, calls, _, asset_module = bootstrap_runtime(tmp_path, previous=False)
+    runtime.bootstrap()
+    initial = runtime.assets._inventory()
+    runtime, _, calls, _, asset_module = bootstrap_runtime(tmp_path, previous=True)
+    monkeypatch.setattr(asset_module, "MAX_BYTES", sum(map(len, initial.values())) + 50)
+    with pytest.raises(ValueError, match="ASSET_BUDGET_EXCEEDED"):
+        runtime.bootstrap()
+    assert not any(call[0] in ("up", "stop", "kill", "rm") for call in calls)
+    assert (tmp_path / "public/assets/Page-bbbbbbbb.js").read_bytes() == b"b"
+
+
+def database_failure_log(*, code="QUERY_TIMEOUT", stage="sql_execute", request_ms="5501.25"):
+    return (
+        "2026-11-14T00:42:01.123456789Z WARNING:app.main:数据库请求失败 "
+        "request_id=12345678-1234-1234-1234-123456789abc "
+        "path=/api/v1/products/overview code=" + code + " type=BoardError,QueryCanceled "
+        "stage="
+        + stage
+        + " request_elapsed_ms="
+        + request_ms
+        + " sql_elapsed_ms=5001.23 sql_total_ms=5200.01"
+    )
+
+
+def test_error_summary_only_emits_allowlisted_fields_and_small_samples():
+    m = module()
+    assert hasattr(m, "summarize_database_errors"), "退役前安全错误摘要尚未实现"
+    secret = "DO_NOT_LEAK_SECRET"
+    logs = "\n".join(
+        [
+            "2026-11-14T00:42:00Z SQL password=" + secret,
+            database_failure_log().replace("type=BoardError,QueryCanceled", "type=" + secret),
+            database_failure_log().replace(
+                "path=/api/v1/products/overview", "path=/private/" + secret
+            ),
+            database_failure_log(code=secret),
+            database_failure_log(stage=secret),
+            database_failure_log().replace(
+                "request_id=12345678-1234-1234-1234-123456789abc", "request_id=" + secret
+            ),
+            *([database_failure_log()] * 8),
+        ]
+    )
+    value = m.summarize_database_errors(logs)
+    assert secret not in json.dumps(value)
+    assert value["matched"] == 10
+    assert len(value["samples"]) == 5
+    assert value["groups"] == [
+        {
+            "code": "QUERY_TIMEOUT",
+            "stage": "sql_execute",
+            "count": 10,
+            "max_request_elapsed_ms": 5501.25,
+            "max_sql_elapsed_ms": 5001.23,
+            "max_sql_total_ms": 5200.01,
+        }
+    ]
+
+
+def test_error_summary_does_not_classify_duration_as_pool_timeout():
+    m = module()
+    assert hasattr(m, "summarize_database_errors"), "退役前安全错误摘要尚未实现"
+    value = m.summarize_database_errors(
+        "\n".join(
+            [
+                database_failure_log(
+                    code="DATABASE_BUSY", stage="pool_checkout", request_ms="5500.00"
+                ),
+                database_failure_log(request_ms="5500.00"),
+            ]
+        )
+    )
+    assert {(item["code"], item["stage"]) for item in value["groups"]} == {
+        ("DATABASE_BUSY", "pool_checkout"),
+        ("QUERY_TIMEOUT", "sql_execute"),
+    }
+
+
+def test_error_summary_bounds_lines_and_rejects_unstructured_tail():
+    m = module()
+    assert hasattr(m, "summarize_database_errors"), "退役前安全错误摘要尚未实现"
+    value = m.summarize_database_errors(database_failure_log() + "\n" + ("ignored\n" * 1000))
+    assert value["matched"] == 0 and value["samples"] == []
+
+
+def test_old_api_error_summary_is_printed_before_container_removal(capsys):
+    m = module()
+    runtime = m.Runtime.__new__(m.Runtime)
+    runtime.assets = SimpleNamespace(touch=lambda *_args, **_kwargs: None)
+    runtime.use = lambda _: None
+    runtime.services = lambda _: ["a" * 64]
+    runtime.inspect = lambda *_: {"State": {"Running": False}}
+    runtime.wait_stopped = lambda *_: None
+    calls = []
+
+    def docker(args):
+        calls.append(args)
+        return database_failure_log() if args[0] == "logs" else ""
+
+    runtime.docker = docker
+    runtime.retire({"active": record(), "candidate": record("b", "green"), "legacy_web": None})
+    output = capsys.readouterr().out
+    assert output, "移除旧容器前应输出安全摘要"
+    summary = json.loads(output)
+    assert summary["event"] == "release_api_error_summary" and summary["matched"] == 1
+    assert summary["retired_commit"] == "a" * 40 and summary["release_commit"] == "b" * 40
+    assert calls[-2:] == [
+        ["logs", "--since", "10m", "--tail", "1000", "--timestamps", "a" * 64],
+        ["rm", "a" * 64],
+    ]
+
+
+def test_only_fixed_bounded_logs_command_merges_stderr(monkeypatch):
+    spec = importlib.util.spec_from_file_location("logs_controller", ROOT / "deploy/manage.py")
+    manage = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manage)
+    calls = []
+    monkeypatch.setattr(
+        manage.subprocess,
+        "run",
+        lambda args, **kwargs: (
+            calls.append((args, kwargs)) or SimpleNamespace(stdout="safe fixture")
+        ),
+    )
+    project = manage.Project()
+    command = ["logs", "--since", "10m", "--tail", "1000", "--timestamps", "a" * 64]
+    assert project.docker(command, {}) == "safe fixture"
+    assert calls[0][1].get("stderr") == subprocess.STDOUT
+    assert calls[0][1].get("stdout") == subprocess.PIPE
+    with pytest.raises(ValueError):
+        project.docker(["logs", "--follow", "a" * 64], {})
+    assert len(calls) == 1
+
+
+def test_log_read_failure_preserves_old_container_and_does_not_print_raw_output(capsys):
+    m = module()
+    runtime = m.Runtime.__new__(m.Runtime)
+    runtime.assets = SimpleNamespace(touch=lambda *_args, **_kwargs: None)
+    runtime.use = lambda _: None
+    runtime.services = lambda _: ["a" * 64]
+    runtime.inspect = lambda *_: {"State": {"Running": False}}
+    runtime.wait_stopped = lambda *_: None
+    calls = []
+
+    def docker(args):
+        calls.append(args)
+        if args[0] == "logs":
+            raise subprocess.CalledProcessError(1, args, output="DO_NOT_LEAK_SECRET")
+        return ""
+
+    runtime.docker = docker
+    with pytest.raises(subprocess.CalledProcessError):
+        runtime.retire({"active": record(), "candidate": record("b", "green"), "legacy_web": None})
+    assert not any(args[0] == "rm" for args in calls)
+    captured = capsys.readouterr()
+    assert captured.out == captured.err == ""

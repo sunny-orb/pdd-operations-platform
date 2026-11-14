@@ -70,6 +70,65 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def summarize_database_errors(logs):
+    """只解析既有数据库失败格式；忽略path/type原串、SQL及其他日志，不按耗时猜原因。"""
+    stages = {
+        "DATABASE_BUSY": "pool_checkout",
+        "QUERY_TIMEOUT": "sql_execute",
+        "DATABASE_UNAVAILABLE": "connection",
+        "DATABASE_ERROR": "sql_execute",
+    }
+    number = r"\d{1,9}(?:\.\d{1,6})?"
+    nullable = rf"(?:{number}|unavailable)"
+    pattern = re.compile(
+        r"request_id=(?P<request_id>[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}|unavailable) "
+        r"path=\S{1,200} code=(?P<code>[A-Z_]+) type=\S{1,256} "
+        r"stage=(?P<stage>[a-z_]+) "
+        rf"request_elapsed_ms=(?P<request_elapsed_ms>{number}) "
+        rf"sql_elapsed_ms=(?P<sql_elapsed_ms>{nullable}) "
+        rf"sql_total_ms=(?P<sql_total_ms>{nullable})"
+    )
+    groups, samples, matched = {}, [], 0
+    for line in logs.splitlines()[-1000:]:
+        if len(line) > 2048 or "数据库请求失败 " not in line:
+            continue
+        timestamp = re.match(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z ", line)
+        if timestamp is None:
+            continue
+        result = pattern.fullmatch(line.split("数据库请求失败 ", 1)[1])
+        if result is None:
+            continue
+        values = result.groupdict()
+        code, stage = values["code"], values["stage"]
+        if stages.get(code) != stage:
+            continue
+        matched += 1
+        sample = {
+            "timestamp": timestamp.group().strip(),
+            "request_id": values["request_id"],
+            "code": code,
+            "stage": stage,
+        }
+        group = groups.setdefault(code, {"code": code, "stage": stage, "count": 0})
+        group["count"] += 1
+        for name in ("request_elapsed_ms", "sql_elapsed_ms", "sql_total_ms"):
+            value = None if values[name] == "unavailable" else float(values[name])
+            sample[name] = value
+            previous = group.get("max_" + name)
+            group["max_" + name] = (
+                max(previous or 0, value) if value is not None else previous
+            )
+        samples.append(sample)
+        samples = samples[-5:]
+    return {
+        "window_seconds": 600,
+        "line_limit": 1000,
+        "matched": matched,
+        "groups": [groups[code] for code in sorted(groups)],
+        "samples": samples,
+    }
+
+
 class EntryScripts(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -130,6 +189,8 @@ def compose_config(project, manifest, *, slot, gateway_image):
         "env_file": [{"path": str(project.root / ".env.runtime"), "format": "raw"}],
         "environment": {"APP_ENV": "production"},
         "networks": ["app"],
+        # 只有gateway是入口；不依赖共享Docker provider的exposedByDefault设置。
+        "labels": {"traefik.enable": "false"},
         "init": True,
         "logging": logging,
     }
@@ -371,6 +432,8 @@ class Runtime:
                     "pdd.release.project=" + self.project.project_name,
                     "--label",
                     "pdd.release.extraction=" + nonce,
+                    "--label",
+                    "traefik.enable=false",
                     image,
                 ]
             ).strip()
@@ -455,18 +518,36 @@ class Runtime:
         require(self.project.check_file(".release.json"), "LEGACY_RELEASE_REQUIRED")
         old, _ = self.project.state(".release.json")
         manifest = old["manifest"]
+        previous_manifest = None
+        if self.project.check_file(".release.previous.json"):
+            previous, _ = self.project.state(".release.previous.json")
+            if previous["manifest"] != manifest:
+                previous_manifest = previous["manifest"]
         self.use(manifest)
         self.network_snapshot = self.networks()
         api = self.one("api", manifest["api"])
         web = self.one("web", manifest["web"])
         # 首次交接在state落盘前中断，也能恢复本模块未提交的临时公开文件。
         self.assets._recover_pending()
+        # 首次接管前已有浏览器可能仍运行上一成功版HTML。只从已验证镜像
+        # 提取公开静态产物；沿用总预算，任一缺失/冲突均在切流前拒绝。
+        protected = {manifest["commit"]}
+        if previous_manifest is not None:
+            protected.add(previous_manifest["commit"])
         self.assets.prepare(
             self.archive(manifest["web"], web),
             manifest["commit"],
             now=time.time(),
-            protected={manifest["commit"]},
+            protected=protected,
         )
+        if previous_manifest is not None:
+            self.docker(["pull", previous_manifest["web"]])
+            self.assets.prepare(
+                self.archive(previous_manifest["web"]),
+                previous_manifest["commit"],
+                now=time.time(),
+                protected=protected,
+            )
         active = {
             "manifest": manifest,
             "slot": "legacy",
@@ -782,6 +863,29 @@ class Runtime:
                     self.docker(["update", "--restart=no", old["api"]])
                     self.docker(["kill", "--signal=TERM", old["api"]])
                 self.wait_stopped(old["api"], service, old["manifest"]["api"])
+                # 停止后、删除前保留切换窗口的安全摘要；读取失败保留容器供续查。
+                logs = self.docker(
+                    [
+                        "logs",
+                        "--since",
+                        "10m",
+                        "--tail",
+                        "1000",
+                        "--timestamps",
+                        old["api"],
+                    ]
+                )
+                summary = summarize_database_errors(logs)
+                summary.update(
+                    event="release_api_error_summary",
+                    retired_commit=old["manifest"]["commit"],
+                    release_commit=state["candidate"]["manifest"]["commit"],
+                    container=old["api"][:12],
+                )
+                print(
+                    json.dumps(summary, sort_keys=True, separators=(",", ":")),
+                    flush=True,
+                )
                 self.docker(["rm", old["api"]])
         if state["legacy_web"]:
             identifier = state["legacy_web"]

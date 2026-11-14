@@ -4,6 +4,8 @@
 
 ## 当前任务与范围
 
+- [ ] 11/14发布切换空窗与推广重复累计本地修复完成：后端1321项、前端441项、check/build/格式通过；独立复核问题已关闭，真实Docker/Traefik/Chrome五次切换3850请求无失败。正在按授权分支→main→CI/CD发布并持续探测；当前生产仍为6ad6344，未切换本轮实现。见[测速校正和验证](docs/validation/2026-11-14.md#release-handoff-20261114)。
+
 - [x] 11/14前端开发代理支持个人配置，本机默认API及临时HTTP/HTTPS目标已验证；仅本地，未访问生产API、推送或部署。见[验证记录](docs/validation/2026-11-13.md#vite-dev-api-proxy-20261114)。
 
 - [ ] 本次只把前端代理、协作手册和售后归档优化推到 `codex/sunny-dev`；合入 `main`、部署及线上验收留待单独确认。生产历史 DELETE 不启用。

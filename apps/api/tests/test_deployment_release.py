@@ -12,6 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.test_deployment_handoff import FakeRuntime, record
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -67,6 +69,26 @@ def docker_calls(monkeypatch):
     return calls
 
 
+def seed_handoff(controller, digit="a"):
+    """真实受控文件与状态机，只有Docker/代理外部边界用确定性Runtime替代。"""
+    compose = base64.b64encode(controller.read("compose.production.yaml")).decode()
+    active = {**record(digit), "compose": compose}
+    controller.write(".release.json", json.dumps({
+        "version": 1, "manifest": active["manifest"], "compose": compose,
+    }).encode())
+    handoff = controller.handoff()
+    runtime = FakeRuntime(digit * 40)
+    runtime.abort = lambda state: runtime.events.append("abort_candidate")
+    handoff.runtime = runtime
+    handoff.save({
+        "version": 1, "phase": "idle",
+        "gateway": {"id": "f" * 64, "image": active["manifest"]["web"]},
+        "active": active, "previous": None, "candidate": None,
+        "old_workers": [], "legacy_web": None, "networks": {},
+    })
+    return handoff
+
+
 def test_release_refuses_unapproved_directory_before_any_docker_call(tmp_path):
     shutil.copyfile(ROOT / "deploy/release.sh", tmp_path / "release.sh")
     result = subprocess.run(["bash", str(tmp_path / "release.sh")], capture_output=True)
@@ -109,6 +131,11 @@ def test_account_cannot_be_overridden_by_environment(project, monkeypatch, docke
         ".compose.rollback.yaml",
         ".release.previous.json",
         ".release.recovery.json",
+        "handoff.py",
+        "assets.py",
+        ".handoff.json",
+        ".compose.handoff.json",
+        ".asset-extraction.json",
     ],
 )
 @pytest.mark.parametrize("kind", ["symlink", "hardlink"])
@@ -164,8 +191,14 @@ def test_release_ignores_environment_overrides_and_uses_project_credentials(
     ):
         monkeypatch.setenv(key, "/outside")
     with module.Project() as controller, controller.lock():
-        controller.release(manifest())
-    assert json.loads((path / ".release.json").read_text())["manifest"] == manifest()
+        environment = controller.docker_environment(manifest())
+        controller.docker(["version"], environment)
+        runtime = controller.handoff().runtime
+        runtime.use(manifest())
+        runtime.compose(manifest(), "blue", manifest()["web"], ["config", "--quiet"])
+    config = json.loads((path / ".compose.handoff.json").read_text())
+    assert config["name"] == "pdd-operations-production"
+    assert config["services"]["api_blue"]["image"] == manifest()["api"]
     assert docker_calls
     for args, options in docker_calls:
         assert args[:5] == [
@@ -204,42 +237,32 @@ def test_unsafe_credentials_fail_before_docker(project, docker_calls, change):
 
 def test_failed_start_preserves_previous_active_state(project, monkeypatch):
     module, path = project
-    (path / ".release.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "manifest": manifest("b"),
-                "compose": base64.b64encode(b"previous-compose").decode(),
-            }
-        )
-    )
+    original = (path / "compose.production.yaml").read_bytes()
+    with module.Project() as controller:
+        handoff = seed_handoff(controller, "b")
 
-    def run(args, **kwargs):
-        if "up" in args:
-            raise subprocess.CalledProcessError(1, args)
-        return SimpleNamespace(stdout='{"status":"already_initialized"}' if "run" in args else "")
+        def fail_start(*_):
+            raise subprocess.CalledProcessError(1, "candidate up --wait")
 
-    monkeypatch.setattr(subprocess, "run", run)
-    with pytest.raises(subprocess.CalledProcessError), module.Project() as controller:
-        controller.release(manifest())
+        monkeypatch.setattr(handoff.runtime, "prepare", fail_start)
+        with pytest.raises(subprocess.CalledProcessError):
+            controller.release(manifest())
     assert json.loads((path / ".release.json").read_text())["manifest"] == manifest("b")
-    assert (
-        base64.b64decode(json.loads((path / ".release.json").read_text())["compose"])
-        == b"previous-compose"
-    )
+    assert base64.b64decode(json.loads((path / ".release.json").read_text())["compose"]) == original
+    assert "switch" not in handoff.runtime.events and "retire" not in handoff.runtime.events
 
 
-def test_success_then_rollback_restores_paired_compose_and_images(project, docker_calls):
+def test_success_then_rollback_restores_paired_compose_and_images(project):
     module, path = project
     with module.Project() as controller, controller.lock():
-        controller.release(manifest("b"))
+        seed_handoff(controller, "b")
         old = (path / "compose.production.yaml").read_bytes()
         (path / "compose.production.yaml").write_text("new-compose")
         controller.release(manifest())
         controller.rollback()
     assert json.loads((path / ".release.json").read_text())["manifest"] == manifest("b")
-    assert (path / "compose.production.yaml").read_bytes() == old
     assert base64.b64decode(json.loads((path / ".release.json").read_text())["compose"]) == old
+    assert json.loads((path / ".handoff.json").read_text())["active"]["manifest"] == manifest("b")
 
 
 @pytest.mark.parametrize("failure", ["worker", "database"])
@@ -255,8 +278,13 @@ def test_worker_or_uninitialized_database_blocks_start(project, monkeypatch, fai
         return SimpleNamespace(stdout=output)
 
     monkeypatch.setattr(subprocess, "run", run)
-    with pytest.raises(module.BoundaryError), module.Project() as controller:
-        controller.release(manifest())
+    with module.Project() as controller:
+        runtime = controller.handoff().runtime
+        monkeypatch.setattr(runtime, "networks", lambda: {})
+        runtime.network_snapshot = {}
+        message = "WORKER_RUNNING" if failure == "worker" else "DATABASE_NOT_INITIALIZED"
+        with pytest.raises(ValueError, match=message):
+            runtime.preflight(manifest())
     assert not any("up" in call for call in calls)
     assert not (path / ".release.json").exists()
 
@@ -376,6 +404,8 @@ def test_deploy_uses_fixed_destination_and_whitelisted_payload(tmp_path, monkeyp
         "release.sh",
         "rollback.sh",
         "storage.py",
+        "handoff.py",
+        "assets.py",
     }
     assert payload["manifest"] == manifest()
 
@@ -396,7 +426,7 @@ def test_build_manifest_commit_mismatch_prevents_ssh(tmp_path, monkeypatch):
     assert calls == [["git", "rev-parse", "HEAD"]]
 
 
-def test_validated_upload_and_release_preserve_outside_files(project, docker_calls):
+def test_validated_upload_and_release_preserve_outside_files(project):
     module, path = project
     payload = {
         "manifest": manifest(),
@@ -408,6 +438,7 @@ def test_validated_upload_and_release_preserve_outside_files(project, docker_cal
     sentinel = path.parent / "other-project"
     sentinel.write_text("untouched")
     with module.Project() as controller, controller.lock():
+        seed_handoff(controller, "b")
         controller.receive(payload)
     assert json.loads((path / ".release.json").read_text())["manifest"] == manifest()
     assert sentinel.read_text() == "untouched"
@@ -461,11 +492,11 @@ def test_build_only_workflow_produces_manifest_without_deploy_side_effects(tmp_p
 
 
 def test_interrupted_state_write_does_not_mix_previous_images_and_compose(
-    project, monkeypatch, docker_calls
+    project, monkeypatch
 ):
     module, path = project
     with module.Project() as controller:
-        controller.release(manifest("b"))
+        handoff = seed_handoff(controller, "b")
         original = (path / "compose.production.yaml").read_bytes()
         (path / "compose.production.yaml").write_text("candidate-a")
         replace = module.os.replace
@@ -478,53 +509,61 @@ def test_interrupted_state_write_does_not_mix_previous_images_and_compose(
         monkeypatch.setattr(module.os, "replace", interrupted)
         with pytest.raises(OSError):
             controller.release(manifest())
+        assert handoff.state()["phase"] == "committing"
+        assert json.loads((path / ".release.json").read_text())["manifest"] == manifest("b")
         monkeypatch.setattr(module.os, "replace", replace)
         (path / "compose.production.yaml").write_text("candidate-c")
-        controller.release(manifest("c"))
+        with pytest.raises(ValueError, match="HANDOFF_PENDING"):
+            controller.release(manifest("c"))
+        handoff.reconcile()
+        assert handoff.runtime.events.count("prepare") == 1
         controller.rollback()
-    assert (path / "compose.production.yaml").read_bytes() == original
+    state = json.loads((path / ".release.json").read_text())
+    assert state["manifest"] == manifest("b")
+    assert base64.b64decode(state["compose"]) == original
 
 
 @pytest.mark.parametrize("successful_versions", [1, 2])
 def test_failed_deploy_rollback_restores_immediately_previous_success(
-    project, monkeypatch, docker_calls, successful_versions
+    project, monkeypatch, successful_versions
 ):
     module, path = project
     with module.Project() as controller:
-        controller.release(manifest("a"))
+        handoff = seed_handoff(controller, "a")
         if successful_versions == 2:
             controller.release(manifest("b"))
         original = (path / "compose.production.yaml").read_bytes()
         good = manifest("a" if successful_versions == 1 else "b")
-        real_activate = controller.activate
+        prepare = handoff.runtime.prepare
 
         def fail(manifest, compose):
             raise subprocess.CalledProcessError(1, "docker up --wait")
 
-        monkeypatch.setattr(controller, "activate", fail)
+        monkeypatch.setattr(handoff.runtime, "prepare", fail)
         with pytest.raises(subprocess.CalledProcessError):
             controller.release(manifest("c"))
-        monkeypatch.setattr(controller, "activate", real_activate)
+        monkeypatch.setattr(handoff.runtime, "prepare", prepare)
         controller.rollback()
     assert json.loads((path / ".release.json").read_text())["manifest"] == good
     assert (path / "compose.production.yaml").read_bytes() == original
 
 
-def test_failed_rollback_can_recover_current_successful_version(project, monkeypatch, docker_calls):
+def test_failed_rollback_can_recover_current_successful_version(project, monkeypatch):
     module, path = project
     with module.Project() as controller:
-        controller.release(manifest("a"))
+        handoff = seed_handoff(controller, "a")
         controller.release(manifest("b"))
-        activate = controller.activate
+        prepare = handoff.runtime.prepare
 
         def fail(*args):
             raise subprocess.CalledProcessError(1, "docker up --wait")
 
-        monkeypatch.setattr(controller, "activate", fail)
+        monkeypatch.setattr(handoff.runtime, "prepare", fail)
         with pytest.raises(subprocess.CalledProcessError):
             controller.rollback()
-        assert (path / ".release.recovery.json").exists()
-        monkeypatch.setattr(controller, "activate", activate)
+        assert handoff.state()["phase"] == "preparing"
+        assert handoff.state()["active"]["manifest"] == manifest("b")
+        monkeypatch.setattr(handoff.runtime, "prepare", prepare)
         controller.rollback()
     assert json.loads((path / ".release.json").read_text())["manifest"] == manifest("b")
-    assert not (path / ".release.recovery.json").exists()
+    assert json.loads((path / ".handoff.json").read_text())["phase"] == "idle"

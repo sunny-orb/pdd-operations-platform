@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
 from . import read_queries
+from .comparison import PERIOD_FIELDS, PeriodSummary
 from .profile_rules import resolve_profile_fields
 from .source import windows
 
@@ -364,9 +365,90 @@ class Repository:
         "source_grouping,promotion_name,promotion_type,bidding_method,source_deleted_label"
     )
 
+    def period_summaries(self, start, end):
+        """同快照/版本的严格日合计；返回少量摘要，不读取或持久化历史事实副本。"""
+        fields = []
+        for field in PERIOD_FIELDS:
+            finite = (
+                f" AND {field} NOT IN ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)"
+                if field == "product_revenue"
+                else ""
+            )
+            fields.append(
+                f"CASE WHEN count({field})=count(*) AND bool_and({field}>=0{finite}) "
+                f"THEN sum({field}) END AS {field}"
+            )
+        rows = self.c.execute(
+            sa.text(
+                "SELECT business_date,count(*) AS row_count,"
+                + ",".join(fields)
+                + " FROM public.read_product_daily_facts WHERE dataset_version_id=:v "
+                "AND business_date BETWEEN :start AND :end GROUP BY business_date"
+            ),
+            dict(v=self.params["product_daily"], start=start, end=end),
+        ).mappings()
+        return {
+            row["business_date"]: PeriodSummary(
+                row["row_count"],
+                {
+                    field: None if row[field] is None else Decimal(row[field])
+                    for field in PERIOD_FIELDS
+                },
+            )
+            for row in rows
+        }
+
     def overview_rows(self, start, end, *, listing_ids=None):
-        """总览只读计算字段，不生成或传输用不到的存储行ID。"""
-        return self.rows(start, end, listing_ids=listing_ids, include_identity=False)
+        """总览按相同身份运输日原值，按原序还原；候选筛选仍用小范围行读取。
+
+        不合并经营事实。金额按字符串运输避免JSON浮点；计数保持整数，
+        名称修订单独分组，窗口序号保留原稳定顺序。仅当前请求占用内存。
+        """
+        if listing_ids is not None:
+            return self.rows(start, end, listing_ids=listing_ids, include_identity=False)
+        identity = (
+            "listing_id",
+            "source_shop_id",
+            "source_shop_name",
+            "source_product_id",
+            "source_product_name",
+        )
+        facts = (
+            "business_date",
+            "views",
+            "visitors",
+            "favorites",
+            "buyers",
+            "orders",
+            "units",
+            "product_revenue",
+        )
+        sql = (
+            "SELECT "
+            + ",".join(identity)
+            + ",json_agg(json_build_array(position,business_date,views,visitors,favorites,"
+            "buyers,orders,units,product_revenue::text)) AS facts FROM (SELECT "
+            + ",".join((*identity, *facts))
+            + ",row_number() OVER (ORDER BY business_date,source_shop_id,source_product_id,"
+            "source_row_key) AS position FROM public.read_product_daily_facts "
+            "WHERE dataset_version_id=:v AND business_date BETWEEN :start AND :end) "
+            "AS selected GROUP BY " + ",".join(identity)
+        )
+        result = self.c.execute(
+            sa.text(sql), dict(v=self.params["product_daily"], start=start, end=end)
+        )
+        rows = []
+        for group in result.mappings():
+            base = {field: group[field] for field in identity}
+            for cells in group["facts"]:
+                position = cells[0] - 1
+                if position >= len(rows):
+                    rows.extend([None] * (position - len(rows) + 1))
+                values = cells[1:]
+                values[0] = date.fromisoformat(values[0])
+                values[-1] = None if values[-1] is None else Decimal(values[-1])
+                rows[position] = dict(base, **dict(zip(facts, values, strict=True)))
+        return rows
 
     def rows(
         self, start, end, *, ads=False, listing_ids=None, risk_only=False, include_identity=True

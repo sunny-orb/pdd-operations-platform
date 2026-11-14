@@ -273,3 +273,102 @@ def test_overview_skips_storage_row_identity_but_detail_keeps_stable_ids(sales_p
     assert projections and all("id" not in columns for columns in projections), (
         "汇总不读取未使用的存储行ID"
     )
+
+
+def test_sql_strict_daily_summaries_match_original_rows(sales_pg, tmp_path):
+    """只读日摘要保留空期、负值、缺项、精度及日期边界，不运输整窗原行。"""
+    from decimal import Decimal
+
+    from app.modules.product_board.comparison import summarize_period, summarize_window
+
+    end, sources = candidate(duplicate_profile=False)
+    raw = [
+        dict(
+            z_id=1 + i * 2 + j,
+            shop_id="663599807",
+            spu_id=str(123 + j),
+            dt=str(end - timedelta(days=i)),
+            time_granularity="day",
+            transaction_amount="100.01",
+            product_uv=100,
+            transaction_users=10,
+            transaction_products=2,
+            favorite_product_users=3,
+        )
+        for i in range(120)
+        for j in range(2)
+    ]
+    raw[0]["transaction_amount"] = None
+    raw[2]["transaction_amount"] = "-1"
+    raw[4]["product_uv"] = None
+    raw[6]["transaction_amount"] = (
+        "1000000000000000000000000000000000000000000000000000000000000.03"
+    )
+    sources["product_daily"] = normalize("product_daily", raw, end)
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, sources))
+    with snapshot(sales_pg) as repo:
+        first = end - timedelta(days=119)
+        rows = repo.rows(first, end)
+        summaries = repo.period_summaries(first, end)
+        assert len(summaries) == 120 and sum(s.row_count for s in summaries.values()) == 240
+        for offset, days in ((0, 1), (0, 58), (58, 58), (3, 1), (1, 1), (120, 7)):
+            finish = end - timedelta(days=offset)
+            start = finish - timedelta(days=days - 1)
+            expected = summarize_period([r for r in rows if start <= r["business_date"] <= finish])
+            assert summarize_window(summaries, start, finish) == expected
+        assert summaries[end].totals["product_revenue"] is None
+        assert summaries[end - timedelta(days=2)].totals["visitors"] is None
+        assert summaries[end - timedelta(days=3)].totals["product_revenue"] == Decimal(
+            "1000000000000000000000000000000000000000000000000000000000100.04"
+        )
+
+
+def test_overview_transport_deduplicates_identity_without_changing_rows(sales_pg, tmp_path):
+    """原行顺序、中文/转义名称、大整数、Decimal及NULL均完整往返。"""
+    from decimal import Decimal
+
+    end, sources = candidate(duplicate_profile=False)
+    raw = [
+        dict(
+            z_id=1 + i * 3 + j,
+            shop_id="663599807",
+            shop_name='店名\n"A"',
+            spu_id=str(123 + j),
+            spu_name="糖豆\\帽" if i % 2 else "商品😀",
+            dt=str(end - timedelta(days=i)),
+            time_granularity="day",
+            transaction_amount="100.000001",
+            product_pv=100,
+            product_uv=9007199254740997,
+            transaction_users=10,
+            transaction_orders=3,
+            transaction_products=2,
+            favorite_product_users=None if i == 1 else 4,
+        )
+        for i in range(62)
+        for j in range(3)
+    ]
+    raw[0]["transaction_amount"] = (
+        "1000000000000000000000000000000000000000000000000000000000000.03"
+    )
+    sources["product_daily"] = normalize("product_daily", raw, end)
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, sources))
+    reads = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if "FROM public.read_product_daily_facts" in statement:
+            reads.append(cursor.rowcount)
+
+    with snapshot(sales_pg) as repo:
+        start = end - timedelta(days=61)
+        expected = [{k: v for k, v in row.items() if k != "id"} for row in repo.rows(start, end)]
+        event.listen(sales_pg, "after_cursor_execute", capture)
+        try:
+            actual = repo.overview_rows(start, end)
+        finally:
+            event.remove(sales_pg, "after_cursor_execute", capture)
+        assert actual == expected
+        assert actual[-3]["product_revenue"] == Decimal(raw[0]["transaction_amount"])
+        assert actual[0]["visitors"] == 9007199254740997
+        assert repo.overview_rows(start, end, listing_ids=[]) == []
+    assert reads and sum(reads) < len(actual), "总览只运输不重复的身份及分组原值"

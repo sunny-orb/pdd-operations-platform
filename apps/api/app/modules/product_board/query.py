@@ -447,8 +447,11 @@ def overview(repo, q, *, listing_ids=None, risk_top=None, selected_ids=None):
     period_daily = None
     if unfiltered(q):
         first = min(pstart, q.end - timedelta(days=59))
-        extra = read_rows(first, repo.start - timedelta(days=1)) if first < repo.start else []
-        period_daily = daily_period_summaries(chain(loaded_rows, extra))
+        if listing_ids is None and hasattr(repo, "period_summaries"):
+            period_daily = repo.period_summaries(first, q.end)
+        else:
+            extra = read_rows(first, repo.start - timedelta(days=1)) if first < repo.start else []
+            period_daily = daily_period_summaries(chain(loaded_rows, extra))
     # 说明区沿用本次计算的日历窗；去年无对应闰日不补成2月28日。
     year_dates = [
         mapped

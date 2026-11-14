@@ -157,3 +157,56 @@ def test_windows_reuse_loaded_facts_and_only_read_extra_history_when_needed():
     repo = CountRepo()
     window(repo)
     assert repo.calls.count((repo.start, repo.end)) == 1
+
+
+def test_unfiltered_overlapping_windows_read_each_measure_once():
+    """重复窗口不能反复扫描同一批度量；结果仍含独立前期及原日历范围。"""
+    from app.modules.product_board.query import period_windows
+
+    reads = []
+
+    class MeasuredRow(dict):
+        def get(self, key, default=None):
+            if key == "product_revenue":
+                reads.append(self["business_date"])
+            return super().get(key, default)
+
+    rows = [MeasuredRow(fact(END - timedelta(days=i), product_revenue=D(i + 1))) for i in range(60)]
+    values = period_windows(Repo(rows), BoardQuery(END, END), rows)
+    assert [
+        (x["metrics"]["revenue"]["value"], x["metrics"]["revenue"]["previous"]) for x in values
+    ] == [(D(28), D(77)), (D(105), D(301)), (D(465), D(1365))]
+    assert len(reads) <= len(rows), "7/14/30日重叠窗口必须共用一次按日汇总"
+
+
+@pytest.mark.parametrize("invalid", [None, D("-1"), D("NaN"), D("Infinity")])
+def test_daily_summary_keeps_invalid_days_and_empty_periods_distinct(invalid):
+    from app.modules.product_board.comparison import daily_period_summaries, summarize_window
+
+    rows = [
+        fact(END, product_revenue=D("100")),
+        fact(END - timedelta(days=1), product_revenue=invalid),
+        fact(END - timedelta(days=8), product_revenue=D("900")),
+    ]
+    daily = daily_period_summaries(rows)
+    current = summarize_window(daily, END - timedelta(days=6), END)
+    assert current.row_count == 2
+    assert current.totals["product_revenue"] is None
+    assert current.totals["visitors"] == 200
+    valid = summarize_window(daily, END, END)
+    assert valid.totals["product_revenue"] == 100 and valid.row_count == 1
+    empty = summarize_window(daily, END + timedelta(days=1), END + timedelta(days=7))
+    assert empty.row_count == 0
+
+
+def test_daily_summary_does_not_round_large_amounts_between_days():
+    from app.modules.product_board.comparison import daily_period_summaries, summarize_window
+
+    rows = [
+        fact(END, product_revenue=D("1e60")),
+        fact(END, product_revenue=D("0.01")),
+        fact(END - timedelta(days=1), product_revenue=D("0.02")),
+    ]
+    result = summarize_window(daily_period_summaries(rows), END - timedelta(days=1), END)
+    assert result.row_count == 3
+    assert result.totals["product_revenue"] == D("1" + "0" * 60 + ".03")

@@ -364,7 +364,13 @@ class Repository:
         "source_grouping,promotion_name,promotion_type,bidding_method,source_deleted_label"
     )
 
-    def rows(self, start, end, *, ads=False, listing_ids=None, risk_only=False):
+    def overview_rows(self, start, end, *, listing_ids=None):
+        """总览只读计算字段，不生成或传输用不到的存储行ID。"""
+        return self.rows(start, end, listing_ids=listing_ids, include_identity=False)
+
+    def rows(
+        self, start, end, *, ads=False, listing_ids=None, risk_only=False, include_identity=True
+    ):
         """固定版本/日期读取必要度量；风险投影保留身份和三项规则输入。"""
         if listing_ids is not None and not listing_ids:
             return []
@@ -372,20 +378,22 @@ class Repository:
         code = "product_promotion" if ads else "product_daily"
         day = "period_start" if ads else "business_date"
         cols = self._ADS_COLS if ads else self._RISK_COLS if risk_only else self._DAILY_COLS
+        if not include_identity and not ads and not risk_only:
+            cols = cols.removeprefix("id,")
         condition = ""
         params = dict(v=self.params[code], start=start, end=end)
         if listing_ids is not None:
             condition = "AND " + read_queries.LISTING_FILTER + " "
             params.update(read_queries.listing_filter(listing_ids))
-        return [
-            dict(r)
-            for r in self.c.execute(
-                sa.text(
-                    f"SELECT {cols} FROM public.{table} WHERE dataset_version_id=:v "
-                    f"AND {day} BETWEEN :start AND :end "
-                    f"{condition}"
-                    f"ORDER BY {day},source_shop_id,source_product_id,source_row_key"
-                ),
-                params,
-            ).mappings()
-        ]
+        result = self.c.execute(
+            sa.text(
+                f"SELECT {cols} FROM public.{table} WHERE dataset_version_id=:v "
+                f"AND {day} BETWEEN :start AND :end "
+                f"{condition}"
+                f"ORDER BY {day},source_shop_id,source_product_id,source_row_key"
+            ),
+            params,
+        )
+        # 列名只读取一次；避开每行Mapping包装，仍保留原值类型与稳定行序。
+        keys = tuple(result.keys())
+        return [dict(zip(keys, row, strict=True)) for row in result]

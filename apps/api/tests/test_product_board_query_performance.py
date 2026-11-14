@@ -218,3 +218,58 @@ def test_repeated_dimension_query_unions_values_and_narrows_facts(sales_pg, tmp_
             query.overview(repo, query.BoardQuery(start, end, shop=("663599807", "799193231")))
         )
     assert response.json()["data"] == expected
+
+
+def test_overview_skips_storage_row_identity_but_detail_keeps_stable_ids(sales_pg, tmp_path):
+    """汇总不构造共享事实的长行ID；逐日分页仍使用原来的稳定ID。"""
+    from app.modules.product_board.source import previous_year
+
+    end, sources = candidate(duplicate_profile=False)
+    dates = [end - timedelta(days=i) for i in range(62)]
+    dates += [previous_year(end - timedelta(days=i)) for i in range(31)]
+    sources["product_daily"] = normalize(
+        "product_daily",
+        [
+            dict(
+                z_id=i + 1,
+                shop_id="663599807",
+                spu_id="123",
+                dt=str(day),
+                time_granularity="day",
+                transaction_amount="100",
+                product_uv=100,
+                transaction_users=10,
+                transaction_orders=10,
+                transaction_products=10,
+                favorite_product_users=2,
+            )
+            for i, day in enumerate(dates)
+        ],
+        end,
+    )
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, sources))
+    projections = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if "FROM public.read_product_daily_facts" in statement and "product_revenue" in statement:
+            projections.append(statement.split(" FROM ", 1)[0].removeprefix("SELECT ").split(","))
+
+    event.listen(sales_pg, "after_cursor_execute", capture)
+    try:
+        with snapshot(sales_pg) as repo:
+            result = query.overview(repo, query.BoardQuery(end - timedelta(days=30), end))
+            assert result["metrics"]["revenue"]["value"] == 3100
+            assert result["metrics"]["revenue"]["previous"] == 3100
+            assert result["metrics"]["revenue"]["previous_period"] == 3100
+    finally:
+        event.remove(sales_pg, "after_cursor_execute", capture)
+    with snapshot(sales_pg) as repo:
+        ids = list(repo.profiles())
+        first, count = repo.page_rows(end - timedelta(days=30), end, ids, 1, 25)
+        again, _ = repo.page_rows(end - timedelta(days=30), end, ids, 1, 25)
+        assert count == 31 and len(first) == 25
+        assert len({r["id"] for r in first}) == 25
+        assert [r["id"] for r in first] == [r["id"] for r in again]
+    assert projections and all("id" not in columns for columns in projections), (
+        "汇总不读取未使用的存储行ID"
+    )

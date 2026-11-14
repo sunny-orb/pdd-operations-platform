@@ -1,5 +1,6 @@
 """主卡期间比较：本期合计直接参与涨跌，保留两期记录和无效原因。"""
 
+from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -45,6 +46,24 @@ def summarize_period(rows) -> PeriodSummary:
             continue
         totals[field] = None
     return PeriodSummary(len(rows), totals)
+
+
+def daily_period_summaries(rows):
+    """在当前请求内汇总原行；只留下各日行数与严格合计，不保留事实副本。"""
+    groups = defaultdict(list)
+    for row in rows:
+        groups[row["business_date"]].append(row)
+    return {day: summarize_period(values) for day, values in groups.items()}
+
+
+def summarize_window(daily, start, end):
+    """合并不重叠日摘要；任一日字段无效仍阻断该字段，缺日不补零。"""
+    parts = [part for day, part in daily.items() if start <= day <= end]
+    totals = {}
+    for field in PERIOD_FIELDS:
+        values = [part.totals[field] for part in parts]
+        totals[field] = None if None in values else _sum(values)
+    return PeriodSummary(sum(part.row_count for part in parts), totals)
 
 
 def period_comparisons(current: PeriodSummary, baseline: PeriodSummary, period: str):

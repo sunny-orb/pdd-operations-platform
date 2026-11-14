@@ -8,7 +8,13 @@ from itertools import chain
 from math import ceil
 
 from .actions import build_actions
-from .comparison import METRIC_INPUTS, period_comparisons, summarize_period
+from .comparison import (
+    METRIC_INPUTS,
+    daily_period_summaries,
+    period_comparisons,
+    summarize_period,
+    summarize_window,
+)
 from .diagnosis import operating_diagnosis
 from .filter_projection import level_group, matches_level
 from .health import growth_health
@@ -298,16 +304,23 @@ def mark_calendar(values, covered):
     return values
 
 
-def period_windows(repo, q, loaded_rows, *, read_rows=None, selected_ids=None):
+def unfiltered(q):
+    return not any((q.shop, q.operator, q.category, q.level, q.products, q.keyword))
+
+
+def period_windows(repo, q, loaded_rows, *, read_rows=None, selected_ids=None, daily=None):
     """固定结束日的7/14/30日表现；每期独立筛选，不受主卡商品名单截断。
 
     只读相容版本中必要的60日事实。缺经营日不补零或递补日期；已接收
     历史边界不足时不把部分期间当成完整期间比较。其他区块不使用此集合。
     """
-    needed_start = q.end - timedelta(days=59)
-    rows = [r for r in loaded_rows if needed_start <= r["business_date"] <= q.end]
-    if needed_start < repo.start:
-        rows += (read_rows or repo.rows)(needed_start, repo.start - timedelta(days=1))
+    if daily is None:
+        needed_start = q.end - timedelta(days=59)
+        rows = [r for r in loaded_rows if needed_start <= r["business_date"] <= q.end]
+        if needed_start < repo.start:
+            rows += (read_rows or repo.rows)(needed_start, repo.start - timedelta(days=1))
+        if unfiltered(q):
+            daily = daily_period_summaries(rows)
     profiles = repo.profiles()
     received_start = getattr(repo, "versions", {}).get("product_daily", {}).get("period_start")
 
@@ -325,8 +338,12 @@ def period_windows(repo, q, loaded_rows, *, read_rows=None, selected_ids=None):
         previous_end = start - timedelta(days=1)
         previous_start = start - timedelta(days=days)
         metrics = period_comparisons(
-            summarize_period(filtered(start, q.end)),
-            summarize_period(filtered(previous_start, previous_end)),
+            summarize_window(daily, start, q.end)
+            if daily is not None
+            else summarize_period(filtered(start, q.end)),
+            summarize_window(daily, previous_start, previous_end)
+            if daily is not None
+            else summarize_period(filtered(previous_start, previous_end)),
             f"前{days}日",
         )
         for value in metrics.values():
@@ -412,7 +429,10 @@ def filtered_overview(repo, q):
 
 
 def overview(repo, q, *, listing_ids=None, risk_top=None, selected_ids=None):
-    read_rows = repo.rows if listing_ids is None else partial(repo.rows, listing_ids=listing_ids)
+    source_rows = getattr(repo, "overview_rows", repo.rows)
+    read_rows = (
+        source_rows if listing_ids is None else partial(source_rows, listing_ids=listing_ids)
+    )
     info, groups, members, loaded_rows, period_info = scope(
         repo, q, with_members=True, read_rows=read_rows
     )
@@ -424,6 +444,11 @@ def overview(repo, q, *, listing_ids=None, risk_top=None, selected_ids=None):
     current = selected_rows(groups, q.start, q.end)
     n = (q.end - q.start).days + 1
     pstart, pend = q.start - timedelta(days=n), q.start - timedelta(days=1)
+    period_daily = None
+    if unfiltered(q):
+        first = min(pstart, q.end - timedelta(days=59))
+        extra = read_rows(first, repo.start - timedelta(days=1)) if first < repo.start else []
+        period_daily = daily_period_summaries(chain(loaded_rows, extra))
     # 说明区沿用本次计算的日历窗；去年无对应闰日不补成2月28日。
     year_dates = [
         mapped
@@ -431,7 +456,7 @@ def overview(repo, q, *, listing_ids=None, risk_top=None, selected_ids=None):
         if (mapped := previous_year(q.start + timedelta(days=i))) is not None
     ]
     ys, ye = previous_year(q.start), previous_year(q.end)
-    read_year = repo.rows if listing_ids is None else partial(repo.rows, listing_ids=info)
+    read_year = source_rows if listing_ids is None else partial(source_rows, listing_ids=info)
     yr = read_year(ys or date(q.start.year - 1, 3, 1), ye or date(q.end.year - 1, 2, 28))
     mapped_dates = {previous_year(x["business_date"]) for x in current}
     year = [r for r in yr if r["listing_id"] in info and r["business_date"] in mapped_dates]
@@ -460,21 +485,27 @@ def overview(repo, q, *, listing_ids=None, risk_top=None, selected_ids=None):
     for row in card_year:
         card_year_daily[row["business_date"]].append(row)
     yearly = {day: aggregate(rows, daily=True) for day, rows in card_year_daily.items()}
-    current_summary = summarize_period(current)
+    current_summary = (
+        summarize_window(period_daily, q.start, q.end)
+        if period_daily is not None
+        else summarize_period(current)
+    )
     year_comparisons = period_comparisons(current_summary, summarize_period(card_year), "去年同期")
     # 环比在前等长日历窗独立筛选，不能被本期商品名单截断，也不向更早日期递补。
-    prior_rows = [r for r in loaded_rows if pstart <= r["business_date"] <= pend]
-    if pstart < repo.start:
-        # 31日对比需62日：只补未加载的前两日，并保留原查询的日期顺序。
-        prior_rows = read_rows(pstart, min(pend, repo.start - timedelta(days=1))) + prior_rows
-    prior_ids = selected_ids
-    if prior_ids is None:
-        prior_info, _ = labels(prior_rows, repo.profiles())
-        prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
-    comparison_past = [r for r in prior_rows if r["listing_id"] in prior_ids]
-    past_comparisons = period_comparisons(
-        current_summary, summarize_period(comparison_past), "前一期"
-    )
+    if period_daily is not None:
+        past_summary = summarize_window(period_daily, pstart, pend)
+    else:
+        prior_rows = [r for r in loaded_rows if pstart <= r["business_date"] <= pend]
+        if pstart < repo.start:
+            # 31日对比需62日：只补未加载的前两日，并保留原查询的日期顺序。
+            prior_rows = read_rows(pstart, min(pend, repo.start - timedelta(days=1))) + prior_rows
+        prior_ids = selected_ids
+        if prior_ids is None:
+            prior_info, _ = labels(prior_rows, repo.profiles())
+            prior_ids = {lid for lid, item in prior_info.items() if matches(item, q)}
+        comparison_past = [r for r in prior_rows if r["listing_id"] in prior_ids]
+        past_summary = summarize_period(comparison_past)
+    past_comparisons = period_comparisons(current_summary, past_summary, "前一期")
     received_start = getattr(repo, "versions", {}).get("product_daily", {}).get("period_start")
     if received_start and pstart < received_start:
         for value in past_comparisons.values():
@@ -527,7 +558,9 @@ def overview(repo, q, *, listing_ids=None, risk_top=None, selected_ids=None):
                 ],
             )
         )
-    windows = period_windows(repo, q, loaded_rows, read_rows=read_rows, selected_ids=selected_ids)
+    windows = period_windows(
+        repo, q, loaded_rows, read_rows=read_rows, selected_ids=selected_ids, daily=period_daily
+    )
     seven = q.end - timedelta(days=6)
     before = seven - timedelta(days=7)
     hot = []

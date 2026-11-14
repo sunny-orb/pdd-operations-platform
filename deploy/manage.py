@@ -2,6 +2,7 @@
 
 import base64
 import fcntl
+import hashlib
 import json
 import os
 import pwd
@@ -9,6 +10,8 @@ import re
 import stat
 import subprocess
 import sys
+import types
+import urllib.request
 import uuid
 from pathlib import Path
 
@@ -16,13 +19,25 @@ ROOT = Path("/home/songbing/pdd-operations-platform")
 ACCOUNT = "songbing"
 PROJECT = "pdd-operations-production"
 DOMAIN = "pdd-operations.kktree.cn"
-UPLOADS = ("compose.production.yaml", "release.sh", "rollback.sh", "manage.py", "storage.py")
+APP_SUBNET = "10.254.240.0/28"
+UPLOADS = (
+    "compose.production.yaml",
+    "release.sh",
+    "rollback.sh",
+    "manage.py",
+    "storage.py",
+    "handoff.py",
+    "assets.py",
+)
 STATE = (
     ".release.json",
     ".release.previous.json",
     ".release.recovery.json",
     ".compose.rollback.yaml",
     ".release.lock",
+    ".handoff.json",
+    ".compose.handoff.json",
+    ".asset-extraction.json",
 )
 FILES = UPLOADS + STATE + (".env", ".env.runtime", ".htpasswd", "compose.sync.yaml")
 
@@ -62,6 +77,80 @@ def validate_manifest(value):
 class Project:
     def __init__(self):
         self.fd = None
+        self._modules = {}
+        self._handoff = None
+
+    @property
+    def root(self):
+        return ROOT
+
+    @property
+    def project_name(self):
+        return PROJECT
+
+    @property
+    def domain(self):
+        return DOMAIN
+
+    @property
+    def app_subnet(self):
+        return APP_SUBNET
+
+    @staticmethod
+    def validate_manifest(value):
+        return validate_manifest(value)
+
+    def load_module(self, name):
+        """从已校验项目文件读取源码；远端stdin入口不依赖sys.path或__file__。"""
+        require(name in ("handoff.py", "assets.py"), "UNAPPROVED_DEPLOY_MODULE")
+        if name not in self._modules:
+            module = types.ModuleType("pdd_release_" + name[:-3])
+            module.__file__ = str(ROOT / name)
+            # 来源仅为上述白名单、经fd校验读取的受信发布源码，不接收任意代码输入。
+            exec(compile(self.read(name), module.__file__, "exec"), module.__dict__)  # noqa: S102
+            self._modules[name] = module
+        return self._modules[name]
+
+    def handoff(self):
+        if self._handoff is None:
+            self._handoff = self.load_module("handoff.py").Handoff(self)
+        return self._handoff
+
+    def external_marker(self):
+        """固定生产HTTPS入口核对实际接管版本；不接受CLI或环境覆盖。"""
+        value = (
+            self.public_bytes("/.well-known/pdd-release", 128).decode("ascii").strip()
+        )
+        require(re.fullmatch("[0-9a-f]{40}", value), "INVALID_PUBLIC_RELEASE_MARKER")
+        return value
+
+    def public_bytes(self, path, limit):
+        """仅固定HTTPS站点的公开文件；测试可替换方法，生产无可变URL入口。"""
+        require(
+            path in ("/index.html", "/.well-known/pdd-release")
+            or (
+                path.startswith("/assets/")
+                and ".." not in path
+                and re.fullmatch(r"/[A-Za-z0-9_@.+/-]+", path)
+            ),
+            "INVALID_PUBLIC_PROBE_PATH",
+        )
+        request = urllib.request.Request(
+            "https://" + DOMAIN + path, headers={"Cache-Control": "no-cache"}
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            require(response.status == 200, "PUBLIC_ASSET_UNAVAILABLE")
+            value = response.read(limit + 1)
+        require(len(value) <= limit, "PUBLIC_ASSET_TOO_LARGE")
+        return value
+
+    def verify_public_files(self, expected):
+        for path, digest in expected.items():
+            require(re.fullmatch("[0-9a-f]{64}", digest), "INVALID_PUBLIC_ASSET_DIGEST")
+            actual = hashlib.sha256(
+                self.public_bytes(path, 64 * 1024 * 1024)
+            ).hexdigest()
+            require(actual == digest, "PUBLIC_ASSET_DIGEST_MISMATCH")
 
     def __enter__(self):
         uid = os.geteuid()
@@ -142,11 +231,18 @@ class Project:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, name, src_dir_fd=self.fd, dst_dir_fd=self.fd)
+            os.fsync(self.fd)
         finally:
             try:
                 os.unlink(temporary, dir_fd=self.fd)
             except FileNotFoundError:
                 pass
+
+    def remove(self, name):
+        require(name == ".asset-extraction.json", "UNAPPROVED_STATE_REMOVAL")
+        if self.check_file(name):
+            os.unlink(name, dir_fd=self.fd)
+            os.fsync(self.fd)
 
     def lock(self):
         self.check_file(".release.lock")
@@ -218,7 +314,15 @@ class Project:
             "WEB_HTPASSWD_FILE": str(ROOT / ".htpasswd"),
         }
 
-    def docker(self, args, env):
+    def docker(self, args, env, *, binary=False):
+        if binary:
+            require(
+                len(args) == 3
+                and args[0] == "cp"
+                and args[2] == "-"
+                and re.fullmatch(r"[0-9a-f]{64}:/usr/share/nginx/html/\.", args[1]),
+                "UNAPPROVED_BINARY_DOCKER_OPERATION",
+            )
         result = subprocess.run(
             [
                 "/usr/bin/docker",
@@ -232,46 +336,11 @@ class Project:
             env=env,
             check=True,
             capture_output=True,
-            text=True,
+            text=not binary,
         )
+        if binary:
+            require(len(result.stdout) <= 72 * 1024 * 1024, "STATIC_ARCHIVE_TOO_LARGE")
         return result.stdout
-
-    def activate(self, manifest, compose_file):
-        env = self.docker_environment(validate_manifest(manifest))
-        self.check_file(compose_file, required=True)
-        compose = [
-            "compose",
-            "--project-name",
-            PROJECT,
-            "--project-directory",
-            str(ROOT),
-            "--env-file",
-            "/dev/null",
-            "-f",
-            str(ROOT / compose_file),
-        ]
-        self.docker([*compose, "config", "--quiet"], env)
-        worker = self.docker(
-            [
-                "ps",
-                "--filter",
-                f"label=com.docker.compose.project={PROJECT}",
-                "--filter",
-                "label=com.docker.compose.service=worker",
-                "--format",
-                "{{.ID}}",
-            ],
-            env,
-        )
-        require(not worker.strip(), "WORKER_RUNNING")
-        self.docker([*compose, "pull", "api", "web"], env)
-        status = json.loads(
-            self.docker([*compose, "run", "--rm", "--no-deps", "database"], env)
-        )
-        require(status == {"status": "already_initialized"}, "DATABASE_NOT_INITIALIZED")
-        self.docker(
-            [*compose, "up", "-d", "--wait", "--wait-timeout", "120", "api", "web"], env
-        )
 
     def state(self, name):
         value = json.loads(self.read(name))
@@ -288,43 +357,11 @@ class Project:
 
     def release(self, manifest):
         validate_manifest(manifest)
-        previous = None
-        if self.check_file(".release.json"):
-            previous, _ = self.state(".release.json")
-        compose = self.read("compose.production.yaml")
         self.docker_environment(manifest)
-        if previous is not None:
-            self.write(".release.recovery.json", json.dumps(previous).encode())
-        self.activate(manifest, "compose.production.yaml")
-        if previous is not None:
-            self.write(".release.previous.json", json.dumps(previous).encode())
-        # 配置和镜像清单同一原子文件发布，避免中断后跨版本拼接。
-        state = {
-            "version": 1,
-            "manifest": manifest,
-            "compose": base64.b64encode(compose).decode(),
-        }
-        self.write(".release.json", json.dumps(state).encode())
-        self.clear_recovery()
-
-    def clear_recovery(self):
-        if self.check_file(".release.recovery.json"):
-            os.unlink(".release.recovery.json", dir_fd=self.fd)
+        self.handoff().release(manifest, self.read("compose.production.yaml"))
 
     def rollback(self):
-        recovering = self.check_file(".release.recovery.json")
-        previous, compose = self.state(
-            ".release.recovery.json" if recovering else ".release.previous.json"
-        )
-        self.docker_environment(previous["manifest"])
-        if not recovering:
-            current, _ = self.state(".release.json")
-            self.write(".release.recovery.json", json.dumps(current).encode())
-        self.write(".compose.rollback.yaml", compose)
-        self.activate(previous["manifest"], ".compose.rollback.yaml")
-        self.write("compose.production.yaml", compose)
-        self.write(".release.json", json.dumps(previous).encode())
-        self.clear_recovery()
+        self.handoff().rollback()
 
     def receive(self, payload):
         require(
@@ -357,7 +394,7 @@ def main():
     try:
         require(
             len(sys.argv) == 2
-            and sys.argv[1] in ("receive", "release", "rollback", "check"),
+            and sys.argv[1] in ("receive", "release", "rollback", "reconcile", "check"),
             "INVALID_ACTION",
         )
         with Project() as project:
@@ -367,6 +404,8 @@ def main():
             with project.lock():
                 if sys.argv[1] == "rollback":
                     project.rollback()
+                elif sys.argv[1] == "reconcile":
+                    project.handoff().reconcile()
                 else:
                     value = json.loads(sys.stdin.read(1_000_001))
                     if sys.argv[1] == "receive":

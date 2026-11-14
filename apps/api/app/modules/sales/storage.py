@@ -2,6 +2,7 @@
 
 import os
 import time
+from contextlib import nullcontext
 from dataclasses import asdict
 from datetime import timedelta
 from pathlib import Path
@@ -71,7 +72,7 @@ class ShopDailyStore:
         self.approved = approved or approved_window(self.code)
         self.tables = reflect_tables(engine, self.fact_table)
 
-    def _lease(self, connection, run_id):
+    def _lease(self, connection, run_id, worker):
         tasks = self.tables["task_runs"]
         task = (
             connection.execute(sa.select(tasks).where(tasks.c.id == run_id).with_for_update())
@@ -79,7 +80,11 @@ class ShopDailyStore:
             .one()
         )
         now = connection.execute(sa.select(sa.func.clock_timestamp())).scalar_one()
-        if task["status"] != "running" or task["lease_expires_at"] <= now:
+        if (
+            task["status"] != "running"
+            or task["worker_ref"] != worker
+            or task["lease_expires_at"] <= now
+        ):
             raise SalesError("TASK_LEASE_LOST", 409)
         return task
 
@@ -139,20 +144,29 @@ class ShopDailyStore:
             last_heartbeat = time.monotonic()
 
             def heartbeat(force=False):
+                """事务内续租不提交业务写入；DB时钟及worker共同阻止过期复活。"""
                 nonlocal last_heartbeat
                 if force or time.monotonic() - last_heartbeat >= HEARTBEAT_SECONDS:
-                    with connection.begin():
-                        task = self._lease(connection, run_id)
-                        if task["worker_ref"] != worker:
-                            raise SalesError("TASK_LEASE_LOST", 409)
-                        connection.execute(
+                    transaction = (
+                        nullcontext() if connection.in_transaction() else connection.begin()
+                    )
+                    with transaction:
+                        self._lease(connection, run_id, worker)
+                        renewed = connection.execute(
                             tasks.update()
-                            .where(tasks.c.id == run_id)
+                            .where(
+                                tasks.c.id == run_id,
+                                tasks.c.status == "running",
+                                tasks.c.worker_ref == worker,
+                                tasks.c.lease_expires_at > sa.func.clock_timestamp(),
+                            )
                             .values(
                                 lease_expires_at=sa.func.clock_timestamp()
                                 + sa.text(f"interval '{LEASE_SECONDS} seconds'")
                             )
                         )
+                        if renewed.rowcount != 1:
+                            raise SalesError("TASK_LEASE_LOST", 409)
                     last_heartbeat = time.monotonic()
 
             try:
@@ -162,7 +176,7 @@ class ShopDailyStore:
                 heartbeat(force=True)
                 if candidate.window != self.approved:
                     raise SalesError("PUBLICATION_SCOPE_MISMATCH")
-                return self._publish(connection, run_id, candidate)
+                return self._publish(connection, run_id, worker, candidate, heartbeat)
             except Exception as exc:
                 if connection.in_transaction():
                     connection.rollback()
@@ -205,14 +219,19 @@ class ShopDailyStore:
             raise SalesError("PUBLICATION_SCOPE_MISMATCH")
         return self.run(lambda _: candidate)
 
-    def _archive(self, version_id, candidate):
+    def _archive(self, version_id, candidate, heartbeat):
         """独占创建必要投影和解释清单；摘要对应实际内容，权限固定600/700。"""
         self.archive_root.mkdir(parents=True, mode=0o700, exist_ok=True)
         os.chmod(self.archive_root, 0o700)
         folder = self.archive_root / version_id
         folder.mkdir(parents=True, mode=0o700, exist_ok=False)
         os.chmod(folder, 0o700)
-        data = ("\n".join(canonical(row) for row in candidate.raw_rows) + "\n").encode()
+        lines = []
+        for row in candidate.raw_rows:
+            heartbeat()
+            lines.append(canonical(row))
+        data = ("\n".join(lines) + "\n").encode()
+        heartbeat()
         policy = canonical(
             dict(
                 policy=self.revision,
@@ -234,14 +253,16 @@ class ShopDailyStore:
             ("interpretation.json", policy.encode()),
             ("producer-source.json", canonical(LOADED_PRODUCER_SOURCES).encode()),
         ):
+            heartbeat()
             write_archive(folder / name, content)
             if (folder / name).stat().st_mode & 0o077:
                 raise SalesError("ARCHIVE_PERMISSIONS")
         if (folder / "input.ndjson").read_bytes() != data:
             raise SalesError("ARCHIVE_CHECKSUM_MISMATCH")
+        heartbeat(force=True)
         return str(folder / "input.ndjson"), str(folder / "interpretation.json")
 
-    def _publish(self, connection, run_id, candidate):
+    def _publish(self, connection, run_id, worker, candidate, heartbeat):
         """草稿分批落库并续租；最终锁版本逐值校验，短事务封版与切入口。"""
         versions, facts, current, tasks, shops, coverage = (
             self.tables[n]
@@ -269,13 +290,18 @@ class ShopDailyStore:
             with connection.begin():
                 ensure_online(connection, [previous.id])
             archive = require_archive(previous.retained_input_ref)
+            heartbeat()
             interpretation = require_archive(previous.interpretation_ref)
         else:
-            archive, interpretation = self._archive(version_id, candidate)
-        expected = {r["source_row_key"]: r for r in candidate.rows}
+            archive, interpretation = self._archive(version_id, candidate, heartbeat)
+        expected, new_keys = {}, set()
+        for row in candidate.rows:
+            heartbeat()
+            expected[row["source_row_key"]] = row
+            new_keys.add((row["source_row_key"], row["shop_id"], row[self.date_column]))
         readable = fact_content.read_table(connection, self.fact_table)
         with connection.begin():
-            self._lease(connection, run_id)
+            heartbeat(force=True)
             old = connection.execute(
                 sa.select(current.c.version_id)
                 .where(current.c.dataset_code == self.code)
@@ -285,12 +311,13 @@ class ShopDailyStore:
                 old_rows = connection.execute(
                     sa.select(
                         readable.c.source_row_key, readable.c.shop_id, readable.c[self.date_column]
-                    ).where(readable.c.dataset_version_id == old)
-                ).all()
-                new_keys = {
-                    (r["source_row_key"], r["shop_id"], r[self.date_column]) for r in candidate.rows
-                }
-                removed = sum(tuple(row) not in new_keys for row in old_rows)
+                    ).where(readable.c.dataset_version_id == old),
+                    execution_options={"stream_results": True, "yield_per": 1000},
+                )
+                removed = 0
+                for row in old_rows:
+                    heartbeat()
+                    removed += tuple(row) not in new_keys
                 if removed and not self.reconcile_full_scope:
                     raise SalesError("SOURCE_OLD_KEY_MISSING")
                 if self.reconcile_full_scope and not previous:
@@ -337,20 +364,21 @@ class ShopDailyStore:
                         received_at=sa.func.clock_timestamp(),
                     )
                 )
+            heartbeat(force=True)
         if not reuse:
             if self.fact_table in fact_content.FACTS and fact_content.enabled(
                 connection, self.fact_table
             ):
                 with connection.begin():
-                    self._lease(connection, run_id)
+                    heartbeat(force=True)
                     fact_content.write_version(
-                        connection, self.fact_table, version_id, candidate.rows
+                        connection, self.fact_table, version_id, candidate.rows, heartbeat=heartbeat
                     )
-                    self._lease(connection, run_id)
+                    heartbeat(force=True)
             else:
                 for offset in range(0, len(candidate.rows), INSERT_BATCH_SIZE):
                     with connection.begin():
-                        self._lease(connection, run_id)
+                        heartbeat(force=True)
                         connection.execute(
                             facts.insert(),
                             [
@@ -358,17 +386,9 @@ class ShopDailyStore:
                                 for row in candidate.rows[offset : offset + INSERT_BATCH_SIZE]
                             ],
                         )
-                        self._lease(connection, run_id)
-                        connection.execute(
-                            tasks.update()
-                            .where(tasks.c.id == run_id)
-                            .values(
-                                lease_expires_at=sa.func.clock_timestamp()
-                                + sa.text(f"interval '{LEASE_SECONDS} seconds'")
-                            )
-                        )
+                        heartbeat(force=True)
         with connection.begin():
-            self._lease(connection, run_id)
+            heartbeat(force=True)
             connection.execute(
                 sa.select(versions.c.id).where(versions.c.id == version_id).with_for_update()
             ).one()
@@ -380,6 +400,7 @@ class ShopDailyStore:
                     execution_options={"stream_results": True, "yield_per": 1000},
                 ).mappings()
                 for stored in result:
+                    heartbeat()
                     wanted = expected.get(stored["source_row_key"])
                     if wanted is None or any(stored[key] != value for key, value in wanted.items()):
                         raise SalesError("CANDIDATE_CONTENT_MISMATCH")
@@ -420,7 +441,7 @@ class ShopDailyStore:
                 connection.execute(
                     versions.update().where(versions.c.id == version_id).values(state="published")
                 )
-            self._lease(connection, run_id)
+            heartbeat(force=True)
             if candidate.source_metadata and "incremental_baseline" in candidate.source_metadata:
                 baseline = connection.execute(
                     sa.select(current.c.version_id)
@@ -438,17 +459,21 @@ class ShopDailyStore:
                     index_elements=[current.c.dataset_code], set_={"version_id": version_id}
                 )
             )
-            source_time = max(
-                (
-                    r.get("source_updated_time_raw")
-                    for r in candidate.rows
-                    if r.get("source_updated_time_raw")
-                ),
-                default=None,
-            )
-            connection.execute(
+            source_time = None
+            for row in candidate.rows:
+                heartbeat()
+                value = row.get("source_updated_time_raw")
+                if value and (source_time is None or value > source_time):
+                    source_time = value
+            heartbeat(force=True)
+            finished = connection.execute(
                 tasks.update()
-                .where(tasks.c.id == run_id)
+                .where(
+                    tasks.c.id == run_id,
+                    tasks.c.status == "running",
+                    tasks.c.worker_ref == worker,
+                    tasks.c.lease_expires_at > sa.func.clock_timestamp(),
+                )
                 .values(
                     status="succeeded",
                     result_version_id=version_id,
@@ -459,6 +484,8 @@ class ShopDailyStore:
                     evidence_ref=interpretation,
                 )
             )
+            if finished.rowcount != 1:
+                raise SalesError("TASK_LEASE_LOST", 409)
         return PublishResult(run_id, version_id, bool(reuse), "succeeded")
 
 

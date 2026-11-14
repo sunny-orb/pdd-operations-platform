@@ -181,13 +181,21 @@ class SalesTargetStore(ShopDailyStore):
 
         return super().run(checked)
 
-    def _archive_target(self, version, candidate):
+    def _archive_target(self, version, candidate, heartbeat):
         self.archive_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.archive_root.chmod(0o700)
         folder = self.archive_root / version
         folder.mkdir(mode=0o700)
-        raw = ("\n".join(canonical(r) for r in candidate.raw_rows) + "\n").encode()
-        normalized = ("\n".join(canonical(r) for r in candidate.rows) + "\n").encode()
+
+        def serialize(rows):
+            lines = []
+            for row in rows:
+                heartbeat()
+                lines.append(canonical(row))
+            return ("\n".join(lines) + "\n").encode()
+
+        raw = serialize(candidate.raw_rows)
+        normalized = serialize(candidate.rows)
         interpretation = canonical(
             dict(
                 revision=TARGET_REVISION,
@@ -214,6 +222,7 @@ class SalesTargetStore(ShopDailyStore):
             ("normalized.ndjson", normalized),
             ("interpretation.json", interpretation),
         ):
+            heartbeat()
             write_archive(folder / name, content)
             if (folder / name).read_bytes() != content:
                 raise SalesError("ARCHIVE_CHECKSUM_MISMATCH")
@@ -243,7 +252,7 @@ class SalesTargetStore(ShopDailyStore):
         if stored_members != {(r["id"], member) for r in actual for member in MEMBERS}:
             raise SalesError("TARGET_MEMBERS_MISMATCH")
 
-    def _publish(self, c, run_id, candidate):
+    def _publish(self, c, run_id, worker, candidate, heartbeat):
         if _producer() != self.loaded_producer:
             raise SalesError("PRODUCER_CODE_CHANGED")
         version = str(uuid4())
@@ -265,9 +274,9 @@ class SalesTargetStore(ShopDailyStore):
                 require_archive(previous.interpretation_ref),
             )
         else:
-            archive, interpretation = self._archive_target(version, candidate)
+            archive, interpretation = self._archive_target(version, candidate, heartbeat)
         with c.begin():
-            self._lease(c, run_id)
+            heartbeat(force=True)
             existing_members = set(
                 c.execute(
                     sa.select(self.tables["shops"].c.id).where(
@@ -305,6 +314,7 @@ class SalesTargetStore(ShopDailyStore):
                 )
                 heads = []
                 for row in candidate.rows:
+                    heartbeat()
                     heads.append(
                         dict(
                             row,
@@ -339,7 +349,7 @@ class SalesTargetStore(ShopDailyStore):
                 c.execute(
                     versions.update().where(versions.c.id == version).values(state="published")
                 )
-            self._lease(c, run_id)
+            heartbeat(force=True)
             c.execute(
                 insert(current)
                 .values(dataset_code=self.code, version_id=version)
@@ -348,9 +358,14 @@ class SalesTargetStore(ShopDailyStore):
                     set_={"version_id": version},
                 )
             )
-            c.execute(
+            finished = c.execute(
                 tasks.update()
-                .where(tasks.c.id == run_id)
+                .where(
+                    tasks.c.id == run_id,
+                    tasks.c.status == "running",
+                    tasks.c.worker_ref == worker,
+                    tasks.c.lease_expires_at > sa.func.clock_timestamp(),
+                )
                 .values(
                     status="succeeded",
                     result_version_id=version,
@@ -359,6 +374,8 @@ class SalesTargetStore(ShopDailyStore):
                     evidence_ref=interpretation,
                 )
             )
+            if finished.rowcount != 1:
+                raise SalesError("TASK_LEASE_LOST", 409)
         return PublishResult(run_id, version, bool(reused), "succeeded")
 
 

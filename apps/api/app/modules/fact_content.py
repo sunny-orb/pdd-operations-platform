@@ -90,7 +90,7 @@ def _value(value, kind):
     return value, value
 
 
-def _blocks(table, version, rows):
+def _blocks(table, version, rows, heartbeat=None):
     columns = [
         x for x in _BASE.tables["public." + table].c if x.name not in ("id", "dataset_version_id")
     ]
@@ -98,6 +98,8 @@ def _blocks(table, version, rows):
     grouped = defaultdict(list)
     keys = set()
     for raw in rows:
+        if heartbeat:
+            heartbeat()
         if raw.keys() - names:
             raise ValueError("CONTENT_UNKNOWN_COLUMN")
         values, tokens = {}, {}
@@ -119,6 +121,8 @@ def _blocks(table, version, rows):
         grouped[bucket].append((values, tokens))
     result = []
     for bucket, items in grouped.items():
+        if heartbeat:
+            heartbeat()
         items.sort(key=lambda x: x[0]["source_row_key"])
         identity = [
             1,
@@ -137,11 +141,12 @@ def _blocks(table, version, rows):
     return sorted(result)
 
 
-def write_version(c, table_name, version_id, rows):
+def write_version(c, table_name, version_id, rows, *, heartbeat=None):
     """写完整候选；同内容块共享，删除通过新成员集合表达，失败由外层事务回滚。
 
     返回物理新增/复用块数及逻辑行数。所有块按同一顺序争用唯一键，避免并发
-    相互等待；已提交块必须 sealed，不能先发布半成品再补写。
+    相互等待；已提交块必须 sealed，不能先发布半成品再补写。可选heartbeat
+    由调用方节流并负责租约/所有权检查；回调不得提交或另开本连接事务。
     """
     from app.modules.local_storage import require_content_write
 
@@ -160,7 +165,9 @@ def write_version(c, table_name, version_id, rows):
         raise ValueError("CONTENT_VERSION_SEALED")
     if version["dataset_code"] not in FACTS[table_name]:
         raise ValueError("CONTENT_NAMESPACE")
-    blocks = _blocks(table_name, version, rows)
+    blocks = _blocks(table_name, version, rows, heartbeat)
+    if heartbeat:
+        heartbeat()
     count = sum(len(b[2]) for b in blocks)
     previous = (
         c.execute(
@@ -219,6 +226,8 @@ def write_version(c, table_name, version_id, rows):
     )
     new = 0
     for key, bucket, values in blocks:
+        if heartbeat:
+            heartbeat()
         if key in existing:
             continue
         created = c.scalar(
@@ -236,6 +245,8 @@ def write_version(c, table_name, version_id, rows):
         )
         if created:
             for offset in range(0, len(values), 1000):
+                if heartbeat:
+                    heartbeat()
                 c.execute(
                     insert(shared),
                     [dict(row, block_id=key) for row in values[offset : offset + 1000]],
@@ -253,6 +264,8 @@ def write_version(c, table_name, version_id, rows):
         schema="public",
     )
     for offset in range(0, len(blocks), 1000):
+        if heartbeat:
+            heartbeat()
         c.execute(
             insert(members),
             [
@@ -260,4 +273,6 @@ def write_version(c, table_name, version_id, rows):
                 for k, b, _ in blocks[offset : offset + 1000]
             ],
         )
+    if heartbeat:
+        heartbeat()
     return {"new_blocks": new, "reused_blocks": len(blocks) - new, "rows": count}

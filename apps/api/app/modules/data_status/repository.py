@@ -10,6 +10,7 @@ from app.modules.data_status.checkpoint_store import read_legacy_tasks
 from app.modules.data_status.history_coverage import history_status
 from app.modules.data_status.timeliness import update_timeliness
 from app.modules.product_board.repository import BoardError
+from app.modules.sales.datasets import READ_SPECS
 
 DATE_TABLES = {
     "shop_daily": ("shop_daily_facts", "business_date"),
@@ -89,7 +90,61 @@ def refresh_platform_snapshots(c):
             )
 
 
+class _StatusSnapshotChanged(Exception):
+    """行的更新事务已结束时，要求从新快照确认一次真实任务状态。"""
+
+
+def _active_sales_transactions(c, tasks, now):
+    """仅将准确任务行的未提交更新与同一后端的来源执行权联合视为存活。"""
+    supported = {"shop_daily", "sales_targets", *READ_SPECS}
+    expired = [
+        task
+        for task in tasks.values()
+        if task["status"] == "running"
+        and task["lease_expires_at"] <= now
+        and task["lock_key"] in supported
+        and task["job_code"]
+        in ("sync_" + task["lock_key"], "sync_" + task["lock_key"] + "_reconciliation")
+    ]
+    if not expired:
+        return set(), False
+    active = set(
+        c.execute(
+            sa.text("""
+            SELECT t.id FROM public.task_runs t
+            JOIN pg_catalog.pg_locks tx ON tx.locktype='transactionid'
+              AND tx.transactionid=t.xmax AND tx.granted AND tx.mode='ExclusiveLock'
+            JOIN pg_catalog.pg_locks owner ON owner.pid=tx.pid
+              AND owner.locktype='advisory' AND owner.granted AND owner.mode='ExclusiveLock'
+              AND owner.objsubid=1
+              AND owner.classid=((hashtext('m3-' || t.lock_key)::bigint >> 32)
+                                 & 4294967295)::oid
+              AND owner.objid=(hashtext('m3-' || t.lock_key)::bigint & 4294967295)::oid
+            JOIN pg_catalog.pg_database db ON db.oid=owner.database
+              AND db.datname=current_database()
+            WHERE t.id=ANY(:ids)
+            """),
+            {"ids": [task["id"] for task in expired]},
+        ).scalars()
+    )
+    # 锁视图不是MVCC快照；发布可能刚提交，先有界换快照再判断失锁。
+    stale_snapshot = any(
+        task["updater_xid"] != "0" and task["id"] not in active for task in expired
+    )
+    return active, stale_snapshot
+
+
 def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=None):
+    arguments = dict(
+        interval_seconds=interval_seconds, enabled=enabled, source_schedule=source_schedule
+    )
+    try:
+        return _read_status_snapshot(engine, **arguments, retry_expired=True)
+    except _StatusSnapshotChanged:
+        return _read_status_snapshot(engine, **arguments, retry_expired=False)
+
+
+def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule, retry_expired):
     """返回已接收状态；新版本尚未生成日期摘要时留空，不展示旧版日期。"""
     if engine is None:
         raise BoardError("DATABASE_UNAVAILABLE", 503)
@@ -106,12 +161,16 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                 r["job_code"]: dict(r)
                 for r in c.execute(
                     sa.text("""
-                SELECT DISTINCT ON(job_code) job_code,status,queued_at,finished_at,
-                  result_version_id,error_code,lease_expires_at FROM task_runs
+                SELECT DISTINCT ON(job_code) id,job_code,lock_key,status,queued_at,finished_at,
+                  result_version_id,error_code,lease_expires_at,xmax::text AS updater_xid
+                FROM task_runs
                 ORDER BY job_code,queued_at DESC,id DESC
             """)
                 ).mappings()
             }
+            active_sales_tasks, stale_snapshot = _active_sales_transactions(c, jobs, now)
+            if retry_expired and stale_snapshot:
+                raise _StatusSnapshotChanged
             successes = {
                 r["dataset_code"]: r["finished_at"]
                 for r in c.execute(
@@ -149,7 +208,10 @@ def read_status(engine, *, interval_seconds=900, enabled=True, source_schedule=N
                     else jobs.get(job_for(code))
                 )
                 expired = bool(
-                    task and task["status"] == "running" and task["lease_expires_at"] <= now
+                    task
+                    and task["status"] == "running"
+                    and task["lease_expires_at"] <= now
+                    and task.get("id") not in active_sales_tasks
                 )
                 cached = (checkpoint or {}).get("platform_snapshot", {}).get(code, {})
                 return dict(

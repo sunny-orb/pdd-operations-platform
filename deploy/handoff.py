@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 import time
 import uuid
 from html.parser import HTMLParser
@@ -23,9 +24,9 @@ def get(path, query=None):
         value=json.load(response)
     if not isinstance(value,dict) or 'error' in value: raise ValueError('INVALID_BUSINESS_RESPONSE')
     return value
-def window(value):
+def window(value, days=30):
     data=value['data']; end=datetime.date.fromisoformat(data['date_to'])
-    start=max(datetime.date.fromisoformat(data['date_from']),end-datetime.timedelta(days=29))
+    start=max(datetime.date.fromisoformat(data['date_from']),end-datetime.timedelta(days=days-1))
     return dict(date_from=str(start),date_to=str(end),data_version=value['meta']['data_version'])
 def compatible(value):
     if isinstance(value,dict):
@@ -38,7 +39,7 @@ def compatible(value):
 def run():
     get('/health/ready')
     get('/api/v1/published-versions')
-    q=window(get('/api/v1/products/meta'))
+    q=window(get('/api/v1/products/meta'), days=31)
     get('/api/v1/products/overview',q)
     compatible(get('/api/v1/products/scores',q))
     q=window(get('/api/v1/promotion/meta',dict(mode='product')));q['mode']='product'
@@ -602,13 +603,34 @@ class Runtime:
         self.use(candidate["manifest"])
         service = "api" if candidate["slot"] == "legacy" else "api_" + candidate["slot"]
         self.inspect(candidate["api"], service, candidate["manifest"]["api"])
-        require(
-            self.docker(
+        try:
+            result = self.docker(
                 ["exec", candidate["api"], "python", "-c", BUSINESS_PROBE]
-            ).strip()
-            == "BUSINESS_PREWARM_OK",
-            "BUSINESS_PREWARM_FAILED",
-        )
+            )
+        except subprocess.CalledProcessError as error:
+            # 仅报告固定分类，不能回显进程命令、响应正文或原始stderr。
+            tail = (
+                error.stderr[-1000:].splitlines()
+                if isinstance(error.stderr, str)
+                else []
+            )
+            reason = (
+                "timeout"
+                if tail[-1:] == ["TimeoutError: timed out"]
+                else "process_error"
+            )
+            print(
+                json.dumps(
+                    {
+                        "event": "release_business_probe_failed",
+                        "reason": reason,
+                        "release_commit": candidate["manifest"]["commit"],
+                    }
+                ),
+                flush=True,
+            )
+            raise
+        require(result.strip() == "BUSINESS_PREWARM_OK", "BUSINESS_PREWARM_FAILED")
 
     def workers(self, state):
         self.use(state["active"]["manifest"])

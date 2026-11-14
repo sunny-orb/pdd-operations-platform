@@ -548,6 +548,68 @@ def test_business_prewarm_retries_only_one_version_conflict(
     assert calls.count("/api/v1/products/meta") == expected_meta_calls
 
 
+@pytest.mark.parametrize(
+    "start,product_start,promotion_start",
+    [
+        ("2026-08-01", "2026-10-14", "2026-10-15"),
+        ("2026-11-01", "2026-11-01", "2026-11-01"),
+    ],
+)
+def test_business_probe_matches_product_default_and_preserves_promotion_window(
+    monkeypatch, start, product_start, promotion_start
+):
+    queries = {}
+
+    def read(url, **_):
+        parsed = urllib.parse.urlsplit(url)
+        queries[parsed.path] = urllib.parse.parse_qs(parsed.query)
+        data = {"status": "ready"}
+        if parsed.path.endswith("/meta"):
+            data = {
+                "date_from": start,
+                "date_to": "2026-11-13",
+                "default_publication_id": "weather",
+                "data_version": "v1",
+            }
+        return io.BytesIO(json.dumps({"data": data, "meta": {"data_version": "v1"}}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", read)
+    exec(module().BUSINESS_PROBE, {})
+    assert queries["/api/v1/products/overview"]["date_from"] == [product_start]
+    assert queries["/api/v1/products/scores"]["date_from"] == [product_start]
+    assert queries["/api/v1/promotion/overview"]["date_from"] == [promotion_start]
+
+
+@pytest.mark.parametrize(
+    "failure,reason",
+    [("TimeoutError: timed out", "timeout"), ("ValueError: secret-value", "process_error")],
+)
+def test_failed_business_warm_reports_safe_reason_without_raw_process_output(
+    capsys, failure, reason
+):
+    m = module()
+    runtime = m.Runtime.__new__(m.Runtime)
+    runtime.use = lambda _: None
+    runtime.inspect = lambda *_: None
+
+    def fail(_):
+        raise subprocess.CalledProcessError(
+            1,
+            ["secret-command"],
+            output="secret-output",
+            stderr=f"secret-trace\n{failure}\n",
+        )
+
+    runtime.docker = fail
+    with pytest.raises(subprocess.CalledProcessError):
+        runtime.warm(record())
+    captured = capsys.readouterr()
+    assert "secret" not in captured.out + captured.err
+    summary = json.loads(captured.out)
+    assert summary["event"] == "release_business_probe_failed"
+    assert summary["reason"] == reason
+
+
 def bootstrap_runtime(tmp_path, *, previous=True):
     """真实静态目录与发布快照校验；仅Docker边界用已知公开tar替代。"""
     m = module()

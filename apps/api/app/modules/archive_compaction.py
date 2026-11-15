@@ -79,10 +79,17 @@ def _compact_locked(store, max_files, max_seconds):
     # 先处理较小历史输入，释放配额后再处理大文件；最多一文件64MiB临时块。
     plain.sort(key=lambda p: (p.stat().st_size, str(p)))
     converted = 0
+    unverified = set()
     for path in plain:
         if converted >= max_files or time.monotonic() >= deadline:
             break
-        expected = _expected(path, deadline)
+        try:
+            expected = _expected(path, deadline)
+        except ValueError as exc:
+            if str(exc) != "ARCHIVE_RESTORE_REQUIRED":
+                raise
+            unverified.add(path)
+            continue
         try:
             with path.open("rb") as stream:
                 write_payload(
@@ -119,7 +126,15 @@ def _compact_locked(store, max_files, max_seconds):
     if garbage:
         # MAGIC/清单损坏可能伪装成明文；全体逻辑输入先按可信摘要验证，拒绝误删可恢复块。
         for path in payloads:
-            expected = _expected(path, deadline)
+            try:
+                expected = _expected(path, deadline)
+            except ValueError as exc:
+                if str(exc) != "ARCHIVE_RESTORE_REQUIRED":
+                    raise
+                # 旧输入没有可信摘要时，只保留；不能据它的外观证明任何块已无引用。
+                unverified.add(path)
+                garbage = []
+                break
             if expected is not None:
                 _verify(path, expected, deadline=deadline)
         budget()
@@ -129,7 +144,8 @@ def _compact_locked(store, max_files, max_seconds):
         status="ok",
         converted=converted,
         collected_blocks=len(garbage),
-        remaining_plain=max(0, len(plain) - converted),
+        unverified_files=len(unverified),
+        remaining_plain=max(0, len(set(plain) - unverified) - converted),
         before_bytes=before,
         after_bytes=store.usage(),
     )

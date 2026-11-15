@@ -233,3 +233,24 @@ def test_damaged_pointer_cannot_cause_collection_of_its_unique_blocks(sales_pg, 
     path.write_bytes(original)
     with open_payload(path) as f:
         assert f.read() == data
+
+
+def test_legacy_unverified_input_is_preserved_without_blocking_verified_files(sales_pg, tmp_path):
+    from app.modules.archive_compaction import compact_archives
+    from app.modules.archive_payload import open_payload
+
+    root = tmp_path / "ingestion"
+    policy(tmp_path)
+    old, data = raw_archive(root, "legacy")
+    old.with_name(old.name + ".sha256").unlink()
+    current, _ = raw_archive(root, "current")
+    result = compact_archives(sales_pg, root)
+    assert result["converted"] == 1 and result["unverified_files"] == 1
+    assert old.read_bytes() == data
+    with open_payload(current) as f:
+        assert f.read() == data
+    orphan = root / ".payloads" / "00" / ("0" * 64 + ".gz")
+    orphan.parent.mkdir(exist_ok=True)
+    orphan.write_bytes(b"keep until all verified")
+    result = compact_archives(sales_pg, root)
+    assert result["collected_blocks"] == 0 and orphan.is_file()

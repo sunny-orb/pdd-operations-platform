@@ -8,7 +8,14 @@ from datetime import UTC, datetime, timedelta
 import sqlalchemy as sa
 
 from app.modules.data_status.catalog import BY_ID, job_for
-from app.modules.data_status.schedule_policy import SOURCE_RETRY_SECONDS
+from app.modules.data_status.checkpoint_store import reconciliation_owned_sources
+from app.modules.data_status.failure_codes import SYNC_FAILURE_CODES, safe_failure_code
+from app.modules.data_status.schedule_policy import (
+    RECONCILIATION_TIME,
+    SOURCE_RETRY_SECONDS,
+    receipt_after_attempt,
+    source_retry_at,
+)
 from app.modules.database_residency import deferred_reason
 
 
@@ -16,7 +23,16 @@ def fingerprint(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
-def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
+def run_monitor(
+    engine,
+    probes,
+    synchronize,
+    *,
+    interval_seconds=900,
+    now=None,
+    reconciliation_sources=(),
+    reconciliation_time=RECONCILIATION_TIME,
+):
     """注入来源检查函数和同步器(groups,持锁连接)；外部异常只落固定错误码。
 
     首次检查也必须实际接收，不能用观测时间认定已有平台版本与上游相同。
@@ -74,6 +90,10 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
 
         try:
             with c.begin():
+                weekly_owned = reconciliation_owned_sources(
+                    c, reconciliation_sources, started_at, reconciliation_time
+                )
+                probes = {code: probe for code, probe in probes.items() if code not in weekly_owned}
                 previous = {r["source_id"]: dict(r) for r in c.execute(sa.select(table)).mappings()}
                 tasks = {
                     r["job_code"]: r
@@ -99,12 +119,12 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                         or task["status"] == "running"
                         and task["lease_expires_at"] <= started_at
                     )
+                    and not receipt_after_attempt(prior or {}, task)
                 ]
                 retry_error = (prior or {}).get("error_code")
-                if not failed_tasks and retry_error not in (
-                    "SYNC_FAILED",
-                    "SOURCE_CHANGED_DURING_SYNC",
-                ):
+                if not failed_tasks and retry_error not in SYNC_FAILURE_CODES | {
+                    "SOURCE_CHANGED_DURING_SYNC"
+                }:
                     continue
                 checked = (prior or {}).get("checked_at")
                 stamps = [task["finished_at"] for task in failed_tasks if task["finished_at"]]
@@ -120,9 +140,16 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                 prior = previous.get(code) or {}
                 group = BY_ID[code].group
                 retry_at = retry_groups.get(group)
+                check_retry_at = (
+                    source_retry_at(prior) if prior.get("check_status") == "failed" else None
+                )
+                due_retry = max(
+                    (stamp for stamp in (retry_at, check_retry_at) if stamp is not None),
+                    default=None,
+                )
                 checked = prior.get("checked_at")
-                if retry_at is not None:
-                    if started_at < retry_at:
+                if due_retry is not None:
+                    if started_at < due_retry:
                         continue
                 elif checked and started_at < checked + timedelta(seconds=interval_seconds):
                     continue
@@ -131,7 +158,7 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                     retry_error=(
                         "SOURCE_CHANGED_DURING_SYNC"
                         if prior.get("error_code") == "SOURCE_CHANGED_DURING_SYNC"
-                        else "SYNC_FAILED"
+                        else safe_failure_code(prior.get("error_code"))
                     )
                     if retry_at is not None
                     else None,
@@ -159,7 +186,10 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                     continue
                 if not results.get(group):
                     write(
-                        code, checked_at=clock(), check_status="succeeded", error_code="SYNC_FAILED"
+                        code,
+                        checked_at=clock(),
+                        check_status="succeeded",
+                        error_code=safe_failure_code(results.get("_errors", {}).get(group)),
                     )
                     continue
                 after = observe(code, retry_error="SOURCE_CHANGED_DURING_SYNC")
@@ -192,7 +222,7 @@ def run_monitor(engine, probes, synchronize, *, interval_seconds=900, now=None):
                     .all()
                 )
             failed = sum(
-                r["check_status"] == "failed" or r["error_code"] == "SYNC_FAILED"
+                r["check_status"] == "failed" or r["error_code"] in SYNC_FAILURE_CODES
                 for r in checked_rows
             )
             pending = sum(

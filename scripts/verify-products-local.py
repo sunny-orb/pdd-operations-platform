@@ -12,6 +12,7 @@ import sqlalchemy as sa
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps/api"))
+from app.modules.archive_payload import read_payload_text
 from app.core.config import Settings
 from app.db.connection import build_engine
 from app.modules.product_board.source import fingerprint
@@ -55,7 +56,7 @@ def main():
                 archive = Path(version["retained_input_ref"]).resolve()
                 if not archive.is_relative_to(ROOT / "var/ingestion/product_board"):
                     raise RuntimeError("归档路径越界")
-                data = json.loads((archive / (code + ".json")).read_text())
+                data = json.loads(read_payload_text(archive / (code + ".json")))
                 expected = {r["source_row_key"]: fingerprint(r) for r in data}
                 keys = tuple(data[0]) if data else ()
                 found = {
@@ -71,7 +72,7 @@ def main():
                     raise RuntimeError("归档与PG全投影不一致")
                 manifest = json.loads((archive / "manifest.json").read_text())
                 if any(
-                    fingerprint((archive / name).read_text()) != value
+                    fingerprint(read_payload_text(archive / name)) != value
                     for name, value in manifest["files"].items()
                 ):
                     raise RuntimeError("归档校验失败")

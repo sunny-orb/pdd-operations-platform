@@ -4,7 +4,32 @@ from contextlib import contextmanager
 
 import sqlalchemy as sa
 
+from app.modules.data_status.schedule_policy import first_reconciliation, next_reconciliation
 from app.modules.data_status.timeliness import merge_update_timing
+
+
+def reconciliation_owned_sources(c, codes, now, reconciliation_time):
+    """项目锁内判定周路径负责的来源；失败等待期间也不交给普通路径重复接收。"""
+    if not codes:
+        return set()
+    cycles = {
+        row["source_id"]: dict(row)
+        for row in c.execute(
+            sa.text("SELECT * FROM source_reconciliations WHERE source_id = ANY(:codes)"),
+            {"codes": list(codes)},
+        ).mappings()
+    }
+    return {
+        code
+        for code in codes
+        if ((cycle := cycles.get(code)) and cycle["status"] in ("running", "failed", "deferred"))
+        or now
+        >= (
+            next_reconciliation(cycle, reconciliation_time)
+            if cycle
+            else first_reconciliation(now, reconciliation_time)
+        )
+    }
 
 
 def read_legacy_tasks(c):

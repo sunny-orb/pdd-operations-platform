@@ -14,6 +14,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from psycopg import sql
 
+from app.modules.archive_payload import open_payload
 from app.modules.archive_store import _safe
 from app.modules.database_retention import (
     CONTENT,
@@ -207,7 +208,7 @@ def export(engine, selected, destination, key, *, version_id=None):
                 manifest["documentation_locators"].extend(locators)
                 for source in files:
                     filename = "evidence-" + str(len(manifest["evidence"])) + ".enc"
-                    with source.open("rb") as f:
+                    with open_payload(source) as f:
                         encrypt(iter(lambda: f.read(CHUNK), b""), destination / filename, key)
                     manifest["files"][filename] = {
                         "kind": "evidence",

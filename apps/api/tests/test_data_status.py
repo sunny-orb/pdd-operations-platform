@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 import sqlalchemy as sa
 
 from tests.test_weather_pg import client_for
@@ -122,6 +123,51 @@ def test_monitor_first_change_no_change_and_due_budget(sales_pg):
     value["count"] = 11  # 同日新增也要接收，不只比较最大日期。
     run_monitor(sales_pg, probe, sync, now=stamp + timedelta(minutes=32))
     assert executed == ["shop_daily", "shop_daily"]
+
+
+@pytest.mark.parametrize("code", ("weather_bulletin", "jst_sales", "product_regions"))
+def test_legacy_failed_checks_retry_five_minutes_and_recovery_keeps_receipt(sales_pg, code):
+    from app.jobs.source_monitor import run_monitor
+    from app.modules.data_status.repository import read_status
+
+    stamp = datetime.fromisoformat("2026-11-04T23:48:00+08:00")
+    unavailable = False
+    downloads = []
+
+    def probe():
+        if unavailable:
+            raise ValueError("private metadata failure")
+        return {"revision": "unchanged"}
+
+    def sync(groups, c):
+        downloads.extend(groups)
+        return dict.fromkeys(groups, True)
+
+    def run(offset):
+        return run_monitor(sales_pg, {code: probe}, sync, now=stamp + timedelta(seconds=offset))
+
+    run(0)
+    downloads.clear()
+    unavailable = True
+    for offset in (900, 1200, 1500):
+        assert run(offset)["failed"] == 1
+        assert run(offset + 299)["checked"] == 0
+        source = next(row for row in read_status(sales_pg)["data"]["sources"] if row["id"] == code)
+        assert source["upstream"]["next_check_at"] == stamp + timedelta(seconds=offset + 300)
+        with sales_pg.connect() as c:
+            p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+            assert p["error_code"] == "CHECK_FAILED"
+            assert p["accepted_at"] == stamp
+    unavailable = False
+    assert run(1800)["status"] == "checked"
+    assert run(2100)["checked"] == 0
+    assert run(2700)["checked"] == 1  # 恢复后回到原十五分钟检查。
+    assert downloads == []
+    with sales_pg.connect() as c:
+        p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert p["check_status"] == "succeeded"
+        assert p["error_code"] is None
+        assert p["accepted_at"] == stamp
 
 
 def test_failed_sync_keeps_accepted_marker_and_retries(sales_pg):

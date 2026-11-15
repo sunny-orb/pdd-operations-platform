@@ -7,6 +7,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.modules.data_status.catalog import DATASET_NAMES, SOURCES, job_for, source_identity
 from app.modules.data_status.checkpoint_store import read_legacy_tasks
+from app.modules.data_status.failure_codes import SYNC_FAILURE_CODES, safe_failure_code
 from app.modules.data_status.history_coverage import history_status
 from app.modules.data_status.timeliness import update_timeliness
 from app.modules.product_board.repository import BoardError
@@ -200,6 +201,8 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                 weather = {item["url"]: item["issue_time"] for item in entries}
 
             def dataset(code, checkpoint=None, *, source_id=None):
+                from app.modules.data_status.schedule_policy import receipt_after_attempt
+
                 head = heads.get(code)
                 task = (
                     legacy_tasks.get(source_id)
@@ -214,7 +217,7 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                     and task.get("id") not in active_sales_tasks
                 )
                 cached = (checkpoint or {}).get("platform_snapshot", {}).get(code, {})
-                return dict(
+                result = dict(
                     code=code,
                     name=DATASET_NAMES.get(code, code),
                     version_id=head["id"] if head else None,
@@ -229,6 +232,29 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                     error_code="WORKER_LOST" if expired else task["error_code"] if task else None,
                     revision=head["upstream_revision"] if head else None,
                 )
+                cycle = reconciliations.get(source_id, {})
+                if (
+                    source_id == "product_regions"
+                    and task
+                    and cycle.get("status") == "succeeded"
+                    and (checkpoint or {}).get("accepted_at") == cycle.get("last_success_at")
+                    and (checkpoint or {}).get("error_code")
+                    not in SYNC_FAILURE_CODES | {"SOURCE_CHANGED_DURING_SYNC"}
+                    and receipt_after_attempt(checkpoint or {}, task)
+                ):
+                    # 同源周接收已稳定成功：展示新尝试，历史普通任务原样保留。
+                    result.update(
+                        last_attempt_at=cycle["last_attempt_at"],
+                        last_finished_at=cycle["last_finished_at"],
+                        last_success_at=max(
+                            stamp
+                            for stamp in (result["last_success_at"], cycle["last_success_at"])
+                            if stamp is not None
+                        ),
+                        attempt_status="succeeded",
+                        error_code=None,
+                    )
+                return result
 
             from app.modules.data_status.schedule_policy import (
                 RECONCILIATION_SOURCES,
@@ -293,7 +319,7 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                 p = checkpoints.get(source.id, {})
                 datasets = [dataset(code, p, source_id=source.id) for code in source.datasets]
                 fixed_times = source_times(source.id, *schedule_args) if scheduled else ()
-                retry_at = source_retry_at(p) if fixed_times else None
+                retry_at = source_retry_at(p)
                 sync_status = p.get("sync_status")
                 if fixed_times and sync_status:
                     # 该来源已有独立普通接收结果，优先于首轮对账前的旧任务证据。
@@ -307,7 +333,7 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                             attempt_status="abandoned" if expired_sync else sync_status,
                             error_code="WORKER_LOST"
                             if expired_sync
-                            else "SYNC_FAILED"
+                            else safe_failure_code(p.get("error_code"))
                             if sync_status == "failed"
                             else None,
                         )
@@ -331,7 +357,7 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                         row["attempt_status"] in ("failed", "abandoned", "cancelled")
                         for row in datasets
                     )
-                    or p.get("error_code") == "SYNC_FAILED"
+                    or p.get("error_code") in SYNC_FAILURE_CODES
                 )
                 changed = p.get("observed_fingerprint") and p["observed_fingerprint"] != p.get(
                     "accepted_fingerprint"
@@ -391,9 +417,10 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                             observed_at=p.get("observed_at"),
                             web_updated_at=p.get("web_updated_at"),
                             web_checked_at=p.get("web_checked_at"),
-                            next_check_at=(retry_at or next_check(source.id, now, *schedule_args))
-                            if fixed_times
-                            else None,
+                            next_check_at=retry_at
+                            or (
+                                next_check(source.id, now, *schedule_args) if fixed_times else None
+                            ),
                             check_times=list(fixed_times),
                             stale=bool(
                                 (

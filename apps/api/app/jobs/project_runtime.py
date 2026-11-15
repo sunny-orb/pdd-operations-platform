@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy.engine import Engine
 
 from app.jobs.project_sync import run_project
+from app.modules.data_status.schedule_policy import RECONCILIATION_TIME
 
 
 @dataclass(frozen=True)
@@ -236,6 +237,8 @@ def execute_project(
     product_sources=None,
     reconcile_product_regions=False,
     reconcile_sources=(),
+    reconciliation_sources=(),
+    reconciliation_time=RECONCILIATION_TIME,
 ):
     """同一批次标识重用PG幂等/互斥；串行跑完整业务链，返回脱敏运行报告。
 
@@ -263,6 +266,8 @@ def execute_project(
         paths.run_archive_root,
         max_attempts=max_attempts,
         lock_connection=lock_connection,
+        reconciliation_sources=reconciliation_sources,
+        reconciliation_time=reconciliation_time,
         depends_on={
             "product_scores": tuple(
                 key

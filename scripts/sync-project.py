@@ -97,6 +97,20 @@ def main():
         if not slot and not monitor and not (new_schedule and args.scheduled):
             return 0
         engine = runtime_engine()
+        if args.scheduled and config.enabled:
+            from app.modules.archive_compaction import compact_archives
+
+            try:
+                maintenance = compact_archives(engine, ROOT / "var/ingestion")
+                if maintenance.get("converted") or maintenance.get("collected_blocks"):
+                    print(json.dumps(dict(stage="archive_compaction", **maintenance)), flush=True)
+            except (ValueError, OSError) as exc:
+                # 维护失败保留输入；继续正常检查，由来源本身如实记录容量或接收失败。
+                code = str(exc) if str(exc) in {
+                    "ARCHIVE_CAPACITY", "ARCHIVE_CHECKSUM", "ARCHIVE_RESTORE_REQUIRED",
+                    "ARCHIVE_PATH", "ARCHIVE_IDENTITY", "ARCHIVE_MANIFEST",
+                } else "ARCHIVE_MAINTENANCE_FAILED"
+                print(json.dumps(dict(stage="archive_compaction", status="failed", code=code)), flush=True)
         if args.only and (args.scheduled or args.check_updates):
             raise ValueError("INVALID_SYNC_DATASETS")
         paths = ProjectPaths(
@@ -148,6 +162,14 @@ def main():
                 warehouse_password=source_password,
                 only=LEGACY_STEPS if args.scheduled and new_schedule else manual_steps,
                 max_attempts=config.max_attempts_per_slot,
+                **(
+                    {
+                        "reconciliation_sources": ("product_regions",),
+                        "reconciliation_time": config.reconciliation_time,
+                    }
+                    if args.scheduled and new_schedule
+                    else {}
+                ),
             )
         if result["status"] not in (
             "already_succeeded",
@@ -165,6 +187,8 @@ def main():
                 warehouse_password=source_password,
                 interval_seconds=config.monitor_interval_seconds,
                 source_ids=LEGACY_SOURCES if new_schedule else None,
+                reconciliation_sources=("product_regions",) if new_schedule else (),
+                reconciliation_time=config.reconciliation_time,
             )
             if checked.get("checked") or checked["status"] != "checked":
                 print(json.dumps(checked, ensure_ascii=False), flush=True)

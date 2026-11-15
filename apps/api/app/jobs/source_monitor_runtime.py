@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from app.connectors.source_probes import SourceProbes
 from app.jobs.project_runtime import execute_project
 from app.jobs.source_monitor import run_monitor
+from app.modules.data_status.failure_codes import safe_failure_code
 from app.modules.data_status.schedule_policy import (
     RECONCILIATION_RETRY_SECONDS,
     RECONCILIATION_TIME,
@@ -69,7 +70,16 @@ def pending_processing(c):
     return pending
 
 
-def execute_monitor(engine, *, paths, warehouse_password, interval_seconds=900, source_ids=None):
+def execute_monitor(
+    engine,
+    *,
+    paths,
+    warehouse_password,
+    interval_seconds=900,
+    source_ids=None,
+    reconciliation_sources=(),
+    reconciliation_time=RECONCILIATION_TIME,
+):
     probes = SourceProbes(warehouse_password, paths.feishu_root)
 
     def synchronize(groups, connection):
@@ -96,6 +106,19 @@ def execute_monitor(engine, *, paths, warehouse_password, interval_seconds=900, 
                 if step not in ("product_scores", "aftersales_report", "refund_targets")
             )
             for group in groups
+        }
+        states["_errors"] = {
+            group: next(
+                (
+                    safe_failure_code(outputs.get(step, {}).get("error_code"))
+                    for step in GROUP_STEPS.get(group, (group,))
+                    if step not in ("product_scores", "aftersales_report", "refund_targets")
+                    and outputs.get(step, {}).get("status") != "succeeded"
+                ),
+                "SYNC_FAILED",
+            )
+            for group in groups
+            if not states[group]
         }
         states["_deferred"] = {
             group: next(
@@ -124,6 +147,8 @@ def execute_monitor(engine, *, paths, warehouse_password, interval_seconds=900, 
             {k: v for k, v in probes.functions().items() if source_ids is None or k in source_ids},
             synchronize,
             interval_seconds=interval_seconds,
+            reconciliation_sources=reconciliation_sources,
+            reconciliation_time=reconciliation_time,
         )
     finally:
         probes.close()
@@ -225,6 +250,15 @@ def execute_source_schedule(
             )
             == "succeeded"
             for code in sources
+        }
+        states["_errors"] = {
+            code: safe_failure_code(
+                outputs.get("products" if bootstrap and code in TABLES else code, {}).get(
+                    "error_code"
+                )
+            )
+            for code in sources
+            if not states[code]
         }
         states["_deferred"] = {
             code: outputs.get("products" if bootstrap and code in TABLES else code, {}).get(

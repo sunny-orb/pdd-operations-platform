@@ -7,6 +7,7 @@ from pathlib import Path
 
 import sqlalchemy as sa
 
+from app.modules.archive_payload import read_payload_text
 from app.modules.archive_store import require_archive
 from app.modules.database_residency import ensure_online
 
@@ -14,6 +15,13 @@ from .source import TABLES, fingerprint, windows
 from .storage import FACT_TABLES, REVISION
 
 LOOKBACK_DAYS = 30
+# 同一m1-board-v2-1指纹协议的三代已发布布局：原始、内容复用、窗口增量。
+# 仅接受完整的已知集合；不能以缺文件跳过校验，也不能导入执行归档代码。
+PRODUCER_LAYOUTS = (
+    {"storage.py", "source.py", "profile_rules.py"},
+    {"storage.py", "source.py", "profile_rules.py", "fact_content.py"},
+    {"storage.py", "source.py", "profile_rules.py", "fact_content.py", "incremental.py"},
+)
 
 
 def restore_baseline(store, code, version, heartbeat=lambda: None):
@@ -27,7 +35,7 @@ def restore_baseline(store, code, version, heartbeat=lambda: None):
         name: (archive / name).read_text() for name in manifest["files"] if name.endswith(".py")
     }
     if (
-        not {"storage.py", "source.py", "profile_rules.py", "fact_content.py"} <= producer.keys()
+        producer.keys() not in PRODUCER_LAYOUTS
         or fingerprint(producer) != manifest.get("producer")
         or manifest.get("producer") != version["producer_revision"]
         or manifest.get("revision") != REVISION
@@ -36,16 +44,16 @@ def restore_baseline(store, code, version, heartbeat=lambda: None):
     end = date.fromisoformat(manifest["end"])
     if code != "profile_records" and end != version["period_end"]:
         raise ValueError("INCREMENTAL_BASELINE_SCOPE_MISMATCH")
-    rows = json.loads(path.read_text())
+    rows = json.loads(read_payload_text(path))
     columns = store.tables[FACT_TABLES[code]].c
     for index, row in enumerate(rows):
         if index % 1000 == 0:
             heartbeat()
         for name, value in row.items():
-            if value is None:
-                continue
             if name not in columns:
                 raise ValueError("INCREMENTAL_BASELINE_MISMATCH")
+            if value is None:
+                continue
             if isinstance(columns[name].type, sa.Date):
                 row[name] = date.fromisoformat(value)
             elif isinstance(columns[name].type, sa.Numeric):

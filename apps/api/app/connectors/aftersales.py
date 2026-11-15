@@ -24,7 +24,8 @@ from app.modules.aftersales.ingestion import (
     style_consensus_eligible,
 )
 from app.modules.sales.datasets import REFUND_SHOPS
-from app.modules.sales.normalization import fingerprint
+from app.modules.sales.normalization import serializable
+from app.modules.streaming_json import fingerprint
 
 
 class AftersalesReader(ProductBoardReader):
@@ -120,15 +121,22 @@ class AftersalesReader(ProductBoardReader):
         snapshot, master = self.read_current_master(first)
         styles = self.read_current_style_categories(first, master, snapshot)
         bundles = self.read_current_bundle_categories(first, master, snapshot)
+        first_digest = fingerprint(
+            (first, snapshot, master, styles, sorted(bundles.items())), default=serializable
+        )
+        # 第一遍只保留摘要；第二遍相等后交付相同原值，不同时常驻两份完整事实。
+        del first, snapshot, master, styles, bundles
         second = self.read(code, end)
         next_snapshot, next_master = self.read_current_master(second)
         next_styles = self.read_current_style_categories(second, next_master, next_snapshot)
         next_bundles = self.read_current_bundle_categories(second, next_master, next_snapshot)
-        if fingerprint((first, snapshot, master, styles, sorted(bundles.items()))) != fingerprint(
-            (second, next_snapshot, next_master, next_styles, sorted(next_bundles.items()))
+        if first_digest != fingerprint(
+            (second, next_snapshot, next_master, next_styles, sorted(next_bundles.items())),
+            default=serializable,
         ):
             raise ValueError("SOURCE_CHANGED_DURING_READ")
-        raw = enrich_current_master(first, master, snapshot, styles, bundles)
+        raw = enrich_current_master(second, next_master, next_snapshot, next_styles, next_bundles)
+        del second, next_master, next_styles, next_bundles
         return raw, normalize(code, raw, end)
 
     def read_current_bundle_categories(self, raw, master, snapshot):

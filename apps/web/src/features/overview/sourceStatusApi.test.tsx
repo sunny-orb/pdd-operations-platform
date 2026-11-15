@@ -2,7 +2,13 @@
 import { QueryClient, QueryClientProvider, focusManager } from "@tanstack/react-query";
 import { act, renderHook, cleanup } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { hasRunningUpdate, useDataUpdateStatus, type DataStatus } from "./sourceStatusApi";
+import {
+  dataStatusSchema,
+  hasRunningUpdate,
+  useDataUpdateStatus,
+  type DataStatus,
+} from "./sourceStatusApi";
+import { sourceHasCheckFailure, sourceHasSyncFailure } from "./dataUpdateAlerts";
 
 afterEach(() => {
   cleanup();
@@ -38,6 +44,66 @@ const running = () => ({
     ],
   },
 });
+it.each(["ARCHIVE_CAPACITY", "INCREMENTAL_BASELINE_MISMATCH", "WAREHOUSE_CONCURRENCY_LIMIT"])(
+  "解析安全失败类别 %s 时保留同步与检查的独立状态",
+  (code) => {
+    const response = {
+      ...idle(),
+      data: {
+        ...idle().data,
+        sources: [
+          {
+            id: "shop_daily",
+            name: "店铺日经营",
+            system: "warehouse",
+            kind: "daily",
+            locator: "cubeappdata.shop_daily",
+            table_name: "shop_daily",
+            source_title: "店铺日经营",
+            source_url: "https://example.com/source",
+            pages: ["sales"],
+            platform_state: "failed",
+            datasets: [
+              {
+                code: "shop_daily",
+                name: "店铺日经营",
+                version_id: "retained-v1",
+                date: "2026-11-15",
+                received_at: null,
+                last_success_at: "2026-11-15T08:30:00+08:00",
+                last_attempt_at: "2026-11-16T08:30:00+08:00",
+                last_finished_at: "2026-11-16T08:31:00+08:00",
+                attempt_status: "failed",
+                error_code: code,
+                revision: null,
+              },
+            ],
+            upstream: {
+              state: "unchanged",
+              checked_at: "2026-11-16T08:30:00+08:00",
+              observed_at: "2026-11-16T08:30:00+08:00",
+              web_updated_at: null,
+              web_checked_at: null,
+              stale: false,
+              observation: {},
+              accepted_at: "2026-11-15T08:30:00+08:00",
+              error_code: code,
+              duration_ms: 10,
+            },
+          },
+        ],
+      },
+    };
+    const data = dataStatusSchema.parse(response).data;
+    const source = data.sources[0];
+    expect(source.upstream.error_code).toBe(code);
+    expect(source.datasets[0].error_code).toBe(code);
+    expect(source.datasets[0].version_id).toBe("retained-v1");
+    expect(sourceHasSyncFailure(source)).toBe(true);
+    expect(sourceHasCheckFailure(source)).toBe(false);
+    expect(hasRunningUpdate(data)).toBe(false);
+  },
+);
 it("打开立即读取，空闲不轮询；运行中15秒，完成停止；关闭入口60秒，后台及卸载停止", async () => {
   vi.useFakeTimers();
   focusManager.setFocused(true);

@@ -646,6 +646,39 @@ it("历史输入待恢复时保留可用数据，不误报上游检查失败", a
   expect(screen.queryByText("本轮上游检查失败，保留上次观测。")).toBeNull();
 });
 
+it.each([
+  ["ARCHIVE_CAPACITY", "归档空间不足，未完成本轮接收。"],
+  ["INCREMENTAL_BASELINE_MISMATCH", "接收基线未通过一致性校验，未完成本轮接收。"],
+  ["WAREHOUSE_CONCURRENCY_LIMIT", "数仓并发受限，未完成本轮接收。"],
+])("接收失败类别 %s 保留已接收数据，不误报检查失败", async (code, reason) => {
+  const base = payload();
+  const data = {
+    ...base,
+    data: {
+      ...base.data,
+      sources: [
+        {
+          ...row,
+          platform_state: "failed",
+          datasets: [{ ...dataset, attempt_status: "failed", error_code: code }],
+          upstream: { ...row.upstream, state: "unchanged", error_code: code },
+        },
+      ],
+    },
+  };
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  await screen.findByText("聚水潭销售 · 已发货 / 已取消");
+  expect(screen.getByRole("button", { name: "同步失败 1 项" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /检查失败/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "展开来源详情" }));
+  expect(screen.getByText(`${reason}保留最近可用数据。`)).toBeTruthy();
+  expect(screen.getByText(`${reason}已有成功数据仍可使用，请以数据日期为准。`)).toBeTruthy();
+  expect(screen.queryByText("本轮上游检查失败，保留上次观测。")).toBeNull();
+  expect(screen.getByText("数据日期：2026-11-02")).toBeTruthy();
+});
+
 it("周对账失败单独提醒，保留数据可用状态和下一次重试时间", async () => {
   const data = payload();
   data.data.sources = [

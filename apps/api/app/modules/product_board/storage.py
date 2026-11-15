@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules import fact_content
+from app.modules.archive_payload import read_payload_text
 from app.modules.archive_store import require_archive, store_for, write_archive
 from app.modules.database_residency import deferred_reason, ensure_online
 from app.modules.sales.source_policy import SHOPS
@@ -336,7 +337,7 @@ class ProductBoardStore:
                     },
                     reused_source_versions=dict(reuse_sources),
                     receipts=self.incremental_receipts,
-                    files={p.name: fingerprint(p.read_text()) for p in archive.iterdir()},
+                    files={p.name: fingerprint(read_payload_text(p)) for p in archive.iterdir()},
                 )
                 write_archive(
                     archive / "manifest.json", json.dumps(manifest, default=str, ensure_ascii=False)

@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 
+from app.modules.data_status.failure_codes import safe_failure_code
 from app.modules.data_status.schedule_policy import (
     FEISHU_TIMES,
     RECONCILIATION_RETRY_SECONDS,
@@ -82,7 +83,16 @@ def due_slot(config, now):
 
 
 def run_project(
-    engine, slot, steps, archive_root, *, max_attempts=2, depends_on=None, lock_connection=None
+    engine,
+    slot,
+    steps,
+    archive_root,
+    *,
+    max_attempts=2,
+    depends_on=None,
+    lock_connection=None,
+    reconciliation_sources=(),
+    reconciliation_time=RECONCILIATION_TIME,
 ):
     """每个step串行返回来源结果；失败不抹去其它来源成功，日志不含异常原文。"""
     m = sa.MetaData()
@@ -98,6 +108,17 @@ def run_project(
             return dict(status="already_running")
         try:
             with c.begin():
+                from app.modules.data_status.checkpoint_store import reconciliation_owned_sources
+
+                now = c.execute(sa.select(sa.func.clock_timestamp())).scalar_one()
+                weekly_owned = reconciliation_owned_sources(
+                    c, reconciliation_sources, now, reconciliation_time
+                )
+                steps = {name: step for name, step in steps.items() if name not in weekly_owned}
+                if not steps and weekly_owned:
+                    return dict(
+                        status="deferred", datasets={}, deferred_sources=sorted(weekly_owned)
+                    )
                 previous = (
                     c.execute(
                         sa.select(tasks.c.status).where(
@@ -168,12 +189,16 @@ def run_project(
                     from app.connectors.retry import safe_diagnostic
 
                     # 错误诊断仅保留白名单字段，不记录查询参数和完整业务行。
+                    diagnostic = safe_diagnostic(exc)
+                    code = getattr(exc, "code", None) or (exc.args[0] if exc.args else None)
+                    if diagnostic["category"] == "warehouse_concurrency_limit":
+                        code = "WAREHOUSE_CONCURRENCY_LIMIT"
                     results[name] = dict(
                         status="failed",
                         error=type(exc).__name__,
-                        error_code=deferred_reason(exc),
+                        error_code=deferred_reason(exc) or safe_failure_code(code),
                         error_module=type(exc).__module__,
-                        diagnostic=safe_diagnostic(exc),
+                        diagnostic=diagnostic,
                         source_code=exc.args[0]
                         if exc.args and isinstance(exc.args[0], int)
                         else None,

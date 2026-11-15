@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render as renderView,
@@ -53,6 +54,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   _resetCacheForTesting();
@@ -170,17 +172,38 @@ it("趋势连续版本冲突后显示区块重试，保留当前经营卡片", a
 });
 
 it("接口失败仍保留八卡及其他折叠，不创建无依据的推广异常", async () => {
+  vi.useFakeTimers();
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 503 }));
-  render(
-    <MemoryRouter>
-      <SalesPage />
-    </MemoryRouter>,
-  );
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SalesPage />
+      </MemoryRouter>,
+    );
+  });
   expect(screen.getByRole("heading", { name: "店铺销售看板" })).toBeTruthy();
-  await waitFor(
-    () => expect(screen.getByRole("button", { name: "重新读取本地数据" })).toBeTruthy(),
-    { timeout: 4000 },
-  );
+  // 精确验证1秒、2秒退避；不让整页角色查询和机器负载挤占墙钟等待。
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(999);
+  });
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1999);
+  });
+  expect(fetch).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(1);
+  });
+  expect(screen.getByRole("button", { name: "重新读取本地数据" })).toBeTruthy();
+  expect(fetch).toHaveBeenCalledTimes(3);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
   expect(fetch).toHaveBeenCalledTimes(3);
   for (const title of [
     "销售金额",
@@ -247,6 +270,7 @@ it("单店切换与再次点击恢复不会改变全店贡献和底表分母", a
 });
 
 it("连续409后停止自动重试", async () => {
+  vi.useFakeTimers();
   let calls = 0;
   vi.stubGlobal(
     "fetch",
@@ -259,14 +283,19 @@ it("连续409后停止自动重试", async () => {
       );
     }),
   );
-  render(
-    <MemoryRouter>
-      <SalesPage />
-    </MemoryRouter>,
-  );
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "重新读取本地数据" })).toBeTruthy(),
-  );
+  // act等待初次读取及一次版本恢复的Promise和React提交，再查询页面角色。
+  await act(async () => {
+    render(
+      <MemoryRouter>
+        <SalesPage />
+      </MemoryRouter>,
+    );
+  });
+  expect(screen.getByRole("button", { name: "重新读取本地数据" })).toBeTruthy();
+  expect(calls).toBe(6);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(60_000);
+  });
   expect(calls).toBe(6);
   expect(screen.getByTestId("sales-kpis").textContent).not.toContain("¥31");
 });

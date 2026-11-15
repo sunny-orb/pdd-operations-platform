@@ -8,9 +8,12 @@ import logging
 import os
 import stat
 import tempfile
+import time
 import tomllib
 from functools import lru_cache
 from pathlib import Path
+
+from app.modules.archive_payload import PAYLOADS, open_payload, read_manifest, write_payload
 
 DEFAULT_MAX = 12 * 1024**3
 DEFAULT_FREE = 2 * 1024**3
@@ -27,17 +30,21 @@ def _safe(path):
 
 
 @lru_cache(maxsize=256)
-def _digest(path, inode, size, mtime_ns, ctime_ns, encoded_text=False):
+def _digest(path, inode, size, mtime_ns, ctime_ns, encoded_text=False, deadline=None):
     digest = hashlib.sha256()
     if encoded_text:
         digest.update(b'"')
-        with Path(path).open(encoding="utf-8") as source:
+        with open_payload(path) as raw, io.TextIOWrapper(raw, encoding="utf-8") as source:
             while chunk := source.read(1024 * 1024):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ValueError("ARCHIVE_MAINTENANCE_BUDGET")
                 digest.update(json.dumps(chunk, ensure_ascii=False)[1:-1].encode())
         digest.update(b'"')
     else:
-        with Path(path).open("rb") as source:
+        with open_payload(path) as source:
             while chunk := source.read(1024 * 1024):
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise ValueError("ARCHIVE_MAINTENANCE_BUDGET")
                 digest.update(chunk)
     after = Path(path).stat()
     if (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (
@@ -50,13 +57,22 @@ def _digest(path, inode, size, mtime_ns, ctime_ns, encoded_text=False):
     return digest.hexdigest()
 
 
-def _verify(path, expected, encoded_text=False):
+def _verify(path, expected, encoded_text=False, deadline=None):
     path = _safe(path)
     info = path.lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
         raise ValueError("ARCHIVE_PATH")
-    actual = _digest(
-        str(path), info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns, encoded_text
+    reader = (
+        _digest.__wrapped__ if deadline is not None or read_manifest(path) is not None else _digest
+    )
+    actual = reader(
+        str(path),
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+        encoded_text,
+        deadline,
     )
     if actual != expected:
         raise ValueError("ARCHIVE_CHECKSUM")
@@ -103,9 +119,17 @@ def require_archive(reference):
 
 
 class ArchiveStore:
-    def __init__(self, root, *, max_bytes=DEFAULT_MAX, min_free_bytes=DEFAULT_FREE):
+    def __init__(
+        self,
+        root,
+        *,
+        max_bytes=DEFAULT_MAX,
+        min_free_bytes=DEFAULT_FREE,
+        payload_dedup_enabled=False,
+    ):
         self.root = _safe(root)
         self.max_bytes, self.min_free_bytes = max_bytes, min_free_bytes
+        self.payload_dedup_enabled = payload_dedup_enabled
 
     def usage(self):
         total = 0
@@ -187,11 +211,14 @@ def store_for(path):
         root,
         max_bytes=policy.get("max_archive_bytes", DEFAULT_MAX),
         min_free_bytes=policy.get("min_free_bytes", DEFAULT_FREE),
+        payload_dedup_enabled=policy.get("payload_dedup_enabled", False),
     )
 
 
 def write_archive(path, content):
     data = content.encode() if isinstance(content, str) else content
+    if store_for(path).payload_dedup_enabled and Path(path).name in PAYLOADS:
+        return write_archive_stream(path, [data])
     path = _safe(path)
     store = store_for(path)
     sidecar = path.with_name(path.name + ".sha256")
@@ -203,6 +230,50 @@ def write_archive(path, content):
     if not sidecar.exists():
         store.write(sidecar, expected.encode())
     return result
+
+
+def write_archive_stream(path, chunks):
+    """流式保存来源字节，支持内容块；仅本次临时文件，不复制完整输入到内存。"""
+    from app.modules.archive_payload import atomic_bytes
+
+    path = _safe(path)
+    store = store_for(path)
+    store.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not path.is_relative_to(store.root) or path == store.root:
+        raise ValueError("ARCHIVE_PATH")
+    lock = os.open(store.root / ".archive.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if path.exists():
+            raise ValueError("ARCHIVE_EXISTS")
+        sidecar = _safe(path.with_name(path.name + ".sha256"))
+        expected = sidecar.read_text().strip() if sidecar.exists() else None
+        if store.payload_dedup_enabled and path.name in PAYLOADS:
+            digest = write_payload(path, chunks, store, expected=expected)
+        else:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix=".pending-", dir=path.parent)
+            h = hashlib.sha256()
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    for chunk in chunks:
+                        store.check(len(chunk) + 64)
+                        stream.write(chunk)
+                        stream.flush()
+                        h.update(chunk)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                digest = h.hexdigest()
+                if expected is not None and digest != expected:
+                    raise ValueError("ARCHIVE_CHECKSUM")
+                os.link(temporary, path, follow_symlinks=False)
+            finally:
+                os.unlink(temporary)
+        if expected is None:
+            atomic_bytes(sidecar, digest.encode())
+        return str(path)
+    finally:
+        os.close(lock)
 
 
 def close_temporary(folder):

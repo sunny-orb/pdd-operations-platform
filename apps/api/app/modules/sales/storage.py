@@ -12,6 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules import fact_content
+from app.modules.archive_payload import read_payload_text
 from app.modules.archive_store import require_archive, write_archive
 from app.modules.database_residency import deferred_reason, ensure_online
 
@@ -257,7 +258,7 @@ class ShopDailyStore:
             write_archive(folder / name, content)
             if (folder / name).stat().st_mode & 0o077:
                 raise SalesError("ARCHIVE_PERMISSIONS")
-        if (folder / "input.ndjson").read_bytes() != data:
+        if read_payload_text(folder / "input.ndjson").encode() != data:
             raise SalesError("ARCHIVE_CHECKSUM_MISMATCH")
         heartbeat(force=True)
         return str(folder / "input.ndjson"), str(folder / "interpretation.json")

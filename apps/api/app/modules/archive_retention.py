@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 
 import sqlalchemy as sa
 
+from app.modules.archive_payload import open_payload
 from app.modules.archive_store import _safe, store_for
 
 PAYLOADS = {
@@ -73,9 +74,11 @@ def file_record(root, path):
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
         raise ValueError("ARCHIVE_PATH")
     digest = hashlib.sha256()
-    with path.open("rb") as stream:
+    size = 0
+    with open_payload(path) as stream:
         while chunk := stream.read(1024 * 1024):
             digest.update(chunk)
+            size += len(chunk)
     after = path.stat()
     if (info.st_ino, info.st_size, info.st_mtime_ns) != (
         after.st_ino,
@@ -83,7 +86,7 @@ def file_record(root, path):
         after.st_mtime_ns,
     ):
         raise ValueError("ARCHIVE_CHANGED")
-    return dict(path=str(path.relative_to(root)), size=info.st_size, sha256=digest.hexdigest())
+    return dict(path=str(path.relative_to(root)), size=size, sha256=digest.hexdigest())
 
 
 def plan_retention(engine, root):
@@ -171,7 +174,7 @@ def export_bundle(root, items, output):
             path = safe_member(root, item["path"])
             info = tarfile.TarInfo(item["path"])
             info.size, info.mode = item["size"], 0o600
-            with path.open("rb") as source:
+            with open_payload(path) as source:
                 archive.addfile(info, source)
 
 

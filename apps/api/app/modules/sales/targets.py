@@ -10,6 +10,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules.archive_payload import read_payload_text
 from app.modules.archive_store import require_archive, write_archive
 
 from .contracts import PublishResult, ReadWindow, SalesError, ShopDailyCandidate
@@ -224,7 +225,7 @@ class SalesTargetStore(ShopDailyStore):
         ):
             heartbeat()
             write_archive(folder / name, content)
-            if (folder / name).read_bytes() != content:
+            if read_payload_text(folder / name).encode() != content:
                 raise SalesError("ARCHIVE_CHECKSUM_MISMATCH")
         return str(folder / "input.ndjson"), str(folder / "interpretation.json")
 

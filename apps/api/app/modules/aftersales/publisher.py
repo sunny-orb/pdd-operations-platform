@@ -1,19 +1,21 @@
 """M5必要原行与固定期间报告发布；仅既有v2表，失败保旧、重跑幂等。"""
 
 import json
+import resource
+import sys
 from datetime import timedelta
-from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
-from app.modules import fact_content
+from app.modules import fact_content, streaming_json
 from app.modules.aftersales.classification import rule_parameters
 from app.modules.aftersales.ingestion import MASTER_TABLE, NOTE, REVISION, TABLES
-from app.modules.archive_store import require_archive, write_archive
+from app.modules.archive_store import require_archive, write_archive, write_archive_stream
 from app.modules.sales.source_policy import SHOPS
+from app.modules.streaming_json import fingerprint, fingerprint_rows
 
 FACTS = dict(
     jst_returns="return_records",
@@ -31,8 +33,10 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, ensure_ascii=False, default=str, separators=(",", ":"))
 
 
-def fingerprint(value):
-    return sha256(canonical(value).encode()).hexdigest()
+def source_chunks(rows):
+    """归档仍为逐行规范JSON及末尾换行，缓冲仅一条必要原投影。"""
+    for row in rows:
+        yield canonical(row).encode() + b"\n"
 
 
 def producer():
@@ -42,6 +46,7 @@ def producer():
             for p in (
                 Path(__file__),
                 Path(fact_content.__file__),
+                Path(streaming_json.__file__),
                 Path(__file__).with_name("ingestion.py"),
                 Path(__file__).with_name("classification.py"),
                 Path(__file__).with_name("bundle_categories.py"),
@@ -74,6 +79,25 @@ def reflect(engine):
 
 def private(path, value):
     return write_archive(path, value)
+
+
+def source_phase(code, run, phase, rows=None):
+    """仅记录阶段/数量/本进程历史峰值；不输出来源字段或连接参数。"""
+    print(
+        json.dumps(
+            dict(
+                event="aftersales_source_phase",
+                dataset=code,
+                run_id=run,
+                phase=phase,
+                rows=rows,
+                process_peak_rss_bytes=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                * (1 if sys.platform == "darwin" else 1024),
+            )
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def publish_source(engine, code, receive, root):
@@ -127,12 +151,15 @@ def publish_source(engine, code, receive, root):
                         )
                     )
 
+            source_phase(code, run, "receiving")
             end, raw, rows = receive(heartbeat)
+            source_phase(code, run, "fingerprinting", len(rows))
             if producer() != code_hash:
                 raise ValueError("M5_PRODUCER_CHANGED")
             digest = fingerprint(
                 dict(revision=REVISION, producer=code_hash, end=end, raw=raw, rows=rows)
             )
+            source_phase(code, run, "archiving", len(rows))
             # 完整内容校验后先核验旧输入与解释；同内容接收不创建空归档。
             with c.begin():
                 previous = c.execute(
@@ -168,9 +195,11 @@ def publish_source(engine, code, receive, root):
                         )
                     ),
                 )
-                archive = private(
-                    Path(root) / run / "input.ndjson", "\n".join(canonical(r) for r in raw) + "\n"
+                archive = write_archive_stream(
+                    Path(root) / run / "input.ndjson", source_chunks(raw)
                 )
+            del raw
+            source_phase(code, run, "persisting", len(rows))
             with c.begin():
                 reuse = c.execute(
                     sa.select(v.c.id).where(
@@ -220,19 +249,19 @@ def publish_source(engine, code, receive, root):
                                 ],
                             )
                     facts = fact_content.read_table(c, FACTS[code])
+                    source_phase(code, run, "validating", len(rows))
                     # 从PG重读必要字段逐格比对，不只验证插入行数。
-                    actual = (
-                        c.execute(
-                            sa.select(*[facts.c[k] for k in rows[0]]).where(
-                                facts.c.dataset_version_id == vid
-                            )
-                        )
-                        .mappings()
-                        .all()
+                    query = (
+                        sa.select(*[facts.c[k] for k in rows[0]])
+                        .where(facts.c.dataset_version_id == vid)
+                        .order_by(facts.c.source_row_key.collate("C"))
+                        .execution_options(yield_per=1000)
                     )
-                    if fingerprint(
-                        [dict(x) for x in sorted(actual, key=lambda x: x["source_row_key"])]
-                    ) != fingerprint(sorted(rows, key=lambda x: x["source_row_key"])):
+                    with c.execute(query) as actual:
+                        actual_digest = fingerprint_rows(dict(row) for row in actual.mappings())
+                    if actual_digest != fingerprint_rows(
+                        sorted(rows, key=lambda x: x["source_row_key"])
+                    ):
                         raise ValueError("SOURCE_PG_CONTENT_MISMATCH")
                     for _, (sid, _, _) in SHOPS.items():
                         cov = t["coverage_records"]
@@ -281,6 +310,7 @@ def publish_source(engine, code, receive, root):
                         evidence_ref=evidence,
                     )
                 )
+            source_phase(code, run, "succeeded", len(rows))
             return dict(
                 status="reused" if reuse else "published",
                 version_id=vid,

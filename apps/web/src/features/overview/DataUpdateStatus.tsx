@@ -32,6 +32,11 @@ import { HistoryCoverage, HistoryCoverageLabel } from "./HistoryCoverage";
 import { UpdateTimeliness, UpdateTimelinessLabel } from "./UpdateTimeliness";
 
 const systems = { warehouse: "数仓", feishu: "飞书", nmc: "气象台" };
+const syncFailureReasons: Record<string, string> = {
+  ARCHIVE_CAPACITY: "归档空间不足，未完成本轮接收。",
+  INCREMENTAL_BASELINE_MISMATCH: "接收基线未通过一致性校验，未完成本轮接收。",
+  WAREHOUSE_CONCURRENCY_LIMIT: "数仓并发受限，未完成本轮接收。",
+};
 const time = (value: string | null | undefined) => (value ? localTime(value) : "—");
 const date = (value: string | null | undefined) =>
   value?.includes("T") ? localTime(value) : (value ?? "—");
@@ -71,7 +76,8 @@ function DatasetDetail({ item }: { item: DatasetStatus }) {
       {["failed", "abandoned", "cancelled"].includes(item.attempt_status ?? "") && (
         <span>
           {item.error_code
-            ? `失败记录：${item.error_code}；具体原因待核实。`
+            ? (syncFailureReasons[item.error_code] ??
+              `失败记录：${item.error_code}；具体原因待核实。`)
             : "失败原因尚未确认。"}
           {item.version_id
             ? "已有成功数据仍可使用，请以数据日期为准。"
@@ -368,11 +374,13 @@ function SourceDetail({ row }: { row: SourceStatus }) {
                   ? "项目维护暂缓了本次更新，现有数据继续可用，稍后按计划重试。"
                   : row.upstream.error_code === "SOURCE_CHANGED_DURING_SYNC"
                     ? "同步期间来源再次变化，等待下一轮接收。"
-                    : row.upstream.error_code === "SYNC_FAILED"
-                      ? "本轮接收未成功，保留最近可用数据。"
-                      : row.upstream.error_code === "WAREHOUSE_WEB_LOGIN_REQUIRED"
-                        ? "数仓网页登录已失效，保留上次更新时间和可用数据。重新登录后按计划继续检查。"
-                        : "本轮上游检查失败，保留上次观测。"}
+                    : syncFailureReasons[row.upstream.error_code]
+                      ? `${syncFailureReasons[row.upstream.error_code]}保留最近可用数据。`
+                      : row.upstream.error_code === "SYNC_FAILED"
+                        ? "本轮接收未成功，保留最近可用数据。"
+                        : row.upstream.error_code === "WAREHOUSE_WEB_LOGIN_REQUIRED"
+                          ? "数仓网页登录已失效，保留上次更新时间和可用数据。重新登录后按计划继续检查。"
+                          : "本轮上游检查失败，保留上次观测。"}
             </dd>
           </div>
         )}

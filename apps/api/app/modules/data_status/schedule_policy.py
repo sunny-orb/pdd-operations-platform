@@ -109,9 +109,22 @@ def unconfirmed_receipt(checkpoint):
 
 
 def source_retry_at(checkpoint):
-    """从最近一次失败或待复核结果计算普通接收的下次重试时间。"""
-    if checkpoint.get("sync_status") != "failed" and not unconfirmed_receipt(checkpoint):
+    """检查失败、接收失败或待复核时，从最近结束的检查/接收等待五分钟。"""
+    if (
+        checkpoint.get("check_status") != "failed"
+        and checkpoint.get("sync_status") != "failed"
+        and not unconfirmed_receipt(checkpoint)
+    ):
         return None
-    finished = checkpoint["sync_finished_at"]
-    checked = checkpoint.get("checked_at") or finished
-    return max(finished, checked) + timedelta(seconds=SOURCE_RETRY_SECONDS)
+    finished = checkpoint.get("sync_finished_at")
+    checked = checkpoint.get("checked_at")
+    return max(stamp for stamp in (finished, checked) if stamp is not None) + timedelta(
+        seconds=SOURCE_RETRY_SECONDS
+    )
+
+
+def receipt_after_attempt(checkpoint, task):
+    """后续稳定接收可覆盖旧失败尝试；不改写原任务，也不把元数据成功当接收。"""
+    accepted = checkpoint.get("accepted_at")
+    ended = task.get("finished_at") or task.get("lease_expires_at")
+    return bool(accepted and ended and accepted >= ended)

@@ -7,6 +7,8 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+from app.modules.archive_payload import open_payload
+
 from . import normalization
 from .contracts import PromotionReadWindow, ReadWindow, SalesError
 from .normalization import fingerprint, normalize_shop_daily
@@ -28,7 +30,7 @@ def restore_candidate(folder: Path, *, heartbeat=lambda: None):
 
     # 先流式校验，再边读边解释，不同时保留原始大列表和规范化副本。
     digest = hashlib.sha256()
-    with (folder / "input.ndjson").open("rb") as stream:
+    with open_payload(folder / "input.ndjson") as stream:
         while chunk := stream.read(1024 * 1024):
             heartbeat()
             digest.update(chunk)
@@ -37,7 +39,7 @@ def restore_candidate(folder: Path, *, heartbeat=lambda: None):
 
     def original_rows():
         verified, count = hashlib.sha256(), 0
-        with (folder / "input.ndjson").open("rb") as stream:
+        with open_payload(folder / "input.ndjson") as stream:
             for index, line in enumerate(stream):
                 if index % 1000 == 0:
                     heartbeat()

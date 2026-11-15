@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
 import sqlalchemy as sa
 
 pytest_plugins = ["tests.sales_pg_support"]
@@ -156,6 +157,399 @@ def test_metadata_failure_preserves_observation_and_next_slot_retries(sales_pg):
         p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
         assert p["check_status"] == "failed" and p["accepted_at"] is None
         assert p["error_code"] == "CHECK_FAILED"
+
+
+@pytest.mark.parametrize("start", ("08:30", "23:58"))
+def test_failed_checks_retry_from_finish_across_midnight_until_success(sales_pg, start):
+    from app.jobs.project_sync import Schedule
+    from app.jobs.source_schedule import run_scheduled_sources
+    from app.modules.data_status.repository import read_status
+
+    current = at(start)
+    probes_seen, downloads = [], []
+    failures = 3
+
+    def probe():
+        nonlocal current, failures
+        probes_seen.append(current)
+        if failures:
+            failures -= 1
+            current += timedelta(minutes=2)
+            raise ValueError("private metadata failure")
+        return {"revision": "stable"}
+
+    def sync(ids, c):
+        downloads.extend(ids)
+        return dict.fromkeys(ids, True)
+
+    def run():
+        return run_scheduled_sources(
+            sales_pg,
+            {"shop_daily": probe},
+            sync,
+            clock=lambda: current,
+            warehouse_times=(start,),
+        )
+
+    for _attempt in range(3):
+        assert run()["failed"] == 1
+        finished = current
+        data = read_status(
+            sales_pg,
+            source_schedule=Schedule(source_schedule_enabled=True, warehouse_times=(start,)),
+        )["data"]
+        source = next(row for row in data["sources"] if row["id"] == "shop_daily")
+        assert source["upstream"]["next_check_at"] == finished + timedelta(minutes=5)
+        current = finished + timedelta(seconds=299)
+        assert run()["checked"] == 0
+        current += timedelta(seconds=1)
+    assert run()["status"] == "checked"
+    current += timedelta(minutes=5)
+    assert run()["checked"] == 0
+    assert probes_seen == [at(start) + timedelta(minutes=offset) for offset in (0, 7, 14, 21, 21)]
+    assert downloads == ["shop_daily"]
+    with sales_pg.connect() as c:
+        p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert p["check_status"] == "succeeded"
+        assert p["error_code"] is None
+        assert p["scheduled_attempts"] == 1
+
+
+def test_weekly_success_refreshes_failed_legacy_check_without_ordinary_download(sales_pg):
+    from app.jobs.source_monitor import run_monitor
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    revision = "accepted"
+
+    def probe():
+        if revision is None:
+            raise ValueError("private metadata failure")
+        return {"revision": revision}
+
+    probes = {"product_regions": probe}
+    run_monitor(
+        sales_pg, probes, lambda ids, c: dict.fromkeys(ids, True), now=sunday - timedelta(hours=1)
+    )
+    revision = None
+    run_monitor(sales_pg, probes, lambda ids, c: {}, now=sunday - timedelta(minutes=30))
+    revision = "accepted"
+    before = run_scheduled_sources(
+        sales_pg, probes, lambda ids, c: {}, now=sunday - timedelta(minutes=20)
+    )
+    assert before["checked"] == 0  # 旧来源的五分钟检查重试仍由 monitor 负责。
+    result = run_scheduled_sources(
+        sales_pg, probes, lambda ids, c: dict.fromkeys(ids, True), now=sunday
+    )
+    assert result["sources"] == ["product_regions"]
+    with sales_pg.connect() as c:
+        p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert p["check_status"] == "succeeded"
+        assert p["checked_at"] == sunday
+        assert p["observed_at"] == sunday
+        assert p["accepted_at"] == sunday
+        assert p["error_code"] is None
+        assert p["sync_status"] is None
+        assert p["scheduled_slot_at"] is None
+
+
+def test_weekly_success_keeps_unresolved_ordinary_failure_but_refreshes_check(sales_pg):
+    from app.jobs.source_monitor import run_monitor
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    probes = {"product_regions": lambda: {"revision": "old"}}
+    old = sunday - timedelta(hours=1)
+    run_monitor(sales_pg, probes, lambda ids, c: dict.fromkeys(ids, True), now=old)
+    with sales_pg.begin() as c:
+        c.execute(
+            sa.text("""
+            UPDATE source_checkpoints SET sync_status='failed',sync_started_at=:old,
+              sync_finished_at=:old,error_code='SYNC_FAILED'
+        """),
+            {"old": old},
+        )
+    result = run_scheduled_sources(
+        sales_pg,
+        {"product_regions": lambda: {"revision": "new"}},
+        lambda ids, c: dict.fromkeys(ids, True),
+        now=sunday,
+    )
+    assert result["sources"] == ["product_regions"]
+    with sales_pg.connect() as c:
+        p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert p["checked_at"] == sunday
+        assert p["check_status"] == "succeeded"
+        assert p["sync_status"] == "failed"
+        assert p["sync_finished_at"] == old
+        assert p["error_code"] == "SYNC_FAILED"
+
+
+def test_failed_check_cooldown_cannot_be_bypassed_by_new_fixed_slot(sales_pg):
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    def unavailable():
+        raise ValueError("private metadata failure")
+
+    options = dict(warehouse_times=("08:30", "08:32"))
+    run_scheduled_sources(
+        sales_pg, {"shop_daily": unavailable}, lambda ids, c: {}, now=at("08:30"), **options
+    )
+    assert (
+        run_scheduled_sources(
+            sales_pg, {"shop_daily": unavailable}, lambda ids, c: {}, now=at("08:34:59"), **options
+        )["checked"]
+        == 0
+    )
+    result = run_scheduled_sources(
+        sales_pg,
+        {"shop_daily": lambda: {"revision": "stable"}},
+        lambda ids, c: dict.fromkeys(ids, True),
+        now=at("08:35"),
+        **options,
+    )
+    assert result["sources"] == ["shop_daily"]
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT scheduled_slot_at FROM source_checkpoints")) == at("08:32")
+
+
+def test_weekly_deferred_cooldown_blocks_overlapping_ordinary_slot(sales_pg):
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    probes = {"shop_daily": lambda: {"revision": "stable"}}
+    options = dict(warehouse_times=("16:10", "17:02"))
+    run_scheduled_sources(
+        sales_pg,
+        probes,
+        lambda ids, c: dict.fromkeys(ids, True),
+        now=sunday - timedelta(minutes=50),
+        **options,
+    )
+    run_scheduled_sources(
+        sales_pg,
+        probes,
+        lambda ids, c: {"_deferred": dict.fromkeys(ids, "MAINTENANCE_DEFERRED")},
+        now=sunday,
+        **options,
+    )
+    assert (
+        run_scheduled_sources(
+            sales_pg, probes, lambda ids, c: {}, now=sunday + timedelta(minutes=2), **options
+        )["checked"]
+        == 0
+    )
+
+
+def test_weekly_failed_probes_retry_after_finish_and_success_stops_cycle(sales_pg):
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    current = sunday - timedelta(minutes=50)
+    unavailable = False
+    downloads = []
+
+    def probe():
+        nonlocal current
+        if unavailable:
+            current += timedelta(minutes=1)
+            raise ValueError("private metadata failure")
+        return {"revision": "stable"}
+
+    def sync(ids, c):
+        downloads.extend(ids)
+        return dict.fromkeys(ids, True)
+
+    def run():
+        return run_scheduled_sources(sales_pg, {"shop_daily": probe}, sync, clock=lambda: current)
+
+    run()
+    downloads.clear()
+    current, unavailable = sunday, True
+    for _attempt in range(3):
+        assert run()["status"] == "partial"
+        with sales_pg.connect() as c:
+            cycle = c.execute(sa.text("SELECT * FROM source_reconciliations")).mappings().one()
+            assert cycle["status"] == "failed"
+            assert cycle["last_finished_at"] == current
+            assert cycle["error_code"] == "CHECK_FAILED"
+            assert cycle["cycle_at"] == sunday
+        current += timedelta(seconds=299)
+        assert run()["checked"] == 0
+        current += timedelta(seconds=1)
+    unavailable = False
+    assert run()["status"] == "checked"
+    current += timedelta(minutes=5)
+    assert run()["checked"] == 0
+    assert downloads == ["shop_daily"] * 4
+
+
+def test_legacy_monitor_yields_pending_weekly_source_and_resumes_after_success(sales_pg):
+    from app.jobs.source_monitor import run_monitor
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    sunday = at("17:00") + timedelta(days=4)
+    probes = {"product_regions": lambda: {"revision": "new"}}
+    calls = []
+    successful = False
+
+    def sync(ids, c):
+        calls.extend(ids)
+        return dict.fromkeys(ids, successful)
+
+    def monitor(stamp):
+        return run_monitor(
+            sales_pg, probes, sync, now=stamp, reconciliation_sources=("product_regions",)
+        )
+
+    assert monitor(sunday)["checked"] == 0
+    for minutes in (0, 5, 10):
+        stamp = sunday + timedelta(minutes=minutes)
+        assert monitor(stamp)["checked"] == 0
+        run_scheduled_sources(sales_pg, probes, sync, now=stamp)
+        assert monitor(stamp + timedelta(minutes=1))["checked"] == 0
+    assert calls == ["product_regions"] * 3
+    successful = True
+    run_scheduled_sources(sales_pg, probes, sync, now=sunday + timedelta(minutes=15))
+    assert monitor(sunday + timedelta(minutes=16))["checked"] == 0
+    assert monitor(sunday + timedelta(minutes=30))["checked"] == 1
+    assert calls == ["product_regions"] * 4
+
+
+def test_weekly_success_closes_matching_legacy_sync_failure_without_repeat(sales_pg):
+    from app.jobs.project_sync import Schedule
+    from app.jobs.source_monitor import run_monitor
+    from app.jobs.source_schedule import run_scheduled_sources
+    from app.modules.data_status.repository import read_status
+    from tests.test_published_versions import publish_pointer
+
+    sunday = at("17:00") + timedelta(days=4)
+    probes = {"product_regions": lambda: {"revision": "unchanged"}}
+    publish_pointer(sales_pg, "product_regions", "available")
+    with sales_pg.begin() as c:
+        c.execute(
+            sa.text("""
+            INSERT INTO task_runs
+              (id,job_code,request_ref,lock_key,status,queued_at,started_at,finished_at,error_code)
+            VALUES ('ordinary-failed','sync_product_regions','test','product_regions',
+                    'failed',:stamp,:stamp,:stamp,'INGESTION_FAILED')
+        """),
+            {"stamp": sunday - timedelta(hours=2)},
+        )
+    run_monitor(
+        sales_pg, probes, lambda ids, c: dict.fromkeys(ids, False), now=sunday - timedelta(hours=1)
+    )
+    run_scheduled_sources(sales_pg, probes, lambda ids, c: dict.fromkeys(ids, True), now=sunday)
+    with sales_pg.connect() as c:
+        p = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert p["error_code"] is None
+        assert p["accepted_at"] == sunday
+    result = run_monitor(
+        sales_pg,
+        probes,
+        lambda ids, c: {},
+        now=sunday + timedelta(minutes=5),
+        reconciliation_sources=("product_regions",),
+    )
+    assert result["checked"] == 0
+    row = next(
+        row
+        for row in read_status(sales_pg, source_schedule=Schedule(source_schedule_enabled=True))[
+            "data"
+        ]["sources"]
+        if row["id"] == "product_regions"
+    )
+    assert row["platform_state"] == "available"
+    assert row["datasets"][0]["attempt_status"] == "succeeded"
+    assert row["datasets"][0]["last_finished_at"] == sunday
+
+
+def test_ordinary_project_yields_weekly_source_under_project_lock(sales_pg, tmp_path):
+    from app.jobs.project_sync import run_project
+    from tests.test_published_versions import publish_pointer
+
+    publish_pointer(sales_pg, "shop_daily", "available")
+    with sales_pg.begin() as c:
+        c.execute(
+            sa.text("""
+            INSERT INTO source_reconciliations
+              (source_id,cycle_at,status,last_attempt_at,last_finished_at,error_code)
+            VALUES ('product_regions',now()-interval '1 hour','failed',
+                    now()-interval '1 hour',now(),'SYNC_FAILED')
+        """)
+        )
+        version = c.scalar(
+            sa.text("SELECT version_id FROM current_datasets WHERE dataset_code='shop_daily'")
+        )
+
+    def forbidden():
+        raise AssertionError("普通固定任务不应重复接收待周对账来源")
+
+    result = run_project(
+        sales_pg,
+        "ordinary-overlap",
+        {"product_regions": forbidden, "shop_daily": lambda: {"version_id": version}},
+        tmp_path,
+        reconciliation_sources=("product_regions",),
+    )
+    assert result["status"] == "succeeded"
+    assert set(result["datasets"]) == {"shop_daily"}
+
+
+@pytest.mark.parametrize(
+    "category",
+    (
+        "ARCHIVE_CAPACITY",
+        "INCREMENTAL_BASELINE_MISMATCH",
+        "WAREHOUSE_CONCURRENCY_LIMIT",
+        "SYNC_FAILED",
+    ),
+)
+def test_runtime_keeps_safe_failure_categories_in_source_and_weekly_state(
+    sales_pg, tmp_path, monkeypatch, capsys, category
+):
+    from pymysql.err import ProgrammingError
+
+    from app.connectors.warehouse_metadata import WarehouseMetadataReader
+    from app.jobs import project_runtime
+    from app.jobs.project_sync import Schedule
+    from app.jobs.source_monitor_runtime import execute_source_schedule
+    from app.modules.data_status.repository import read_status
+    from tests.test_project_sync_runtime import paths_for
+
+    def fail():
+        if category == "WAREHOUSE_CONCURRENCY_LIMIT":
+            raise ProgrammingError(1064, "Exceed concurrency limit: private upstream query")
+        raise ValueError("private upstream query" if category == "SYNC_FAILED" else category)
+
+    monkeypatch.setattr(
+        project_runtime, "build_steps", lambda *args, **kwargs: {"shop_daily": fail}
+    )
+    monkeypatch.setattr(WarehouseMetadataReader, "read", lambda self, code: {"revision": "stable"})
+    sunday = at("17:00") + timedelta(days=4)
+    result = execute_source_schedule(
+        sales_pg,
+        paths=paths_for(tmp_path),
+        warehouse_password=lambda: "unused",
+        warehouse_headers=lambda: {},
+        now=sunday,
+        source_ids=("shop_daily",),
+    )
+    assert result["failed"] == 1
+    source = next(
+        row
+        for row in read_status(sales_pg, source_schedule=Schedule(source_schedule_enabled=True))[
+            "data"
+        ]["sources"]
+        if row["id"] == "shop_daily"
+    )
+    assert source["upstream"]["error_code"] == category
+    assert source["datasets"][0]["error_code"] == category
+    assert source["reconciliation"]["error_code"] == "SYNC_FAILED"  # 沿用现行周状态DB约束。
+    assert source["platform_state"] == "failed"
+    logs = capsys.readouterr().out
+    assert f'"failure_category": "{category}"' in logs
+    assert "private upstream query" not in logs
 
 
 def test_policy_config_is_validated_and_survives_legacy_time_edits(tmp_path):

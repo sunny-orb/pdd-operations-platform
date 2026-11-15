@@ -9,6 +9,7 @@ import sqlalchemy as sa
 from app.jobs.source_monitor import fingerprint
 from app.modules.data_status.catalog import job_for
 from app.modules.data_status.checkpoint_store import CheckpointStore, read_legacy_tasks
+from app.modules.data_status.failure_codes import SYNC_FAILURE_CODES, safe_failure_code
 from app.modules.data_status.schedule_policy import (
     FEISHU_SOURCES,
     FEISHU_TIMES,
@@ -20,6 +21,7 @@ from app.modules.data_status.schedule_policy import (
     first_reconciliation,
     next_reconciliation,
     source_retry_at,
+    source_times,
     unconfirmed_receipt,
 )
 from app.modules.database_residency import deferred_reason
@@ -91,7 +93,7 @@ def _probe(read, clock):
         )
 
 
-def _log_reconciliation(code, cycle_at, status, finished_at, error):
+def _log_reconciliation(code, cycle_at, status, finished_at, error, failure_category=None):
     print(
         json.dumps(
             dict(
@@ -101,6 +103,7 @@ def _log_reconciliation(code, cycle_at, status, finished_at, error):
                 status=status,
                 finished_at=finished_at.isoformat(),
                 error_code=error,
+                failure_category=failure_category,
             ),
             ensure_ascii=False,
         ),
@@ -188,13 +191,21 @@ def run_scheduled_sources(
             cycle = cycles.get(code)
             weekly_retry_at = (
                 next_reconciliation(cycle, reconciliation_time, reconciliation_retry_seconds)
-                if cycle and cycle["status"] == "failed"
+                if cycle and cycle["status"] in ("failed", "deferred")
                 else None
             )
             cooling_down = any(
                 due_at is not None and started < due_at for due_at in (retry_at, weekly_retry_at)
             )
-            regular = force or (not cooling_down and (fixed or retry_at is not None))
+            # 旧监测来源的检查重试由 monitor 执行，本入口只接管它的周对账。
+            regular = force or (
+                not cooling_down
+                and (
+                    fixed
+                    or retry_at is not None
+                    and bool(source_times(code, warehouse_times, feishu_times))
+                )
+            )
             weekly_slot = (
                 _reconciliation_slot(
                     store,
@@ -300,7 +311,9 @@ def run_scheduled_sources(
                         if stable:
                             values.update(accepted_fingerprint=accepted, accepted_at=finished)
                         if not succeeded:
-                            values["error_code"] = "SYNC_FAILED"
+                            values["error_code"] = safe_failure_code(
+                                results.get("_errors", {}).get(code)
+                            )
                         elif not stable and after.get("observed_fingerprint"):
                             values["error_code"] = "SOURCE_CHANGED_DURING_SYNC"
                         store.write(c, code, **values)
@@ -309,19 +322,22 @@ def run_scheduled_sources(
                     if stable and code not in ordinary:
                         # 稳定证据可接受，但只关闭已确认解决的普通失败。
                         values = dict(after, accepted_fingerprint=accepted, accepted_at=finished)
-                        if prior or code in regular_codes:
-                            for key in ("checked_at", "check_status", "duration_ms", "error_code"):
-                                values.pop(key)
-                        if (
-                            prior.get("sync_status") in ("failed", "running")
-                            and prior.get("observed_fingerprint") == accepted
+                        if prior.get("error_code") not in (
+                            None,
+                            "CHECK_FAILED",
+                            "WAREHOUSE_WEB_LOGIN_REQUIRED",
                         ):
-                            values.update(
-                                sync_status="succeeded",
-                                sync_started_at=attempted,
-                                sync_finished_at=finished,
-                            )
-                            if prior["error_code"] in ("SYNC_FAILED", "SOURCE_CHANGED_DURING_SYNC"):
+                            values["error_code"] = prior["error_code"]
+                        if prior.get("observed_fingerprint") == accepted:
+                            if prior.get("sync_status") in ("failed", "running"):
+                                values.update(
+                                    sync_status="succeeded",
+                                    sync_started_at=attempted,
+                                    sync_finished_at=finished,
+                                )
+                            if prior["error_code"] in SYNC_FAILURE_CODES | {
+                                "SOURCE_CHANGED_DURING_SYNC"
+                            }:
                                 values["error_code"] = None
                         store.write(c, code, **values)
                     error = (
@@ -346,7 +362,16 @@ def run_scheduled_sources(
                         **success,
                     )
             if code in weekly:
-                _log_reconciliation(code, weekly_slot, status, finished, error)
+                _log_reconciliation(
+                    code,
+                    weekly_slot,
+                    status,
+                    finished,
+                    error,
+                    safe_failure_code(results.get("_errors", {}).get(code))
+                    if not succeeded and code not in deferred
+                    else None,
+                )
                 if status == "failed":
                     weekly_failed.add(code)
         from app.modules.data_status.repository import refresh_platform_snapshots
@@ -362,7 +387,7 @@ def run_scheduled_sources(
             code
             for code in regular_codes
             if current[code]["check_status"] == "failed"
-            or current[code].get("error_code") == "SYNC_FAILED"
+            or current[code].get("error_code") in SYNC_FAILURE_CODES
         }
         pending = sum(
             current[code].get("error_code") == "SOURCE_CHANGED_DURING_SYNC"

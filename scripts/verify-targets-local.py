@@ -12,6 +12,7 @@ import sqlalchemy as sa
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps/api"))
+from app.modules.archive_payload import read_payload_text
 from app.core.config import Settings
 from app.db.connection import build_engine
 
@@ -45,7 +46,7 @@ def main():
             assert folder.is_relative_to(ROOT / "var/ingestion/sales_targets")
             raw = [
                 json.loads(line, parse_float=Decimal)
-                for line in (folder / "input.ndjson").read_text().splitlines()
+                for line in read_payload_text(folder / "input.ndjson").splitlines()
             ]
             expected = {}
             for row in raw:

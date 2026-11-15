@@ -81,6 +81,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
   const latest = source?.observed_through ?? "";
   const [dates, setDates] = useState<Dates | null>(null);
   const range = dates ?? { from: latest, to: latest };
+  const hasRange = Boolean(range.from && range.to && range.from <= range.to);
   const [shop, setShop] = useState("");
   const [category, setCategory] = useState("");
   const [search, setSearch] = useState("");
@@ -91,7 +92,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
   const [searchReset, setSearchReset] = useState(0);
   const [offset, setOffset] = useState(0);
   const { data, error, retry } = useSalesDetail(
-    detailPath(product ? "product-regions" : "regions", version, {
+    detailPath(product ? "product-regions" : "regions", hasRange ? version : undefined, {
       date_from: range.from,
       date_to: range.to,
       ...(shop ? { shop_id: shop } : {}),
@@ -145,7 +146,7 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
     <DatesFilter
       range={range}
       source={source}
-      disabled={!version}
+      disabled={!version || !hasRange}
       onChange={setDates}
       label={product ? "产品地区" : "地区交易"}
     />
@@ -408,18 +409,22 @@ function RegionPanel({ filters, onConflict, product = false }: Props & { product
                   ? "产品地区数据读取失败"
                   : !version
                     ? "产品地区数据暂不可用"
-                    : !d
-                      ? "正在读取产品地区数据…"
-                      : "所选店铺、品类、产品及时间段暂无记录，请调整筛选条件。"
+                    : !hasRange
+                      ? "暂无产品地区记录"
+                      : !d
+                        ? "正在读取产品地区数据…"
+                        : "所选店铺、品类、产品及时间段暂无记录，请调整筛选条件。"
                 : error
                   ? "地区交易数据读取失败"
                   : !version
                     ? "地区交易数据暂不可用"
-                    : !d
-                      ? "正在读取地区交易数据…"
-                      : d.source.state !== "observed"
-                        ? "地区交易数据暂不可用"
-                        : "暂无地区交易记录",
+                    : !hasRange
+                      ? "暂无地区交易记录"
+                      : !d
+                        ? "正在读取地区交易数据…"
+                        : d.source.state !== "observed"
+                          ? "地区交易数据暂不可用"
+                          : "暂无地区交易记录",
             }}
             columns={
               product

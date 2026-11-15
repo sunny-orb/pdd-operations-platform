@@ -23,6 +23,68 @@ const filters = {
 };
 const onConflict = () => {};
 
+it.each([false, true])(
+  "地区无日期不发空请求，接入后自动恢复且不受最近失败影响（产品=%s）",
+  async (product) => {
+    const calls: URL[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) => {
+        const url = new URL(path, "http://localhost");
+        calls.push(url);
+        return {
+          ok: true,
+          json: async () =>
+            url.pathname.endsWith("/filters")
+              ? {
+                  meta: testMeta,
+                  data: { categories: [], products: [], total: 0, offset: 0, limit: 100, source },
+                }
+              : response("zero"),
+        };
+      }),
+    );
+    const code = product ? "product_regions" : "shop_regions";
+    const capability = product ? "product_regions" : "regions";
+    const missing = {
+      ...filters,
+      data: {
+        ...filters.data,
+        capabilities: { [capability]: true },
+        sources: { [code]: { ...source, observed_from: null, observed_through: null } },
+      },
+    };
+    const view = render(<SalesRegions filters={missing} onConflict={onConflict} />);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(calls.filter((url) => !url.pathname.endsWith("/filters"))).toHaveLength(0);
+    const region = within(
+      document.querySelector<HTMLElement>(product ? "#product-regions" : "#regions")!,
+    );
+    expect(region.getByText(product ? "暂无产品地区记录" : "暂无地区交易记录")).toBeTruthy();
+    expect(region.queryByText(/正在读取/)).toBeNull();
+    view.rerender(
+      <SalesRegions
+        filters={{
+          ...missing,
+          data: {
+            ...missing.data,
+            sources: { [code]: { ...source, last_attempt_status: "failed" } },
+          },
+        }}
+        onConflict={onConflict}
+      />,
+    );
+    await waitFor(() =>
+      expect(calls.filter((url) => !url.pathname.endsWith("/filters"))).toHaveLength(1),
+    );
+    const request = calls.find((url) => !url.pathname.endsWith("/filters"))!;
+    expect(request.searchParams.get("date_from")).toBe("2026-10-31");
+    expect(request.searchParams.get("date_to")).toBe("2026-10-31");
+    await waitFor(() => expect(region.getByText("浙江")).toBeTruthy());
+    expect(region.queryByText(/读取失败/)).toBeNull();
+  },
+);
+
 it("产品候选中文组词不查询，确认搜索保留已选产品及经营范围", async () => {
   const calls: URL[] = [];
   vi.stubGlobal(

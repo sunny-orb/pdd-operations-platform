@@ -6,6 +6,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 import sqlalchemy as sa
 
+from app.modules.fact_content import read_name
 from app.modules.promotion.metrics import store_metrics
 from app.modules.record_coverage import missing_shop_days
 
@@ -22,7 +23,8 @@ def source_info(snapshot, code):
     if code in cached:
         return cached[code]
     spec = SPECS.get(code)
-    table = spec.fact_table if spec else "sales_targets"
+    # 来源日期与经营明细共用逻辑事实；共享版本可能没有旧物理表记录。
+    table = read_name(spec.fact_table) if spec else "sales_targets"
     date_column = spec.date_column if spec else "period_start"
     v = snapshot["versions"].get(code)
     c = snapshot["connection"]

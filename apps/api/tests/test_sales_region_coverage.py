@@ -1,9 +1,50 @@
 """后台地区缺项明细使用真实隔离PG；缺行、空字段、真实0分别验证。"""
 
+import pytest
+import sqlalchemy as sa
 from test_sales_extended_api import params, publish, setup
 from test_sales_extended_sources import sample
 
 pytest_plugins = ["sales_pg_support"]
+
+
+@pytest.mark.parametrize("reuse", [False, True])
+def test_region_default_dates_read_the_same_published_facts_as_details(
+    sales_pg, tmp_path, monkeypatch, reuse
+):
+    """页面用来源日期构造首个请求；共享内容和旧物理存储必须得到相同日期与金额。"""
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(reuse).lower())
+    client = setup(sales_pg, tmp_path)
+    publish(
+        sales_pg,
+        tmp_path,
+        "product_regions",
+        [
+            sample("product_regions", id="first", dt="2026-10-26"),
+            sample("product_regions", id="last", dt="2026-10-27", actual_shipped_amount="123"),
+        ],
+    )
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT count(*) FROM product_region_records")) == (
+            0 if reuse else 2
+        )
+        assert c.scalar(sa.text("SELECT count(*) FROM read_product_region_records")) == 2
+    filters = client.get("/api/v1/sales/filters").json()
+    source = filters["data"]["sources"]["product_regions"]
+    assert (source["observed_from"], source["observed_through"]) == ("2026-10-26", "2026-10-27")
+    scope = dict(
+        date_from=source["observed_through"],
+        date_to=source["observed_through"],
+        data_version=filters["meta"]["data_version"],
+    )
+    response = client.get("/api/v1/sales/product-regions", params=scope)
+    assert response.status_code == 200, response.json()
+    assert response.json()["data"]["totals"]["actual_shipped_amount"] == "123.00"
+    assert response.json()["data"]["source"] == source
+    assert (
+        client.get("/api/v1/sales/product-regions", params={**scope, "date_from": ""}).status_code
+        == 422
+    )
 
 
 def test_region_field_gaps_follow_shop_and_date_without_changing_totals(sales_pg, tmp_path):

@@ -102,3 +102,53 @@ def test_conversion_working_budget_preserves_original_even_with_free_quota(tmp_p
         )
     assert path.read_bytes() == data
     assert not list((root / ".payloads").rglob("*.gz"))
+
+
+def test_manifest_repeated_blocks_have_bounded_filesystem_checks(tmp_path, monkeypatch):
+    """重复引用不能让元数据读取按引用数重复遍历整条文件祖先链。"""
+    import json
+    from pathlib import Path
+
+    from app.modules.archive_payload import MAGIC, read_manifest
+
+    path = tmp_path / "ingestion/source/a/input.ndjson"
+    path.parent.mkdir(parents=True)
+    block = {"sha256": "a" * 64, "size": 1}
+    path.write_bytes(
+        MAGIC
+        + json.dumps(dict(format=1, size=4096, sha256="b" * 64, chunks=[block] * 4096)).encode()
+    )
+    original = Path.lstat
+    checked = []
+
+    def observed_lstat(self, *args, **kwargs):
+        checked.append(self)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", observed_lstat)
+    assert read_manifest(path)["size"] == 4096
+    assert len(checked) < 128
+
+
+@pytest.mark.parametrize("link_kind", ["symbolic", "hard"])
+def test_each_manifest_read_rechecks_block_links(tmp_path, link_kind):
+    import os
+
+    from app.modules.archive_payload import read_manifest, write_payload
+    from app.modules.archive_store import ArchiveStore
+
+    root = tmp_path / "ingestion"
+    path = root / "source/a/input.ndjson"
+    path.parent.mkdir(parents=True)
+    write_payload(path, [b"historical input"], ArchiveStore(root, min_free_bytes=0))
+    assert read_manifest(path)
+    block = next((root / ".payloads").rglob("*.gz"))
+    outside = tmp_path / "outside.gz"
+    outside.write_bytes(block.read_bytes())
+    block.unlink()
+    if link_kind == "symbolic":
+        block.symlink_to(outside)
+    else:
+        os.link(outside, block)
+    with pytest.raises(ValueError, match="ARCHIVE_PATH"):
+        read_manifest(path)

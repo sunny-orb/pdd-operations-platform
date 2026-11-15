@@ -254,3 +254,28 @@ def test_legacy_unverified_input_is_preserved_without_blocking_verified_files(sa
     orphan.write_bytes(b"keep until all verified")
     result = compact_archives(sales_pg, root)
     assert result["collected_blocks"] == 0 and orphan.is_file()
+
+
+def test_gc_checks_all_digest_metadata_before_decoding_any_payload(tmp_path, monkeypatch):
+    """缺可信摘要的小旧文件也应先禁止GC，不先解压前面的完整历史。"""
+    import app.modules.archive_compaction as compaction
+    from app.modules.archive_store import ArchiveStore, write_archive_stream
+
+    root = tmp_path / "ingestion"
+    policy(tmp_path)
+    verified = root / "source/a/input.ndjson"
+    write_archive_stream(verified, [b"verified history\n" * 10000])
+    unknown = root / "source/z/input.ndjson"
+    unknown.parent.mkdir(parents=True)
+    unknown.write_bytes(b"legacy without independent digest")
+    orphan = root / ".payloads/00" / ("0" * 64 + ".gz")
+    orphan.parent.mkdir(exist_ok=True)
+    orphan.write_bytes(b"retain until every input can be verified")
+
+    def unexpected_decode(*args, **kwargs):
+        raise AssertionError("GC decoded history before discovering missing digest metadata")
+
+    monkeypatch.setattr(compaction, "_verify", unexpected_decode)
+    result = compaction._compact_locked(ArchiveStore(root, min_free_bytes=0), 0, 20)
+    assert result["collected_blocks"] == 0 and result["unverified_files"] == 1
+    assert orphan.exists() and unknown.read_bytes() == b"legacy without independent digest"

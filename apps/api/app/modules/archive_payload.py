@@ -79,8 +79,32 @@ def read_block(root, item):
     return data
 
 
+def _checked_path(path, checked):
+    """只在一次读取或持归档锁的维护批次内复用路径检查，绝不跨调用持久缓存。"""
+    path = Path(path).absolute()
+    if ".." in path.parts:
+        raise ValueError("ARCHIVE_PATH")
+    item = path
+    while item not in checked:
+        try:
+            info = item.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if stat.S_ISLNK(info.st_mode) or (stat.S_ISREG(info.st_mode) and info.st_nlink != 1):
+                raise ValueError("ARCHIVE_PATH")
+        checked.add(item)
+        item = item.parent
+    return path
+
+
 def read_manifest(path):
-    path = safe(path)
+    """每次独立调用重新检查清单和所有块路径，重复引用只检查一次。"""
+    return _read_manifest(path, set())
+
+
+def _read_manifest(path, checked):
+    path = _checked_path(path, checked)
     with path.open("rb") as f:
         if f.read(len(MAGIC)) != MAGIC:
             return None
@@ -101,7 +125,10 @@ def read_manifest(path):
         or len(m["chunks"]) > MAX_BLOCKS
     ):
         raise ValueError("ARCHIVE_MANIFEST")
-    block_path(payload_root(path), m["sha256"])
+    digests = set()
+    if not isinstance(m["sha256"], str) or not re.fullmatch("[0-9a-f]{64}", m["sha256"]):
+        raise ValueError("ARCHIVE_MANIFEST")
+    digests.add(m["sha256"])
     for item in m["chunks"]:
         if (
             not isinstance(item, dict)
@@ -110,9 +137,16 @@ def read_manifest(path):
             or not 0 < item["size"] <= MAX_CHUNK
         ):
             raise ValueError("ARCHIVE_MANIFEST")
-        block_path(payload_root(path), item["sha256"])
+        if not isinstance(item["sha256"], str) or not re.fullmatch("[0-9a-f]{64}", item["sha256"]):
+            raise ValueError("ARCHIVE_MANIFEST")
+        digests.add(item["sha256"])
     if sum(x["size"] for x in m["chunks"]) != m["size"]:
         raise ValueError("ARCHIVE_MANIFEST")
+    root = next((p for p in path.parents if p.name in ("ingestion", "scoring")), None)
+    if root is None:
+        raise ValueError("ARCHIVE_PATH")
+    for digest in digests:
+        _checked_path(root / ".payloads" / digest[:2] / (digest + ".gz"), checked)
     return m
 
 

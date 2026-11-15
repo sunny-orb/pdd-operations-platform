@@ -8,7 +8,7 @@ from pathlib import Path
 
 import sqlalchemy as sa
 
-from app.modules.archive_payload import PAYLOADS, read_manifest, safe, write_payload
+from app.modules.archive_payload import PAYLOADS, _checked_path, _read_manifest, safe, write_payload
 from app.modules.archive_store import _verify, store_for
 
 MIN_PAYLOAD = 256 * 1024
@@ -33,13 +33,14 @@ def _identity(connection, root):
         raise ValueError("ARCHIVE_IDENTITY")
 
 
-def _expected(path, deadline=None):
+def _expected_metadata(path):
+    """只读可信摘要位置；GC先确认全部输入可鉴真，再解码任何大文件。"""
     sidecar = safe(path.with_name(path.name + ".sha256"))
     if sidecar.is_file():
         expected = sidecar.read_text().strip()
         if not re.fullmatch("[0-9a-f]{64}", expected):
             raise ValueError("ARCHIVE_CHECKSUM")
-        return expected
+        return expected, False
     import json
 
     if path.name == "input.ndjson":
@@ -47,7 +48,7 @@ def _expected(path, deadline=None):
         expected = json.loads(policy.read_text()).get("input_sha256") if policy.is_file() else None
         if not expected:
             raise ValueError("ARCHIVE_RESTORE_REQUIRED")
-        return expected
+        return expected, False
     manifest = safe(path.parent / "manifest.json")
     expected = (
         json.loads(manifest.read_text()).get("files", {}).get(path.name)
@@ -56,8 +57,15 @@ def _expected(path, deadline=None):
     )
     if not expected:
         raise ValueError("ARCHIVE_RESTORE_REQUIRED")
-    _verify(path, expected, encoded_text=True, deadline=deadline)
-    return None
+    return expected, True
+
+
+def _expected(path, deadline=None):
+    expected, encoded_text = _expected_metadata(path)
+    if encoded_text:
+        _verify(path, expected, encoded_text=True, deadline=deadline)
+        return None
+    return expected
 
 
 def _compact_locked(store, max_files, max_seconds):
@@ -71,9 +79,11 @@ def _compact_locked(store, max_files, max_seconds):
     before = store.usage()  # 整棵项目归档拒绝符号/硬链接，先验证再修改。
     payloads = sorted(p for p in root.rglob("*") if p.name in PAYLOADS and p.is_file())
     plain = []
+    checked = set()
+    manifests = {}
     for path in payloads:
         budget()
-        manifest = read_manifest(path)
+        manifest = manifests[path] = _read_manifest(path, checked)
         if manifest is None and path.stat().st_size >= MIN_PAYLOAD:
             plain.append(path)
     # 先处理较小历史输入，释放配额后再处理大文件；最多一文件64MiB临时块。
@@ -106,28 +116,33 @@ def _compact_locked(store, max_files, max_seconds):
                 raise
         else:
             converted += 1
+            # 原子替换及新块改变了路径状态；只重读本次改变的清单。
+            checked.clear()
+            manifests[path] = _read_manifest(path, checked)
     # 所有已发布或失败批次的指针均纳入引用；不只看current，历史报告也完整保留。
     referenced = set()
-    for path in payloads:
-        budget()
-        manifest = read_manifest(path)
-        if manifest is not None:
-            referenced.update(item["sha256"] for item in manifest["chunks"])
+    if not unverified:
+        for manifest in manifests.values():
+            budget()
+            if manifest is not None:
+                referenced.update(item["sha256"] for item in manifest["chunks"])
     garbage = []
     blocks = root / ".payloads"
-    if blocks.exists():
+    if not unverified and blocks.exists():
         for path in sorted(blocks.rglob("*.gz")):
             budget()
-            safe(path)
+            _checked_path(path, checked)
             if not re.fullmatch("[0-9a-f]{64}", path.stem) or path.parent.name != path.stem[:2]:
                 raise ValueError("ARCHIVE_PATH")
             if path.stem not in referenced:
                 garbage.append(path)
     if garbage:
         # MAGIC/清单损坏可能伪装成明文；全体逻辑输入先按可信摘要验证，拒绝误删可恢复块。
+        expected_inputs = []
         for path in payloads:
+            budget()
             try:
-                expected = _expected(path, deadline)
+                expected, encoded_text = _expected_metadata(path)
             except ValueError as exc:
                 if str(exc) != "ARCHIVE_RESTORE_REQUIRED":
                     raise
@@ -135,8 +150,10 @@ def _compact_locked(store, max_files, max_seconds):
                 unverified.add(path)
                 garbage = []
                 break
-            if expected is not None:
-                _verify(path, expected, deadline=deadline)
+            expected_inputs.append((path, expected, encoded_text))
+        if garbage:
+            for path, expected, encoded_text in expected_inputs:
+                _verify(path, expected, encoded_text=encoded_text, deadline=deadline)
         budget()
         for path in garbage:
             path.unlink()

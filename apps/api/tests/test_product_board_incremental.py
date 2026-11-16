@@ -158,7 +158,7 @@ def test_window_merge_equals_full_and_keeps_old_version(
                         else new_end.replace(year=new_end.year - 1),
                         new_end.replace(year=new_end.year - 1),
                     ),
-                    (new_end - timedelta(days=29), new_end),
+                    (new_end, new_end),
                 )
     before = len(list(tmp_path.iterdir()))
     assert receive(store, source)["versions"] == second["versions"]
@@ -279,6 +279,57 @@ def test_full_historical_repair_does_not_relax_other_incremental_source(sales_pg
         )
 
 
+@pytest.mark.parametrize(
+    "code,raw_amount,column,table",
+    [
+        ("product_daily", "transaction_amount", "product_revenue", "product_daily_facts"),
+        ("product_promotion", "total_cost", "spend", "product_promotion_records"),
+    ],
+)
+def test_single_day_revision_and_weekly_repair_preserve_old_values(
+    sales_pg, tmp_path, monkeypatch, code, raw_amount, column, table
+):
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", "true")
+    source = Source(date(2026, 11, 12))
+    store = ProductBoardStore(sales_pg, tmp_path)
+    first = receive(store, source)
+    source.raw[code][0][raw_amount] = "30.00"
+    source.raw[code][1][raw_amount] = "20.00"
+    source.calls.clear()
+    daily = receive(store, source, selected=(code,))
+    assert source.calls == [(code, ((date(2026, 11, 12), date(2026, 11, 12)),))]
+
+    def amounts(version):
+        with sales_pg.connect() as c:
+            return dict(
+                c.execute(
+                    sa.text(
+                        f"SELECT source_row_key,{column} FROM read_{table} "
+                        "WHERE dataset_version_id=:v"
+                    ),
+                    {"v": version},
+                ).all()
+            )
+
+    original = amounts(first["versions"][code])
+    partial = amounts(daily["versions"][code])
+    assert partial == {**original, "2026-11-12": 30}
+    before = {
+        str(p.relative_to(tmp_path)): p.stat().st_size for p in tmp_path.rglob("*") if p.is_file()
+    }
+    assert receive(store, source, selected=(code,))["versions"] == daily["versions"]
+    assert before == {
+        str(p.relative_to(tmp_path)): p.stat().st_size for p in tmp_path.rglob("*") if p.is_file()
+    }
+    full = receive(store, source, selected=(code,), full_sources=(code,))
+    assert amounts(full["versions"][code]) == {**partial, "2026-11-11": 20}
+    assert amounts(first["versions"][code]) == original
+    # 只约束其他上游来源；派生资料关系须重新绑定本次相容输入版本。
+    for other in TABLES:
+        if other != code:
+            assert full["versions"][other] == first["versions"][other]
+
+
 def test_producer_change_creates_one_version_then_noop(sales_pg, tmp_path, monkeypatch):
     from app.modules.product_board import storage
     from app.modules.product_board.source import fingerprint
@@ -331,7 +382,7 @@ def test_changed_profile_relationship_is_not_false_noop(sales_pg, tmp_path, monk
     assert len(list(tmp_path.iterdir())) == before
 
 
-def test_slower_selected_promotion_preserves_verified_coverage(sales_pg, tmp_path):
+def test_slower_promotion_keeps_coverage_and_defers_older_correction_to_full(sales_pg, tmp_path):
     source = Source(date(2026, 11, 12))
     source.raw["product_promotion"] = [
         r for r in source.raw["product_promotion"] if r["dt"] <= "2026-11-10"
@@ -342,6 +393,10 @@ def test_slower_selected_promotion_preserves_verified_coverage(sales_pg, tmp_pat
     source.raw["product_promotion"][0]["total_cost"] = "9.99"
     second = receive(store, source, selected=("product_promotion",))
     assert second["end"] == "2026-11-12"
+    assert second["versions"] == first["versions"]
+    second = receive(
+        store, source, selected=("product_promotion",), full_sources=("product_promotion",)
+    )
     assert second["versions"]["product_daily"] == first["versions"]["product_daily"]
     with sales_pg.connect() as c:
         assert (

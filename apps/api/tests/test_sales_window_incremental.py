@@ -104,18 +104,57 @@ def archive_bytes(root):
 
 
 @pytest.mark.parametrize("code", CODES)
+def test_single_day_corrects_latest_and_defers_older_revision_to_full(sales_pg, tmp_path, code):
+    from app.modules.sales.window_incremental import receive_sales_window
+
+    original = [row(code, "older", "2026-11-11"), row(code, "latest", "2026-11-12")]
+    first = publish(sales_pg, tmp_path, code, original)
+    upstream = [row(code, "older", "2026-11-11", "2"), row(code, "latest", "2026-11-12", "3")]
+    windows = []
+    store = store_for(sales_pg, tmp_path, code)
+
+    def read(window):
+        windows.append(window)
+        return normalize(
+            code,
+            [r for r in upstream if window.start <= date.fromisoformat(r["dt"]) <= window.end],
+            window,
+        )
+
+    daily = store.run(lambda hb: receive_sales_window(store, read, heartbeat=hb))
+    assert windows[-1].start == windows[-1].end == date(2026, 11, 12)
+    assert values(sales_pg, code, daily.version_id) == {
+        "older": Decimal("1"),
+        "latest": Decimal("3"),
+    }
+    before = archive_bytes(tmp_path)
+    assert store.run(lambda hb: receive_sales_window(store, read, heartbeat=hb)).reused
+    assert archive_bytes(tmp_path) == before
+    full = store.run(lambda hb: receive_sales_window(store, read, heartbeat=hb, full=True))
+    assert windows[-1] == scope(code)
+    assert values(sales_pg, code, full.version_id) == {
+        "older": Decimal("2"),
+        "latest": Decimal("3"),
+    }
+    assert values(sales_pg, code, first.version_id) == {
+        "older": Decimal("1"),
+        "latest": Decimal("1"),
+    }
+
+
+@pytest.mark.parametrize("code", CODES)
 def test_window_equals_full_preserves_history_and_repeat_does_not_grow(sales_pg, tmp_path, code):
     historic = "2025-10-20" if code in PROMOTION_CODES else "2026-08-24"
-    old = [row(code, "old", historic), row(code, "recent", "2026-10-20")]
+    old = [row(code, "old", historic), row(code, "recent", "2026-11-11")]
     initial = publish(sales_pg, tmp_path, code, old, "2026-11-11")
-    delta = [row(code, "recent", "2026-10-20", "2.00"), row(code, "new", "2026-11-12", "3.00")]
+    delta = [row(code, "new", "2026-11-12", "3.00")]
     windows = []
     result = receive(sales_pg, tmp_path, code, delta, windows=windows)
-    assert windows[0].start == date(2026, 10, 14)
+    assert windows[0].start == date(2026, 11, 12)
     assert type(windows[0]) is type(scope(code))
     assert values(sales_pg, code, result.version_id) == {
         "old": Decimal("1"),
-        "recent": Decimal("2"),
+        "recent": Decimal("1"),
         "new": Decimal("3"),
     }
     assert values(sales_pg, code, initial.version_id) == {
@@ -124,9 +163,9 @@ def test_window_equals_full_preserves_history_and_repeat_does_not_grow(sales_pg,
     }
     assert (
         restore_candidate(tmp_path / result.version_id).rows
-        == normalize(code, [old[0], *delta], scope(code)).rows
+        == normalize(code, [*old, *delta], scope(code)).rows
     )
-    full = publish(sales_pg, tmp_path, code, [old[0], *delta])
+    full = publish(sales_pg, tmp_path, code, [*old, *delta])
     assert full.version_id == result.version_id and full.reused
     before = archive_bytes(tmp_path)
     for _ in range(2):
@@ -159,8 +198,8 @@ def test_bootstrap_gap_catchup_and_full_historical_repair(sales_pg, tmp_path, co
     assert windows == [scope(code)]
     publish(sales_pg, tmp_path, code, old, "2026-09-01")
     windows.clear()
-    receive(sales_pg, tmp_path, code, [old[1], row(code, "new", "2026-09-15")], windows=windows)
-    assert windows[0].start == date(2026, 8, 3)
+    receive(sales_pg, tmp_path, code, [row(code, "new", "2026-09-15")], windows=windows)
+    assert windows[0].start == date(2026, 9, 2)
     repaired = [row(code, "old", historic, "9"), old[1], row(code, "new", "2026-09-15")]
     windows.clear()
     final = receive(sales_pg, tmp_path, code, repaired, full=True, windows=windows)
@@ -173,17 +212,20 @@ def test_bootstrap_gap_catchup_and_full_historical_repair(sales_pg, tmp_path, co
 @pytest.mark.parametrize("code", CODES)
 @pytest.mark.parametrize("change", ("missing", "day", "historical_move", "shop"))
 def test_unexplained_missing_or_identity_moves_keep_current(sales_pg, tmp_path, code, change):
-    old = [row(code, "old", "2026-08-24"), row(code, "recent", "2026-10-20")]
+    old = [row(code, "old", "2026-08-24"), row(code, "recent", "2026-11-12")]
     initial = publish(sales_pg, tmp_path, code, old)
     if change == "missing":
         changed = [row(code, "new", "2026-11-12")]
     elif change == "day":
         changed = [row(code, "recent", "2026-10-21")]
     elif change == "historical_move":
-        changed = [row(code, "old", "2026-10-21"), old[1]]
+        changed = [
+            row(code, "old", "2026-11-12", shop_id="799193231", shop_name=SHOPS["799193231"][1]),
+            old[1],
+        ]
     else:
         changed = [
-            row(code, "recent", "2026-10-20", shop_id="799193231", shop_name=SHOPS["799193231"][1])
+            row(code, "recent", "2026-11-12", shop_id="799193231", shop_name=SHOPS["799193231"][1])
         ]
     with pytest.raises(SalesError):
         receive(sales_pg, tmp_path, code, changed)
@@ -203,9 +245,9 @@ def test_unexplained_missing_or_identity_moves_keep_current(sales_pg, tmp_path, 
 
 def test_shop_region_id_cannot_change_region(sales_pg, tmp_path):
     code = "shop_regions"
-    publish(sales_pg, tmp_path, code, [row(code, "recent", "2026-10-20")])
+    publish(sales_pg, tmp_path, code, [row(code, "recent", "2026-11-12")])
     with pytest.raises(SalesError, match="SOURCE_KEY_MOVED"):
-        receive(sales_pg, tmp_path, code, [row(code, "recent", "2026-10-20", province="江苏")])
+        receive(sales_pg, tmp_path, code, [row(code, "recent", "2026-11-12", province="江苏")])
 
 
 @pytest.mark.parametrize("code", PROMOTION_CODES)
@@ -272,7 +314,7 @@ def test_reader_empty_policy_stability_and_default_rejection(code):
     with pytest.raises(SalesError, match="SOURCE_NO_RECORDS"):
         read(reader_for(lambda *args: []))
     assert read(reader_for(lambda *args: []), allow_empty=True).rows == ()
-    scans = iter(([], [row(code, "recent", "2026-10-20")]) * 2)
+    scans = iter(([], [row(code, "recent", "2026-11-12")]) * 2)
     with pytest.raises(SalesError, match="SOURCE_CHANGED_DURING_READ"):
         read(reader_for(lambda *args: next(scans)), allow_empty=True)
 
@@ -291,7 +333,7 @@ def test_project_runtime_ordinary_and_explicit_full_keep_approved_scope(
     paths = paths_for(tmp_path)
     root = paths.ingestion_root / code
     historic = "2025-10-20" if code in PROMOTION_CODES else "2026-08-24"
-    rows = [row(code, "old", historic), row(code, "recent", "2026-10-20")]
+    rows = [row(code, "old", historic), row(code, "recent", "2026-11-12")]
     initial = publish(sales_pg, root, code, rows)
     windows = []
 
@@ -316,7 +358,7 @@ def test_project_runtime_ordinary_and_explicit_full_keep_approved_scope(
     monkeypatch.setattr(shop_daily, "ShopDailyReader", Reader)
     result = build_steps(sales_pg, paths, lambda: "test-only")[code]()
     assert result["version_id"] == initial.version_id
-    assert windows[-1].start == date(2026, 10, 14)
+    assert windows[-1].start == date(2026, 11, 12)
     rows[0] = row(code, "old", historic, "8")
     full = build_steps(sales_pg, paths, lambda: "test-only", reconcile_sources=(code,))[code]()
     assert windows[-1] == scope(code)

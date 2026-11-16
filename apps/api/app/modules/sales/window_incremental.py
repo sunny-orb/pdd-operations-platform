@@ -16,7 +16,8 @@ from .normalization import fingerprint, normalize_shop_daily
 from .source_normalization import normalize_source
 from .source_policy import MAX_ROWS
 
-LOOKBACK_DAYS = 30
+# 普通接收只重查最新业务日；更早修订由批准的周对账发现，不视为修改游标。
+LOOKBACK_DAYS = 1
 SALES_INCREMENTAL_SOURCES = frozenset(
     {
         "shop_daily",
@@ -48,7 +49,7 @@ def receive_sales_window(store, read, *, heartbeat=lambda: None, full=False, row
     """在store.run来源锁内接收；read稳定双读，返回可独立重放的完整候选。
 
     周对账/无基线读完整批准范围；普通接收只替换回看窗口，缺键和跨日移键拒绝。
-    已验证范围取归档窗口，不用最大业务日期推定齐数；断档扩大到旧窗口末尾回看。
+    已验证范围取归档窗口，不用最大业务日期推定齐数；断档补齐旧窗口之后的日期。
     """
     if store.code not in SALES_INCREMENTAL_SOURCES:
         raise SalesError("INVALID_INCREMENTAL_DATASET")
@@ -95,7 +96,7 @@ def receive_sales_window(store, read, *, heartbeat=lambda: None, full=False, row
             raise SalesError("INCREMENTAL_BASELINE_SCOPE_MISMATCH")
         start = max(approved.start, approved.end - timedelta(days=LOOKBACK_DAYS - 1))
         if baseline.window.end < start:
-            start = max(approved.start, baseline.window.end - timedelta(days=LOOKBACK_DAYS - 1))
+            start = max(approved.start, baseline.window.end + timedelta(days=1))
         window = type(approved)(start, approved.end, approved.shop_ids)
     heartbeat()
     incoming = read(window)

@@ -1,4 +1,4 @@
-"""30日接收保留历史、对账与失败恢复；来源合成，发布使用真实PostgreSQL。"""
+"""单日接收保留历史、对账与失败恢复；来源合成，发布使用真实PostgreSQL。"""
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -65,28 +65,28 @@ def test_incremental_equals_full_and_old_version_stays_readable(
     sales_pg, tmp_path, monkeypatch, shared
 ):
     monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(shared).lower())
-    old = [row("old", "2026-08-24"), row("recent", "2026-10-20")]
+    old = [row("old", "2026-08-24"), row("recent", "2026-11-11")]
     first = publish(sales_pg, tmp_path, old, scope("2026-11-11"))
-    delta = [row("recent", "2026-10-20", "80.25"), row("new", "2026-11-12", "10")]
+    delta = [row("new", "2026-11-12", "10")]
     windows = []
     result = incremental(sales_pg, tmp_path, delta, windows=windows)
-    assert windows == [ReadWindow(date(2026, 10, 14), date(2026, 11, 12), tuple(SHOPS))]
+    assert windows == [ReadWindow(date(2026, 11, 12), date(2026, 11, 12), tuple(SHOPS))]
     assert values(sales_pg, result.version_id) == {
         "old": Decimal("100.01"),
-        "recent": Decimal("80.25"),
+        "recent": Decimal("100.01"),
         "new": Decimal("10"),
     }
     assert values(sales_pg, first.version_id) == {
         "old": Decimal("100.01"),
         "recent": Decimal("100.01"),
     }
-    full = publish(sales_pg, tmp_path, [old[0], *delta])
+    full = publish(sales_pg, tmp_path, [*old, *delta])
     assert full.version_id == result.version_id and full.reused
     from app.modules.sales.archive_replay import restore_candidate
 
     assert (
         restore_candidate(tmp_path / str(result.version_id)).rows
-        == normalize_source("product_regions", [old[0], *delta], scope()).rows
+        == normalize_source("product_regions", [*old, *delta], scope()).rows
     )
     assert incremental(sales_pg, tmp_path, delta).version_id == result.version_id
 
@@ -97,11 +97,11 @@ def test_incremental_equals_full_and_old_version_stays_readable(
         [],
         [row("new", "2026-11-12")],
         [row("recent", "2026-10-21")],
-        [row("old", "2026-10-21"), row("recent", "2026-10-20")],
+        [row("old", "2026-10-21"), row("recent", "2026-11-12")],
     ],
 )
 def test_missing_or_moved_keys_preserve_previous(sales_pg, tmp_path, changed):
-    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-10-20")])
+    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-11-12")])
     with pytest.raises(SalesError):
         incremental(sales_pg, tmp_path, changed)
     with sales_pg.connect() as c:
@@ -124,18 +124,16 @@ def test_bootstrap_and_long_outage_expand_window(sales_pg, tmp_path):
     # 独立旧基线模拟停机：不能从最新事实最大日期猜已经验证到哪一天。
     old = publish(sales_pg, tmp_path, [row("old", "2026-08-24")], scope("2026-09-01"))
     windows.clear()
-    result = incremental(
-        sales_pg, tmp_path, [row("old", "2026-08-24"), row("gap", "2026-09-15")], windows=windows
-    )
-    assert windows[0].start == date(2026, 8, 3)
+    result = incremental(sales_pg, tmp_path, [row("gap", "2026-09-15")], windows=windows)
+    assert windows[0].start == date(2026, 9, 2)
     assert values(sales_pg, old.version_id) == {"old": Decimal("100.01")}
     assert "gap" in values(sales_pg, result.version_id)
 
 
 def test_full_reconciliation_corrects_old_dates_but_rejects_unexplained_removal(sales_pg, tmp_path):
-    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-10-20")])
+    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-11-12")])
     windows = []
-    corrected = [row("old", "2026-08-24", "20"), row("recent", "2026-10-20")]
+    corrected = [row("old", "2026-08-24", "20"), row("recent", "2026-11-12")]
     result = incremental(sales_pg, tmp_path, corrected, full=True, windows=windows)
     assert windows == [scope()]
     assert values(sales_pg, result.version_id)["old"] == Decimal("20")
@@ -186,7 +184,7 @@ def test_project_entry_uses_window_and_weekly_entry_uses_full(sales_pg, tmp_path
     monkeypatch.setattr("app.modules.sales.storage.approved_window", lambda code=None: scope())
     paths = paths_for(tmp_path)
     root = paths.ingestion_root / "product_regions"
-    original = [row("old", "2026-08-24"), row("recent", "2026-10-20")]
+    original = [row("old", "2026-08-24"), row("recent", "2026-11-12")]
     first = publish(sales_pg, root, original)
     windows = []
 
@@ -209,7 +207,7 @@ def test_project_entry_uses_window_and_weekly_entry_uses_full(sales_pg, tmp_path
     monkeypatch.setattr(sales_sources, "SalesSourceReader", Reader)
     result = build_steps(sales_pg, paths, lambda: "test-only")["product_regions"]()
     assert result["version_id"] == first.version_id
-    assert windows[-1].start == date(2026, 10, 14)
+    assert windows[-1].start == date(2026, 11, 12)
     original[0] = row("old", "2026-08-24", "15")
     result = build_steps(sales_pg, paths, lambda: "test-only", reconcile_product_regions=True)[
         "product_regions"
@@ -228,9 +226,9 @@ def test_project_entry_uses_window_and_weekly_entry_uses_full(sales_pg, tmp_path
 def test_baseline_changed_before_publish_does_not_replace_new_head(sales_pg, tmp_path):
     from app.modules.sales.product_regions_incremental import receive_product_regions
 
-    initial = [row("old", "2026-08-24"), row("recent", "2026-10-20")]
+    initial = [row("old", "2026-08-24"), row("recent", "2026-11-12")]
     first = publish(sales_pg, tmp_path, initial)
-    newer = publish(sales_pg, tmp_path, [initial[0], row("recent", "2026-10-20", "42")])
+    newer = publish(sales_pg, tmp_path, [initial[0], row("recent", "2026-11-12", "42")])
     with sales_pg.begin() as c:
         c.execute(
             sa.text(
@@ -245,7 +243,7 @@ def test_baseline_changed_before_publish_does_not_replace_new_head(sales_pg, tmp
     def receive(hb):
         candidate = receive_product_regions(
             store,
-            lambda w: normalize_source("product_regions", [row("recent", "2026-10-20", "99")], w),
+            lambda w: normalize_source("product_regions", [row("recent", "2026-11-12", "99")], w),
             heartbeat=hb,
         )
         with sales_pg.begin() as c:
@@ -274,7 +272,7 @@ def test_baseline_changed_before_publish_does_not_replace_new_head(sales_pg, tmp
 def test_source_failure_and_corrupt_baseline_leave_history(sales_pg, tmp_path):
     from app.modules.sales.product_regions_incremental import receive_product_regions
 
-    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-10-20")])
+    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-11-12")])
     store = ShopDailyStore(
         sales_pg, archive_root=tmp_path, approved=scope(), spec=SPECS["product_regions"]
     )
@@ -285,24 +283,24 @@ def test_source_failure_and_corrupt_baseline_leave_history(sales_pg, tmp_path):
     with pytest.raises(SalesError, match="SOURCE_CHANGED_DURING_READ"):
         store.run(lambda hb: receive_product_regions(store, broken, heartbeat=hb))
     assert (
-        incremental(sales_pg, tmp_path, [row("recent", "2026-10-20")]).version_id
+        incremental(sales_pg, tmp_path, [row("recent", "2026-11-12")]).version_id
         == first.version_id
     )
     (tmp_path / first.version_id / "input.ndjson").write_text("corrupt")
     with pytest.raises(ValueError, match="ARCHIVE_CHECKSUM"):
-        incremental(sales_pg, tmp_path, [row("recent", "2026-10-20")])
+        incremental(sales_pg, tmp_path, [row("recent", "2026-11-12")])
     assert len(values(sales_pg, first.version_id)) == 2
 
 
 def test_merged_candidate_obeys_total_source_limit(sales_pg, tmp_path, monkeypatch):
     from app.modules.sales import product_regions_incremental as incremental_module
 
-    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-10-20")])
+    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-11-12")])
     monkeypatch.setattr(incremental_module, "PRODUCT_REGION_SOURCE_MAX_ROWS", 2, raising=False)
     with pytest.raises(SalesError, match="SOURCE_ROW_LIMIT"):
-        incremental(sales_pg, tmp_path, [row("recent", "2026-10-20"), row("new", "2026-11-12")])
+        incremental(sales_pg, tmp_path, [row("recent", "2026-11-12"), row("new", "2026-11-12")])
     assert (
-        incremental(sales_pg, tmp_path, [row("recent", "2026-10-20")]).version_id
+        incremental(sales_pg, tmp_path, [row("recent", "2026-11-12")]).version_id
         == first.version_id
     )
 
@@ -365,7 +363,7 @@ def test_ordinary_status_continues_after_weekly_failure(sales_pg):
 def test_archive_replay_renews_lease_without_changing_candidate(sales_pg, tmp_path):
     from app.modules.sales.archive_replay import restore_candidate
 
-    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-10-20")])
+    first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-11-12")])
     beats = []
     candidate = restore_candidate(tmp_path / first.version_id, heartbeat=lambda: beats.append(1))
     assert beats
@@ -389,7 +387,7 @@ def test_archive_changed_during_replay_is_rejected(sales_pg, tmp_path, monkeypat
             reads += 1
             if reads == 2:
                 with original_open(path, "a") as stream:
-                    stream.write(canonical(row("added", "2026-10-20")) + "\n")
+                    stream.write(canonical(row("added", "2026-11-12")) + "\n")
         return original_open(path, mode, *args, **kwargs)
 
     monkeypatch.setattr(Path, "open", open_with_change)

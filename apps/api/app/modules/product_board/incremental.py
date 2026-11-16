@@ -14,7 +14,8 @@ from app.modules.database_residency import ensure_online
 from .source import TABLES, fingerprint, windows
 from .storage import FACT_TABLES, REVISION
 
-LOOKBACK_DAYS = 30
+# 普通接收重查最新业务日，旧日修订交给周对账；新进入的同比日期另行补读。
+LOOKBACK_DAYS = 1
 # 同一m1-board-v2-1指纹协议的三代已发布布局：原始、内容复用、窗口增量。
 # 仅接受完整的已知集合；不能以缺文件跳过校验，也不能导入执行归档代码。
 PRODUCER_LAYOUTS = (
@@ -128,7 +129,7 @@ def _merge(code, oldrows, incoming, periods, end):
 def receive_product_board(store, reader, selected=None, full_sources=(), heartbeat=lambda: None):
     """在store.run锁内调用；逐来源覆盖求差，返回完整规范化候选及共同接收末日。
 
-    普通读取当前30日和全部新进入批准范围的日期；断档从旧覆盖末尾回看。
+    普通读取最新业务日和全部新进入批准范围的日期；断档补齐旧覆盖之后的日期。
     完整对账仅放宽被明确选中的来源，资料始终使用完整必要快照。
     """
     selected = tuple(TABLES) if selected is None else tuple(selected)
@@ -177,7 +178,7 @@ def receive_product_board(store, reader, selected=None, full_sources=(), heartbe
                 old_end = baseline_ends[code]
                 start = end - timedelta(days=LOOKBACK_DAYS - 1)
                 if old_end < start:
-                    start = old_end - timedelta(days=LOOKBACK_DAYS - 1)
+                    start = old_end + timedelta(days=1)
                 days = approved - _days(windows(old_end, code))
                 days |= approved & _days(((start, end),))
                 periods[code] = _periods(days)

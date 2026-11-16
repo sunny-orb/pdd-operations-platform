@@ -1,6 +1,6 @@
 # 店铺改名兼容实施方案
 
-依据：[用户确认及来源证据](../source-evidence.md#shop-rename-20261116)、[身份契约](../data-contract.md#shop-rename-20261116)。2026-11-16用户已授权本地实现与验证，未授权生产发布。进度只记TODO，结果记当日validation。
+依据：[用户确认及来源证据](../source-evidence.md#shop-rename-20261116)、[身份契约](../data-contract.md#shop-rename-20261116)。2026-11-16用户先授权本地实现与验证，随后授权推送、上线与验收，并要求验收后清理线上部署备份和旧版本。进度只记TODO，结果记当日validation。
 
 ## 对象与边界
 
@@ -12,10 +12,10 @@ PostgreSQL沿现有shops，ID、created_at、status及关联均不改，不增�
 
 1. 在tests/test_shop_rename.py先增加回归：新旧RPA/飞书/JST输入归到原店且保留原名；混合名称同日重复被拒；未知名称不误收；查询标签统一新名。先运行确认新名失败，再实现。
 2. sales/source_policy.py维护规范名、已确认RPA别名和展示解析；datasets.py追加JST新别名。normalization.py/source_normalization.py校验用别名集合，aftersales.py/source_probes.py的SQL占位符按别名数量生成。六个业务店不会因七个别名变为七家。
-3. product_board/query.py、promotion/query.py及其版本定义使用规范展示名，销售/状态页沿SHOPS。SalesRatings移除旧简称；销售历史补齐审计及售后商品明细提示保留JST完整格式并使用新名，固定报告内容不重写。各域发布保留既有身份行，新行使用规范名；读取出口按ID展示规范名。
+3. product_board/query.py、promotion/query.py及其版本定义使用规范展示名，销售/状态页沿SHOPS。SalesRatings移除旧简称；销售历史补齐审计及售后商品明细提示保留JST完整格式并使用新名，固定报告内容不重写。数据状态已保存的历史覆盖groups在读取时按ID转换当前简称，正常/过期/失败结果的日期、状态及缺口数不变，库内摘要不回写。各域发布保留既有身份行，新行使用规范名；读取出口按ID展示规范名。
 4. sales/rename_archive.py只允许本次审查过的旧→当前解释器SHA256组合，重验旧政策、来源定义、映射和旧别名。旧内容指纹及PG生产者仍须匹配；重放保留旧事实名，增量合并后用当前规则发布。未来公式变化必须重新审查兼容对，不执行归档源码，不为改名重取全量上游。历史推广固定11条的派生来源名按旧映射恢复；10/30原版的窗口/预算配置按已核两文件摘要组合单独兼容，只用于历史推广，禁止混搭或扩到其他来源。
 5. 真实PG验证旧事实/资料链接/推广/销售读取统一名称、既有shops/ID/金额不变、重复发布幂等。前端覆盖简称，运行npm run check、npm test、npm run build；浏览器核验商品、推广、销售及状态显示。依赖全量历史事实的旧名称不批改，不重跑上游任务。
-6. 独立审查本次差异，修正问题；更新统一问题台账、契约、TODO及验证记录。仅提交本次完整目标，不推送/发布生产。
+6. 独立审查本次差异，修正问题；更新统一问题台账、契约、TODO及验证记录。按后续上线授权经CI/CD发布，实际接续与页面验收完成后精确清理部署副本。
 
 ## 验收重点
 

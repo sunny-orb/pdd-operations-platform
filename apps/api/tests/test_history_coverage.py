@@ -264,3 +264,48 @@ def test_product_history_coverage_preserves_shared_version_rows(sales_pg, tmp_pa
     official = next(group for group in coverage["groups"] if group["shop_id"] == "spigf")
     assert "2026-10-26" not in official["dates"]
     assert len(official["dates"]) == 29
+
+
+@pytest.mark.parametrize("state", ["gaps", "stale", "failed"])
+def test_saved_history_names_follow_shop_identity_without_rewriting_snapshot(sales_pg, state):
+    import copy
+    import json
+
+    from app.modules.data_status.history_coverage import binding, history_status
+    from app.modules.data_status.repository import read_status
+
+    saved = {
+        **binding("shop_daily", {}, NOW),
+        "state": state,
+        "checked_at": NOW.isoformat(),
+        "missing_count": 3,
+        "groups": [
+            {"shop_id": "spitztx", "shop_name": "童装童鞋店", "dates": ["2026-11-09"]},
+            {"shop_id": "spigf", "shop_name": "官方店", "dates": ["2026-11-09"]},
+            {"shop_id": "unknown", "shop_name": "未知店铺", "dates": ["2026-11-09"]},
+        ],
+    }
+    if state == "stale":
+        saved["window_end"] = "2026-11-08"
+    original = copy.deepcopy(saved)
+    result = history_status("shop_daily", saved, {}, NOW)
+    assert result["groups"][0]["shop_name"] == "青少年服饰店"
+    expected = copy.deepcopy(original)
+    expected["groups"][0]["shop_name"] = "青少年服饰店"
+    assert result == expected
+    assert saved == original
+
+    seed_checkpoint(sales_pg)
+    with sales_pg.begin() as c:
+        c.execute(
+            sa.text("UPDATE source_checkpoints SET platform_snapshot=CAST(:snapshot AS jsonb)"),
+            {"snapshot": json.dumps({"history": saved})},
+        )
+    data = read_status(sales_pg)["data"]
+    source = next(row for row in data["sources"] if row["id"] == "shop_daily")
+    assert source["history"]["groups"][0]["shop_name"] == "青少年服饰店"
+    assert source["history"]["checked_at"] == saved["checked_at"]
+    assert source["history"]["missing_count"] == 3
+    with sales_pg.connect() as c:
+        stored = c.scalar(sa.text("SELECT platform_snapshot->'history' FROM source_checkpoints"))
+    assert stored == original

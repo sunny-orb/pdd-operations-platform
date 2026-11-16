@@ -62,6 +62,15 @@ def history_status(
     expected = binding(code, heads, now, warehouse_times, feishu_times)
     if not saved:
         return dict(**expected, state="pending" if expected["inputs"] else "unavailable")
+    # 已存摘要不重写；缺口状态、日期和输入绑定沿原值，店名按既有身份展示当前简称。
+    if "groups" in saved:
+        saved = {
+            **saved,
+            "groups": [
+                {**group, "shop_name": SHOP_NAMES.get(group["shop_id"], group["shop_name"])}
+                for group in saved["groups"]
+            ],
+        }
     if saved.get("state") == "failed":
         return saved
     if any(saved.get(k) != v for k, v in expected.items()):

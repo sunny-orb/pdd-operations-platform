@@ -10,7 +10,7 @@
 | M3 店铺销售      | [首链、续段与目标](m3-sales-implementation.md)                                                                      |
 | M5 售后分析      | [报告、金额、分类与目标](m5-aftersales-implementation.md)                                                           |
 | M6 运营中心      | [四域复用与天气扩展](m6-overview-implementation.md)                                                                 |
-| 店铺身份改名     | [新旧别名接入、历史归档兼容与统一展示](shop-rename.md) |
+| 店铺身份改名     | [新旧别名接入、历史归档兼容与统一展示](shop-rename.md)                                                              |
 | 全项目同步       | [来源编排与一致性](project-sync-implementation.md)                                                                  |
 | AI能力规划       | [页面AI分析、项目问答与商品建议兜底草案](ai-assistance.md)（仅规划，规则待用户确认）                                |
 | 看板性能         | [API计算与复测](api-performance.md)、[全库索引](database-performance.md)、[前端请求与渲染](frontend-performance.md) |

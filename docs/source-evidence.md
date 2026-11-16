@@ -2444,7 +2444,6 @@ SQL连接握手版本5.1.0；在唯一已授权店铺表尝试限定1行的`SHOW
 
 结论：上述样本支持“已观察到新增日为主”，未观察到共同日期修订；不证明旧日永不回补、撤回或重新计算，也没有新增可靠修改游标、删除信号或完整批次承诺。当前不能将八源全部标为可无损缩到一天。商品日/推广还需要补读去年同期新进入的日期，停机后的遗漏日期也必须补齐。若选择单日加每周全范围对账，是接受旧日变化可能延迟到成功周对账才更新的策略取舍；周对账受限流失败时延迟还会延长，不能称为无影响替换。聚水潭状态型事实仍缺缩窗依据。缩小读取窗口与减少PG多版本物理副本是两件事，本轮未改变前述来源或存储结论。
 
-
 <a id="shop-rename-20261116"></a>
 
 ## 2026-11-16 青少年服饰店改名实查
@@ -2455,18 +2454,18 @@ SQL连接握手版本5.1.0；在唯一已授权店铺表尝试限定1行的`SHOW
 
 复用项目既有数仓ro连接，串行SELECT；窗口为2026-10-17（含）至2026-11-17（不含），只返回店铺ID/编码、名称、最早/最晚业务日期、行数，不取经营金额或个人信息。拼多多七表按shop_id=271470254及day筛选；JST两表先按用户给定新旧全名，再按查得的shop_code=11273433复核，均限定channel=拼多多。
 
-| 来源 | 实查名称 | 记录数 | 最新业务日 |
-| --- | --- | --- | --- |
-| bwd_rpa_pdd_product_detail_f | 旧拼多多名 | 1280 | 11/15 |
-| bwd_rpa_pdd_goods_report_promotion_detail_f | 旧拼多多名 | 528 | 11/15 |
-| ods_rpa_pdd_traffic_kanban_overview_f | 旧拼多多名 | 30 | 11/15 |
-| ods_rpa_pdd_evaluation_overview_f | 旧拼多多名 | 30 | 11/15 |
-| ods_rpa_pdd_product_promotion_overview_f | 旧拼多多名 | 30 | 11/15 |
-| bwd_rpa_pdd_region_sales_summary_pddht_f | 旧拼多多名 | 234 | 11/14 |
-| bwd_rpa_pdd_region_sales_summary_jst_f | 旧拼多多名 | 325 | 11/14 |
-| ud_1_dsyyxskb | 旧JST名，编码11273433 | 491 | 11/15 23:01:05 |
-| dwd_trd_sys_aftersale_order_detail_f | 旧JST名，编码11273433 | 238 | 11/15 21:12:52 |
-| 飞书销售日报tblISBHrFF4jFJqW | 新JST全名30条、旧名0条 | 30 | 11/15 |
+| 来源                                        | 实查名称               | 记录数 | 最新业务日     |
+| ------------------------------------------- | ---------------------- | ------ | -------------- |
+| bwd_rpa_pdd_product_detail_f                | 旧拼多多名             | 1280   | 11/15          |
+| bwd_rpa_pdd_goods_report_promotion_detail_f | 旧拼多多名             | 528    | 11/15          |
+| ods_rpa_pdd_traffic_kanban_overview_f       | 旧拼多多名             | 30     | 11/15          |
+| ods_rpa_pdd_evaluation_overview_f           | 旧拼多多名             | 30     | 11/15          |
+| ods_rpa_pdd_product_promotion_overview_f    | 旧拼多多名             | 30     | 11/15          |
+| bwd_rpa_pdd_region_sales_summary_pddht_f    | 旧拼多多名             | 234    | 11/14          |
+| bwd_rpa_pdd_region_sales_summary_jst_f      | 旧拼多多名             | 325    | 11/14          |
+| ud_1_dsyyxskb                               | 旧JST名，编码11273433  | 491    | 11/15 23:01:05 |
+| dwd_trd_sys_aftersale_order_detail_f        | 旧JST名，编码11273433  | 238    | 11/15 21:12:52 |
+| 飞书销售日报tblISBHrFF4jFJqW                | 新JST全名30条、旧名0条 | 30     | 11/15          |
 
 JST按编码复核另发现一条11/05 13:25:43售后记录，名称为`kk树-kocotree欢趣-配饰`，编码同为11273433。仅凭这次样本不能判定其同店别名、来源错误或其他原因；当前名称白名单不接收该行。本次不把它自动加入改名兼容范围，也不能宣称JST编码已经验证为全历史唯一身份。
 

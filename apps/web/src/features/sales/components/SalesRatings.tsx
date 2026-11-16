@@ -121,7 +121,7 @@ export const SalesRatings = memo(function SalesRatings({
               { shop_id: "spifs", display_name: "服饰店" },
               { shop_id: "spiyj", display_name: "雨具店" },
               { shop_id: "spixb", display_name: "箱包店" },
-              { shop_id: "spitztx", display_name: "童装童鞋店" },
+              { shop_id: "spitztx", display_name: "青少年服饰店" },
             ]
         ).map((s) => {
           const r = data?.data.latest.find((p) => p.shop_id === s.shop_id);

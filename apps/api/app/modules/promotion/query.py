@@ -11,7 +11,7 @@ from app.modules.product_board.filter_projection import level_group, matches_lev
 from app.modules.product_board.metrics import compare
 from app.modules.product_board.profile_rules import matches_keyword
 from app.modules.product_board.repository import BoardError
-from app.modules.sales.source_policy import SHOPS
+from app.modules.sales.source_policy import SHOPS, display_shop_name
 
 from .metrics import SPECS, product_metrics, store_metrics
 
@@ -102,7 +102,7 @@ def labels(repo, rows):
             listing_id=lid,
             shop_id=values[0]["source_shop_id"],
             product_id=values[0]["source_product_id"],
-            shop_name=values[0]["source_shop_name"],
+            shop_name=display_shop_name(values[0]["source_shop_id"], values[0]["source_shop_name"]),
             product_name=profile.get("product_name")
             or (next(iter(names)) if len(names) == 1 else None),
             category=profile.get("category"),
@@ -521,7 +521,7 @@ def days(repo, q):
                 dict(
                     date=r["date"],
                     shop_id=r["source_shop_id"],
-                    shop_name=r["source_shop_name"],
+                    shop_name=display_shop_name(r["source_shop_id"], r["source_shop_name"]),
                     channel=r["channel_code"],
                     channel_label=CHANNELS[r["channel_code"]],
                     # 历史行已在导入时确认来源；只缩短展示标签，不改生效来源和数值。

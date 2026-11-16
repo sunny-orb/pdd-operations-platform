@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .contracts import ReadWindow, SalesError, ShopDailyCandidate
-from .source_policy import CORE, METRICS, MISSING_MARKERS, POLICY_REVISION, SHOPS
+from .source_policy import CORE, METRICS, MISSING_MARKERS, POLICY_REVISION, SHOP_NAME_ALIASES, SHOPS
 
 
 def serializable(value):
@@ -57,7 +57,7 @@ def normalize_shop_daily(rows: list[dict], window: ReadWindow) -> ShopDailyCandi
         if not isinstance(metrics, dict):
             raise SalesError("SOURCE_JSON_INVALID")
         name = item.get("shop_name")
-        if name != SHOPS[source_shop][1]:
+        if name not in SHOP_NAME_ALIASES[source_shop]:
             raise SalesError("SOURCE_SHOP_NAME_CONFLICT")
         row = dict(
             source_record_id=record_id,

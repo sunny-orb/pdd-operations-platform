@@ -33,6 +33,9 @@ REFUND_SHOPS = dict(
     )
 )
 
+# 别名数量不等于店铺数量；旧事实与新接收记录都归到同一内部ID。
+REFUND_SHOPS["kk树-kocotree青少年服饰旗舰店-配饰"] = "spitztx"
+
 
 @dataclass(frozen=True)
 class DatasetSpec:

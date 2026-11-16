@@ -20,7 +20,8 @@ CODES = ("product_daily", "product_promotion", "profile_records", "profile_links
 DEFINITION_REVISION = (
     "m1-board-query-v1:"
     + hashlib.sha256(
-        b"".join(
+        Path(__file__).parents[1].joinpath("sales/source_policy.py").read_bytes()
+        + b"".join(
             Path(__file__).with_name(name).read_bytes()
             for name in (
                 "query.py",

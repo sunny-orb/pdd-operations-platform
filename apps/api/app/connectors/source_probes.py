@@ -31,7 +31,8 @@ def warehouse_query(code, end):
     start = end - timedelta(days=6)
     if code in ("jst_returns", "jst_sales"):
         column = "confirm_date" if code == "jst_returns" else "pay_time"
-        where = "channel=%s AND shop_name IN (%s,%s,%s,%s,%s,%s)"
+        placeholders = ",".join(["%s"] * len(REFUND_SHOPS))
+        where = f"channel=%s AND shop_name IN ({placeholders})"
         params = ("拼多多", *REFUND_SHOPS)
         if code == "jst_sales":
             where += " AND order_status IN (%s,%s)"

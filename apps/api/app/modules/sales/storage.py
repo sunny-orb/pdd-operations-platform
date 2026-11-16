@@ -499,6 +499,7 @@ def producer_sources():
         "modules/sales/product_regions_incremental.py",
         "modules/sales/window_incremental.py",
         "modules/sales/archive_replay.py",
+        "modules/sales/rename_archive.py",
         "modules/sales/promotion_history.py",
         "modules/sales/datasets.py",
         "modules/sales/source_normalization.py",

@@ -31,7 +31,8 @@ from app.modules.streaming_json import fingerprint
 class AftersalesReader(ProductBoardReader):
     def latest(self, code):
         time_col = "confirm_date" if code == "jst_returns" else "pay_time"
-        clause = "channel=%s AND shop_name IN (%s,%s,%s,%s,%s,%s)"
+        placeholders = ",".join(["%s"] * len(REFUND_SHOPS))
+        clause = f"channel=%s AND shop_name IN ({placeholders})"
         params = ("拼多多", *REFUND_SHOPS)
         if code != "jst_returns":
             clause += " AND order_status=%s"
@@ -56,7 +57,8 @@ class AftersalesReader(ProductBoardReader):
         projection = ",".join(
             f"CAST(s.`{c}` AS CHAR) AS `{c}`" if c in NUMBERS else f"s.`{c}`" for c in COLUMNS[code]
         )
-        clause = "s.channel=%s AND s.shop_name IN (%s,%s,%s,%s,%s,%s)"
+        placeholders = ",".join(["%s"] * len(REFUND_SHOPS))
+        clause = f"s.channel=%s AND s.shop_name IN ({placeholders})"
         params = ("拼多多", *REFUND_SHOPS)
         if code != "jst_returns":
             clause += " AND s.order_status=%s"

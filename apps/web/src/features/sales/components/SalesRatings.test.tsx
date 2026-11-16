@@ -176,7 +176,7 @@ it("趋势按本区选店更新列和缺失原因，全取消有提示，旧口�
   const details = panel.getByText("查看评分趋势明细").closest("details")!;
   expect(details.open).toBe(false);
   fireEvent.click(panel.getByText("查看评分趋势明细"));
-  for (const name of ["雨具店", "箱包店", "童装童鞋店"])
+  for (const name of ["雨具店", "箱包店", "青少年服饰店"])
     fireEvent.click(panel.getByRole("checkbox", { name }));
   const row = panel.getByRole("row", { name: /2026-11-01/ });
   expect(row.textContent).toContain("95.25");
@@ -188,12 +188,12 @@ it("趋势按本区选店更新列和缺失原因，全取消有提示，旧口�
   for (const checkbox of panel.getAllByRole("checkbox")) fireEvent.click(checkbox);
   expect(panel.getByRole("status").textContent).toContain("请选择店铺");
   expect(panel.queryByRole("table")).toBeNull();
-  fireEvent.click(panel.getByRole("checkbox", { name: "童装童鞋店" }));
+  fireEvent.click(panel.getByRole("checkbox", { name: "青少年服饰店" }));
   expect(panel.getByRole("status").textContent).toContain("暂无可绘制的评分");
   expect(panel.getByText("查看评分趋势明细").closest("details")!.open).toBe(true);
   expect(panel.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
     "日期",
-    "童装童鞋店",
+    "青少年服饰店",
   ]);
   expect(panel.getByRole("row", { name: /2026-11-01/ }).textContent).toContain("4.80（旧口径）");
 });

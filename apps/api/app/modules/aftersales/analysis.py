@@ -3,6 +3,9 @@
 import hashlib
 from decimal import Decimal
 
+from app.modules.sales.datasets import REFUND_SHOPS
+from app.modules.sales.source_policy import display_shop_name
+
 from .classification import compatible, enabled, observations
 from .metrics import groups, ratio, summarize
 from .query import METRICS, history_reports, reasons, report_totals, roles
@@ -100,7 +103,11 @@ def object_rows(repo, q, level):
             product=cell(
                 e.get("source_product_name"),
                 "；".join(
-                    str(e[k])
+                    str(
+                        f"kk树-{display_shop_name('spitztx', e[k])}-配饰"
+                        if k == "source_shop_name" and REFUND_SHOPS.get(e[k]) == "spitztx"
+                        else e[k]
+                    )
                     for k in (
                         "source_shop_name",
                         "source_subcategory",

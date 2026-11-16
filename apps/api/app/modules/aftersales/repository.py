@@ -45,7 +45,9 @@ COMMON_FIELDS = (
 
 def revision():
     return hashlib.sha256(
-        b"".join(
+        Path(__file__).parents[1].joinpath("sales/source_policy.py").read_bytes()
+        + Path(__file__).parents[1].joinpath("sales/datasets.py").read_bytes()
+        + b"".join(
             Path(__file__).with_name(n).read_bytes()
             for n in (
                 "repository.py",

@@ -9,7 +9,7 @@ from .contracts import ReadWindow, SalesError
 from .datasets import HISTORY_SPEC, REFUND_BASE
 from .normalization import fingerprint
 from .source_normalization import normalize_source, numeric
-from .source_policy import SHOPS
+from .source_policy import SHOPS, display_shop_name
 
 APPROVED = (
     ("799193231", "2026-02-21", "tbl8vvB4sSYPDyLM"),
@@ -135,7 +135,7 @@ def supplement_audit(warehouse, history, start=None, end=None, shops=None):
         result.append(
             dict(
                 shop_id=row["shop_id"],
-                shop_name=row["source_shop_name"],
+                shop_name=display_shop_name(row["shop_id"], row["source_shop_name"]),
                 date=str(day),
                 source=row["source_channel_label"],
                 source_url=link,

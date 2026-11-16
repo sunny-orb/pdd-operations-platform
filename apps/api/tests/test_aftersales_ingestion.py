@@ -759,7 +759,8 @@ def test_numeric_keyset_pagination_preserves_shorter_ids_and_string_projection(c
     assert scope_queries[0] == scope_queries[1]
     assert scope_queries[0][1][-2:] == (date(2026, 8, 29), date(2026, 10, 28))
     for query, params in queries:
-        assert "s.channel=%s" in query and "s.shop_name IN (%s,%s,%s,%s,%s,%s)" in query
+        assert "s.channel=%s" in query and "s.shop_name IN (%s,%s,%s,%s,%s,%s,%s)" in query
+        assert query.count("%s") == len(params)
         assert ("s.order_status=%s" in query) == (code != "jst_returns")
         if "COUNT(*)" not in query:
             assert "AND s.__id>%s ORDER BY s.__id" in query

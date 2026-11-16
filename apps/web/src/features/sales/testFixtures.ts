@@ -90,7 +90,7 @@ export function syntheticResponse(path: string) {
         };
 }
 
-export const syntheticNames = ["官方店", "户外店", "服饰店", "雨具店", "箱包店", "童装童鞋店"];
+export const syntheticNames = ["官方店", "户外店", "服饰店", "雨具店", "箱包店", "青少年服饰店"];
 export const syntheticAllShops = syntheticNames.map((display_name, i) => ({
   ...testMetrics,
   shop_id: ["spigf", "spihw", "spifs", "spiyj", "spixb", "spitztx"][i],

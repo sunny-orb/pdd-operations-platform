@@ -9,8 +9,20 @@ SHOPS = {
     "191467219": ("spifs", "kocotree儿童服饰旗舰店", "服饰店"),
     "343339448": ("spiyj", "kocotree旗舰店", "雨具店"),
     "990012831": ("spixb", "kocotree母婴玩具旗舰店", "箱包店"),
-    "271470254": ("spitztx", "kocotree童装童鞋旗舰店", "童装童鞋店"),
+    "271470254": ("spitztx", "kocotree青少年服饰旗舰店", "青少年服饰店"),
 }
+# 2026-11-16用户确认同店改名；来源原名保留，当前展示与接收别名分别负责。
+SHOP_NAME_ALIASES = {sid: (values[1],) for sid, values in SHOPS.items()}
+SHOP_NAME_ALIASES["271470254"] += ("kocotree童装童鞋旗舰店",)
+
+
+def display_shop_name(shop_id, source_name):
+    """输入既有平台/内部ID及来源名；仅改名店显示当前名，不改变事实或其他店。"""
+    if shop_id in ("271470254", "spitztx"):
+        return SHOPS["271470254"][1]
+    return source_name
+
+
 METRICS = {
     "成交金额": "shop_revenue",
     "店铺访客数": "shop_visitors",

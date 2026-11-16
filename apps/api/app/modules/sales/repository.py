@@ -3,6 +3,7 @@
 import hashlib
 import json
 from contextlib import contextmanager
+from pathlib import Path
 
 import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
@@ -45,7 +46,13 @@ def read_snapshot(engine, version=None):
             )
             token = hashlib.sha256(
                 json.dumps(
-                    {"inputs": versions, "promotion_rule": promotion_metrics.definition_revision()},
+                    {
+                        "inputs": versions,
+                        "promotion_rule": promotion_metrics.definition_revision(),
+                        "shop_names": hashlib.sha256(
+                            Path(__file__).with_name("source_policy.py").read_bytes()
+                        ).hexdigest(),
+                    },
                     sort_keys=True,
                 ).encode()
             ).hexdigest()

@@ -67,7 +67,8 @@ def receive_sales_window(store, read, *, heartbeat=lambda: None, full=False, row
         head = (
             c.execute(
                 sa.text("""
-            SELECT v.id,v.retained_input_ref,v.content_fingerprint FROM current_datasets d
+            SELECT v.id,v.retained_input_ref,v.content_fingerprint,v.producer_revision
+            FROM current_datasets d
             JOIN dataset_versions v ON v.id=d.version_id
             WHERE d.dataset_code=:code AND v.state='published'
         """),
@@ -85,7 +86,9 @@ def receive_sales_window(store, read, *, heartbeat=lambda: None, full=False, row
         source = Path(require_archive(head["retained_input_ref"]))
         for name in ("interpretation.json", "producer-source.json"):
             require_archive(source.parent / name)
-        baseline = restore_candidate(source.parent, heartbeat=heartbeat)
+        baseline = restore_candidate(
+            source.parent, heartbeat=heartbeat, expected_producer=head["producer_revision"]
+        )
         if baseline.fingerprint != head["content_fingerprint"]:
             raise SalesError("INCREMENTAL_BASELINE_MISMATCH")
         if (

@@ -15,15 +15,20 @@ from .normalization import fingerprint, normalize_shop_daily
 from .source_policy import PROMOTION_CODES, SHOPS
 
 
-def restore_candidate(folder: Path, *, heartbeat=lambda: None):
+def restore_candidate(folder: Path, *, heartbeat=lambda: None, expected_producer=None):
     """校验输入、生产者及解释指纹后重建候选；解释代码不相容时拒绝静默重算。"""
     folder = Path(folder)
     manifest = json.loads((folder / "interpretation.json").read_text())
     sources = json.loads((folder / "producer-source.json").read_text())
     if "sha256:" + fingerprint(sources) != manifest["producer_revision"]:
         raise SalesError("ARCHIVE_PRODUCER_MISMATCH")
-    if sources["modules/sales/normalization.py"] != Path(normalization.__file__).read_text():
-        raise SalesError("ARCHIVE_INTERPRETER_MISMATCH")
+    if expected_producer is not None and manifest["producer_revision"] != expected_producer:
+        raise SalesError("ARCHIVE_PRODUCER_MISMATCH")
+    legacy = sources["modules/sales/normalization.py"] != Path(normalization.__file__).read_text()
+    if legacy:
+        from .rename_archive import validate_legacy_interpretation
+
+        validate_legacy_interpretation(manifest, sources)
 
     def original_type(value):
         return Decimal(value["decimal"]) if set(value) == {"decimal"} else value
@@ -61,7 +66,7 @@ def restore_candidate(folder: Path, *, heartbeat=lambda: None):
         from . import source_normalization
         from .source_normalization import normalize_source
 
-        if (
+        if not legacy and (
             sources["modules/sales/source_normalization.py"]
             != Path(source_normalization.__file__).read_text()
         ):
@@ -70,7 +75,7 @@ def restore_candidate(folder: Path, *, heartbeat=lambda: None):
             from . import promotion_history
             from .promotion_history import normalize_history
 
-            if (
+            if not legacy and (
                 sources.get("modules/sales/promotion_history.py")
                 != Path(promotion_history.__file__).read_text()
             ):
@@ -81,6 +86,10 @@ def restore_candidate(folder: Path, *, heartbeat=lambda: None):
     else:
         candidate = normalize_shop_daily(rows, window)
     candidate = replace(candidate, source_metadata=manifest.get("source_metadata"))
+    if legacy:
+        from .rename_archive import restore_legacy_fingerprint
+
+        candidate = restore_legacy_fingerprint(candidate, code)
     if candidate.fingerprint != manifest["fingerprint"]:
         raise SalesError("ARCHIVE_INTERPRETATION_MISMATCH")
     return candidate

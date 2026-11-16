@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from .contracts import SalesError, ShopDailyCandidate
 from .datasets import EXTENDED_REVISION, PROMOTION_METRICS, REFUND_SHOPS, SPECS
 from .normalization import fingerprint
-from .source_policy import MISSING_MARKERS, SHOPS
+from .source_policy import MISSING_MARKERS, SHOP_NAME_ALIASES, SHOPS
 
 
 def numeric(value, *, negative=False, formula=False):
@@ -75,7 +75,10 @@ def normalize_source(code, rows, window, heartbeat=lambda: None):
             name, raw_date = item["店铺"], item.get("日期")
         else:
             source_shop = str(item.get("shop_id") or "")
-            if source_shop not in spec.shop_ids or item.get("shop_name") != SHOPS[source_shop][1]:
+            if (
+                source_shop not in spec.shop_ids
+                or item.get("shop_name") not in SHOP_NAME_ALIASES[source_shop]
+            ):
                 raise SalesError("SOURCE_SHOP_CONFLICT")
             if item.get("time_granularity") != "day":
                 raise SalesError("SOURCE_GRANULARITY_INVALID")

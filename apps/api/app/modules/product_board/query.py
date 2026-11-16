@@ -7,6 +7,8 @@ from functools import partial
 from itertools import chain
 from math import ceil
 
+from app.modules.sales.source_policy import display_shop_name
+
 from .actions import build_actions
 from .comparison import (
     METRIC_INPUTS,
@@ -78,7 +80,7 @@ def labels(rows, profiles):
             listing_id=lid,
             shop_id=values[0]["source_shop_id"],
             product_id=values[0]["source_product_id"],
-            shop_name=values[0]["source_shop_name"],
+            shop_name=display_shop_name(values[0]["source_shop_id"], values[0]["source_shop_name"]),
             product_name=p.get("product_name") or (next(iter(names)) if len(names) == 1 else None),
             category=p.get("category"),
             level=p.get("level"),
@@ -132,6 +134,7 @@ def new_product_catalog(repo, rows, profiles):
     missing = [lid for lid, p in profiles.items() if p.get("level") == "新品" and lid not in info]
     for identity in repo.listing_identities(missing) if missing else ():
         lid = identity["listing_id"]
+        identity["shop_name"] = display_shop_name(identity["shop_id"], identity["shop_name"])
         names = {
             item["shop_name"]
             for item in info.values()

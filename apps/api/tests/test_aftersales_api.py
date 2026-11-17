@@ -407,7 +407,8 @@ def test_comparison_text_preserves_rate_units_and_zero_base():
 
     assert comparison_text(Decimal("0.1234"), "percent") == "12.34%"
     assert change_text(Decimal("0.2"), Decimal("0.1"), "percent") == "+10.00个百分点"
-    assert change_text(Decimal("2"), Decimal("0"), "number") == "2；相对变化不可比"
+    assert change_text(Decimal("2"), Decimal("0"), "number") == "2（对比值是 0，算不出涨跌幅）"
+    assert change_text(Decimal("2"), Decimal("-1"), "number") == "3（对比值为负数，算不出涨跌幅）"
     assert change_text(None, Decimal("1"), "currency") is None
 
 
@@ -450,7 +451,7 @@ def test_unverified_focus_is_unavailable_not_zero_records(sales_pg):
         assert next(x["value"] for x in body["metrics"] if x["key"] == "records") is None
         table = client.get("/api/v1/aftersales/analysis?focus=quality&view=category").json()["data"]
         assert table["status"] == "rule_pending"
-        assert "不表示无问题" in table["scope_note"]
+        assert table["scope_note"] == "这份报告暂时无法按质量问题筛选。"
 
 
 def classified_returns(suffix="1"):

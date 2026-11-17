@@ -1,4 +1,11 @@
 import { formatFixedDecimal } from "../../shared/format/decimal";
+import type { Report } from "./contracts";
+
+export const reportTypeLabels: Record<Report["report_type"], string> = {
+  weekly: "周报",
+  monthly: "月报",
+  custom: "自定义",
+};
 /** 原值只作精确十进制展示；百分点字段已经是百分点，不再次乘100。 */
 export function formatValue(value: string | null | undefined, type = "number") {
   const fixed = formatFixedDecimal(

@@ -151,6 +151,49 @@ def test_publish_real_pg_totals_idempotence_yoy_and_failed_refresh(sales_pg, tmp
         assert repo.source_summary("j1_returns")["actual_inbound_amount"] == Decimal("20.1256")
 
 
+def test_summary_preserves_metrics_and_detail_retains_actions(sales_pg, tmp_path, monkeypatch):
+    from app.api import aftersales as api
+    from app.modules.aftersales.rpa_publisher import sync_rpa
+    from tests.test_aftersales_api import client_for
+
+    sync_rpa(sales_pg, lambda: delivery(date(2025, 11, 16), 100) + delivery(), tmp_path)
+    calculate = api.overview
+    calls = []
+
+    def counted(repo, q):
+        calls.append(repo.token)
+        return calculate(repo, q)
+
+    monkeypatch.setattr(api, "overview", counted)
+    with client_for(sales_pg) as client:
+        summary = client.get("/api/v1/aftersales/overview?detail=summary").json()["data"]
+        full = client.get("/api/v1/aftersales/overview?detail=full").json()["data"]
+        assert not summary["actions"] and full["actions"]
+        assert summary == {
+            **full,
+            "actions": [],
+            "category_actions": full["category_actions"][:3],
+            "style_actions": full["style_actions"][:3],
+        }
+        report = full["report"]["id"]
+        explicit = client.get("/api/v1/aftersales/overview", params={"report_id": report})
+        assert len(full["trend"]) == 2
+        assert explicit.json()["data"] == {
+            **full,
+            "trend": [point for point in full["trend"] if point["id"] == report],
+        }
+        assert len(calls) == 1
+        cache = client.app.state.aftersales_overview_cache
+        version, size = api.prewarm_aftersales_overview(sales_pg, cache, None)
+        assert size and len(calls) == 2
+        historical = full["trend"][0]["id"]
+        assert client.get(
+            "/api/v1/aftersales/overview", params={"report_id": historical}
+        ).is_success
+        assert len(calls) == 2
+        assert api.prewarm_aftersales_overview(sales_pg, cache, version) == (version, None)
+
+
 @pytest.mark.parametrize("sku", ["1", None])
 def test_rpa_style_groups_pair_by_native_codes_and_roll_up_skus(sku):
     from app.modules.aftersales.metrics import groups

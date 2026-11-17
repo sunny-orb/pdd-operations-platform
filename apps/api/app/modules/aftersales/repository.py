@@ -299,13 +299,15 @@ class Repository:
         }
         return result
 
-    def source_summary(self, role, report=None):
+    def source_summary(self, role, report=None, *, include_categories=False):
         """元信息/历史聚合只读取SQL汇总，不向Python装载全部经营行。"""
         report = report or self.report
         if not self.source_available(role, report):
             return None
         key = (report["id"], role)
-        if key in self._summaries:
+        if key in self._summaries and (
+            not include_categories or "categories" in self._summaries[key]
+        ):
             return self._summaries[key]
         src = self.inputs(report)[role]
         fields = (
@@ -317,6 +319,11 @@ class Repository:
             f"CASE WHEN COUNT({field})=COUNT(*) THEN SUM({field}) END AS {field}"
             for field in fields
         )
+        if include_categories:
+            sums += (
+                ",array_agg(DISTINCT source_product_category) "
+                "FILTER (WHERE source_product_category <> '') AS categories"
+            )
         value = dict(
             self.c.execute(
                 sa.text(
@@ -338,6 +345,20 @@ class Repository:
     def metadata(self):
         sources = []
         inputs = self.inputs()
+        rpa = self.is_rpa()
+        codes = {role: self.source_code(role) for role in ROLES}
+        jobs = {
+            role: "sync_rpa_aftersales" if rpa else "sync_" + code for role, code in codes.items()
+        }
+        tasks = {
+            task["job_code"]: task
+            for task in self.c.execute(
+                sa.text("""SELECT DISTINCT ON (job_code)
+                    job_code,status,started_at,finished_at,error_code FROM public.task_runs
+                    WHERE job_code=ANY(:jobs) ORDER BY job_code,queued_at DESC,id DESC"""),
+                dict(jobs=list(set(jobs.values()))),
+            ).mappings()
+        }
         heads = {
             r["dataset_code"]: dict(r)
             for r in self.c.execute(
@@ -346,35 +367,26 @@ class Repository:
                     "JOIN public.dataset_versions v ON v.id=d.version_id "
                     "WHERE v.state='published' AND d.dataset_code=ANY(:codes)"
                 ),
-                dict(codes=[self.source_code(role) for role in ROLES]),
+                dict(codes=list(codes.values())),
             ).mappings()
         }
-        for role, (code, _, label) in ROLES.items():
+        for role, (_, _, label) in ROLES.items():
             v = inputs.get(role)
-            rpa = self.is_rpa()
-            code = self.source_code(role)
-            job = "sync_rpa_aftersales" if rpa else "sync_" + code
-            task = (
-                self.c.execute(
+            code, job = codes[role], jobs[role]
+            task = tasks.get(job)
+            success = (
+                None
+                if v is None
+                else v["received_at"]
+                if rpa
+                else self.c.execute(
                     sa.text(
-                        "SELECT status,started_at,finished_at,error_code FROM public.task_runs "
-                        "WHERE job_code=:job ORDER BY queued_at DESC,id DESC LIMIT 1"
+                        "SELECT max(finished_at) FROM public.task_runs "
+                        "WHERE status='succeeded' AND job_code=:job AND result_version_id=:vid"
                     ),
-                    dict(job=job),
-                )
-                .mappings()
-                .first()
+                    dict(job=job, vid=v["id"]),
+                ).scalar_one_or_none()
             )
-            success = self.c.execute(
-                sa.text(
-                    "SELECT max(finished_at) FROM public.task_runs "
-                    "WHERE status='succeeded' AND job_code=:job AND result_version_id=:vid"
-                ),
-                dict(
-                    job=job,
-                    vid=self.report["dataset_version_id"] if rpa else v["id"] if v else None,
-                ),
-            ).scalar_one_or_none()
             summary = self.source_summary(role)
             available = summary is not None
             no_records = available and not summary["rows"]
@@ -393,7 +405,6 @@ class Repository:
                     "j3_cancelled_sales": "RPA已取消商品期间报表",
                 }[role]
                 note = "原表aftersales_reports_rpa；数值空白按业务确认计0，合计行已排除。"
-                success = v["received_at"] if v else None
             note += (
                 "完整性未确认；确认日期和支付日期不是同批订单。"
                 if available

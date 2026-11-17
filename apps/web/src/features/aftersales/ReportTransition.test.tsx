@@ -170,8 +170,10 @@ it.each(["observed", "failed_retained", "new_input_pending_report"])(
       expect(oldAlert.isConnected).toBe(true);
       expect(oldAlert.closest('[aria-hidden="true"]')).toBeTruthy();
     }
-    await act(async () => pending.get("r2/meta")!());
     await waitFor(() => expect(pending.has("r2/overview")).toBe(true));
+    expect(pending.has("r2/options")).toBe(true);
+    expect(pending.has("r2/analysis")).toBe(true);
+    await act(async () => pending.get("r2/meta")!());
     expect(oldRisk.isConnected).toBe(true);
     // 新目录尚未回来，旧目录仍允许快速改选；业务数据不混用。
     await choose("r3");

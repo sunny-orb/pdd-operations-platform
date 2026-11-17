@@ -1,4 +1,4 @@
-import { Empty, Table } from "antd";
+import { Button, Empty, Skeleton, Table } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import type { Action, Meta, Overview } from "./contracts";
 import { Metrics } from "./Metrics";
@@ -69,7 +69,19 @@ function riskEntries(items: Overview["category_risks"] = []) {
     }));
 }
 
-export function Details({ data, meta }: { data: Overview | undefined; meta?: Meta }) {
+export function Details({
+  data,
+  meta,
+  actionsPending = false,
+  actionsError = false,
+  retryActions,
+}: {
+  data: Overview | undefined;
+  meta?: Meta;
+  actionsPending?: boolean;
+  actionsError?: boolean;
+  retryActions?: () => void;
+}) {
   const sources = meta?.sources ?? [];
   const sourceNotes = [...new Set(sources.map((source) => source.note).filter(Boolean))];
   const riskMetrics = data?.risk_metrics;
@@ -174,38 +186,46 @@ export function Details({ data, meta }: { data: Overview | undefined; meta?: Met
           <div>
             <h2 id="aftersales-action-list">整改行动清单</h2>
           </div>
-          <span>{data?.actions.length ?? 0} 项</span>
+          {!actionsPending && !actionsError && <span>{data?.actions.length ?? 0} 项</span>}
         </div>
-        <Table
-          className="m5-action-table"
-          columns={columns}
-          dataSource={data?.actions ?? []}
-          rowKey="id"
-          size="small"
-          expandable={
-            data?.actions.some((row) => row.note)
-              ? {
-                  columnTitle: "依据",
-                  columnWidth: 48,
-                  rowExpandable: (row) => !!row.note,
-                  expandedRowRender: (row) => <p className="m5-row-notes">{row.note}</p>,
-                }
-              : undefined
-          }
-          scroll={{ x: 1230, y: 360 }}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: false,
-            hideOnSinglePage: true,
-          }}
-          locale={{
-            expand: "展开判断依据",
-            collapse: "收起判断依据",
-            emptyText: (
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前范围暂无行动建议" />
-            ),
-          }}
-        />
+        {actionsPending ? (
+          <div role="status" aria-label="正在读取整改清单">
+            <Skeleton active paragraph={{ rows: 3 }} />
+          </div>
+        ) : actionsError ? (
+          <Button onClick={retryActions}>重试读取整改清单</Button>
+        ) : (
+          <Table
+            className="m5-action-table"
+            columns={columns}
+            dataSource={data?.actions ?? []}
+            rowKey="id"
+            size="small"
+            expandable={
+              data?.actions.some((row) => row.note)
+                ? {
+                    columnTitle: "依据",
+                    columnWidth: 48,
+                    rowExpandable: (row) => !!row.note,
+                    expandedRowRender: (row) => <p className="m5-row-notes">{row.note}</p>,
+                  }
+                : undefined
+            }
+            scroll={{ x: 1230, y: 360 }}
+            pagination={{
+              pageSize: 10,
+              showSizeChanger: false,
+              hideOnSinglePage: true,
+            }}
+            locale={{
+              expand: "展开判断依据",
+              collapse: "收起判断依据",
+              emptyText: (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="当前范围暂无行动建议" />
+              ),
+            }}
+          />
+        )}
       </section>
       <section className="m5-stage-row">
         <div className="m5-panel">

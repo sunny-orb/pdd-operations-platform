@@ -139,15 +139,34 @@
   opacity: 0;
   pointer-events: none;
 }
+.m5-stable-content[data-retaining="true"] > .m5-retained-content {
+  visibility: visible;
+  opacity: 0.3;
+}
 .m5-loading-indicator {
   position: absolute;
-  inset: 24px 0 auto;
+  inset: 16px 16px auto;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
   color: var(--m5-muted);
   font-size: 13px;
+}
+.m5-stable-content[data-retaining="true"] > .m5-loading-indicator {
+  inset-inline: 0;
+  width: max-content;
+  margin-inline: auto;
+  border-radius: 6px;
+  background: #fff;
+  padding: 6px 10px;
+}
+.m5-loading-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
 }
 .m5-stable-content > .m5-retained-content > .m5-report-summary {
   margin-top: 4px;

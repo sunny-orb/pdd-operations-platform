@@ -70,6 +70,24 @@ def row_id(key):
     return hashlib.sha256(str(key).encode()).hexdigest()
 
 
+def missing_metric_note(key, metrics, returns):
+    if key in ("returned_qty", "inbound_amount"):
+        if not returns:
+            return "报表里没有这组退货记录。"
+        if key == "returned_qty":
+            return "有退货记录缺少实退数量。"
+        return "实际入库金额缺失或还没核实。"
+    if key == "gmv":
+        return "缺少可对应的已发货或已取消销售金额。"
+    denominator = metrics["shipped_amount" if key == "aftersale_rate" else "gmv"]
+    if denominator is not None and denominator <= 0:
+        amount = "实发金额" if key == "aftersale_rate" else "支付口径GMV"
+        return f"{amount}为 0 或负数，算不出退款率。"
+    if key == "presale_rate":
+        return "缺少可对应的已发货或已取消销售金额，算不出退款率。"
+    return "缺少可对应的退货或销售金额，算不出退款率。"
+
+
 def object_rows(repo, q, level):
     blocks = roles(repo, q)
     parameters = repo.classification_parameters()
@@ -78,14 +96,15 @@ def object_rows(repo, q, level):
     order_field = "inbound_amount" if whole["inbound_amount"] is not None else "returned_qty"
     all_values.sort(key=lambda r: (-(r["metrics"][order_field] or Decimal(0)), str(r["key"])))
     result = []
-    for rank, row in enumerate(all_values, 1):
+    offset = (q.page - 1) * q.size
+    for rank, row in enumerate(all_values[offset : offset + q.size], offset + 1):
         m = row["metrics"]
         e = row["example"]
         issues = observations(row["roles"][0], parameters)
         cells = {
             k: cell(
                 m.get(k),
-                "缺角色/缺记录/缺金额或组键不相容时不可计算。" if m.get(k) is None else None,
+                missing_metric_note(k, m, row["roles"][0]) if m.get(k) is None else None,
             )
             for k in (
                 "returned_qty",
@@ -99,7 +118,10 @@ def object_rows(repo, q, level):
         cells.update(
             category=cell(e.get("source_product_category") or "待核对品类"),
             rank=cell(rank),
-            style_code=cell(e.get("source_style_code"), "保留来源原款码，不按商品编码猜测。"),
+            style_code=cell(
+                e.get("source_style_code"),
+                "报表没提供款式编码。" if not e.get("source_style_code") else None,
+            ),
             product=cell(
                 e.get("source_product_name"),
                 "；".join(
@@ -114,17 +136,16 @@ def object_rows(repo, q, level):
                         "source_color_specification",
                     )
                     if e.get(k)
-                )
-                or "分组所需字段未齐，分母待核。",
+                ),
             ),
             qty_share=cell(ratio(m["returned_qty"], whole["returned_qty"])),
             amount_share=cell(ratio(m["inbound_amount"], whole["inbound_amount"])),
             reasons=cell(items=reasons(row["roles"][0], parameters)[:5]),
-            size=cell(items=issues["size_rows"], detail=issues["note"]),
-            quality=cell(items=issues["quality_rows"], detail=issues["note"]),
+            size=cell(items=issues["size_rows"]),
+            quality=cell(items=issues["quality_rows"]),
         )
         result.append(dict(id=row_id(row["key"]), cells=cells))
-    return result
+    return result, len(all_values)
 
 
 def comparison_text(value, kind):
@@ -145,22 +166,31 @@ def change_text(current, previous, kind):
         return f"{difference * 100:+.2f}个百分点"
     absolute = comparison_text(difference, kind)
     if previous <= 0:
-        return f"{absolute}；相对变化不可比"
-    return f"{absolute}；{difference / previous * 100:+.2f}%"
+        base = "是 0" if previous == 0 else "为负数"
+        return f"{absolute}（对比值{base}，算不出涨跌幅）"
+    return f"{absolute}（{difference / previous * 100:+.2f}%）"
 
 
 def comparison(repo, q):
     r = repo.report
     if not r:
-        return [], "尚无可用报告，无法比较。"
+        return [], 0, "当前没有可用的报告。"
     prefix = "yoy" if q.view == "yoy" else "previous"
     previous = repo.by_id.get(r[prefix + "_report_id"])
     if r[prefix + "_comparison_status"] != "available" or previous is None:
-        return [], r[prefix + "_comparison_reason"] or "比较报告不可用。"
+        label = "去年同期" if q.view == "yoy" else "上一期"
+        return [], 0, f"暂无可对比的{label}报告。"
+    rolling_weeks = all(
+        report["report_type"] == "weekly"
+        and (report["period_end"] - report["period_start"]).days == 29
+        for report in (r, previous)
+    )
     parameters = repo.classification_parameters()
     previous_parameters = repo.classification_parameters(previous)
-    now = summarize(*roles(repo, q), parameters=parameters)
-    old = summarize(*roles(repo, q, previous), parameters=previous_parameters)
+    current_blocks = roles(repo, q)
+    previous_blocks = roles(repo, q, previous)
+    now = summarize(*current_blocks, parameters=parameters)
+    old = summarize(*previous_blocks, parameters=previous_parameters)
     result = []
     for k, label, kind, _ in METRICS:
         if k == "records":
@@ -184,12 +214,15 @@ def comparison(repo, q):
                 ),
             )
         )
+    start = (q.page - 1) * q.size
+    stop = start + q.size
+    total = len(result)
+    result = result[start:stop]
     for level in ("category", "style"):
-        curr = {str(x["key"]): x for x in groups(roles(repo, q), level, parameters)}
-        prev = {
-            str(x["key"]): x for x in groups(roles(repo, q, previous), level, previous_parameters)
-        }
-        for key in sorted(set(curr) | set(prev)):
+        curr = {str(x["key"]): x for x in groups(current_blocks, level, parameters)}
+        prev = {str(x["key"]): x for x in groups(previous_blocks, level, previous_parameters)}
+        keys = sorted(set(curr) | set(prev))
+        for key in keys[max(0, start - total) : max(0, stop - total)]:
             a = curr.get(key)
             b = prev.get(key)
             am = a["metrics"]["inbound_amount"] if a else None
@@ -212,10 +245,13 @@ def comparison(repo, q):
                     ),
                 )
             )
+        total += len(keys)
     return (
         result,
-        f"比较实际期间 {previous['period_start']}—{previous['period_end']}，"
-        "完整组键配对；缺行不推断零。",
+        total,
+        f"对比 {previous['period_start']} 至 {previous['period_end']}。"
+        + ("两份周报都是滚动 30 天。" if rolling_weeks else "")
+        + "实际入库金额按同品类、同品类下的同款号比较。算不出的项显示 —。",
     )
 
 
@@ -235,21 +271,42 @@ def analysis(repo, q):
             if repo.is_rpa()
             else "只有销售记录时，退货数据显示 —"
         )
-        rows = object_rows(repo, q, q.view)
+        rows, total = object_rows(repo, q, q.view)
     elif q.view in ("mom", "yoy"):
-        rows, note = comparison(repo, q)
+        rows, total, note = comparison(repo, q)
         if q.view == "yoy":
             columns = [(k, "去年同期" if k == "previous" else label, t) for k, label, t in columns]
     elif q.view == "quality":
-        issues = observations(roles(repo, q)[0], parameters)
+        returns = roles(repo, q)[0]
+        issues = observations(returns, parameters)
         rows = [
             dict(id=row_id(r["name"]), cells={k: cell(v) for k, v in r.items()})
             for r in issues["quality_rows"]
         ]
-        note = issues["note"]
+        note = (
+            "按退货原因归类，占比按当前筛选的实退总件数计算。"
+            "同一记录可能归入多个细类，细类数量不能直接相加。"
+        )
+        if rows and any(
+            item["qty"] is None or item["share"] is None for item in issues["quality_rows"]
+        ):
+            note += "缺数量或实退总件数为 0 时，算不出的项显示 —。"
+        if not rows:
+            if not repo.report:
+                note = "当前没有可用的报告。"
+            elif not enabled(parameters, "quality"):
+                note = "这份报告暂时无法按质量问题分类。"
+            elif returns is None:
+                note = "缺少退货数据，暂时无法统计质量问题。"
+            elif not returns:
+                note = "当前筛选没有退货记录。"
+            elif issues["quality_qty"] is None:
+                note = "缺少可用的退货原因或数量，暂时无法统计。"
+            else:
+                note = "当前筛选的退货原因里没有识别到质量问题。"
     else:
         rows = []
-        note = "整份报告范围；品类、关键词、问题重点不改变历史报告总体，不把重叠期间相加。"
+        note = "这里展示整份报表的数据。重叠周期不能相加。"
         for r in history_reports(repo, q):
             m = report_totals(repo, r)
             pr = public_report(r)
@@ -261,15 +318,20 @@ def analysis(repo, q):
                 generated_at=cell(pr["generated_at"]),
             )
             rows.append(dict(id=r["id"], cells=cells))
+    if q.view in ("quality", "history"):
+        total = len(rows)
+        rows = rows[(q.page - 1) * q.size : q.page * q.size]
     pending_focus = q.focus != "all" and q.view != "history" and not enabled(parameters, q.focus)
-    if pending_focus:
-        note = "尺码/质量分类规则未核，此重点筛选不可计算；空列表不表示无问题。 " + note
+    if pending_focus and repo.report and (q.view not in ("mom", "yoy") or total):
+        focus = "尺码" if q.focus == "size" else "质量"
+        note = f"这份报告暂时无法按{focus}问题筛选。"
+    status = "rule_pending" if pending_focus else "observed_reference" if total else "unavailable"
     return dict(
-        status="rule_pending" if pending_focus else "observed_reference" if rows else "unavailable",
+        status=status,
         scope_note=note,
         columns=[dict(key=k, label=label, type=t) for k, label, t in columns],
-        rows=rows[(q.page - 1) * q.size : q.page * q.size],
-        total=len(rows),
+        rows=rows,
+        total=total,
         page=q.page,
         size=q.size,
     )

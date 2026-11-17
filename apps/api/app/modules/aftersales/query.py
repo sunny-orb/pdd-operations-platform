@@ -8,7 +8,7 @@ from .amounts import amount_details
 from .classification import classify_rows, enabled, observations
 from .decisions import decisions
 from .metrics import from_values, groups, identity, matches, ratio, summarize, total
-from .repository import ROLES, public_report
+from .repository import ROLES, BoardError, public_report
 
 
 @dataclass(frozen=True)
@@ -44,8 +44,10 @@ def roles(repo, q, report=None):
 
 
 def options(repo, q):
-    rows = repo.rows("j1_returns") or []
-    cats = sorted({r["source_product_category"] for r in rows if r.get("source_product_category")})
+    summary = repo.source_summary("j1_returns", include_categories=True)
+    if summary and summary["rows"] > 300000:
+        raise BoardError("REPORT_SCOPE_ROW_LIMIT", 503)
+    cats = sorted(summary["categories"] or []) if summary else []
     return dict(
         reports=[public_report(r) for r in repo.defaults],
         categories=cats,
@@ -280,6 +282,7 @@ def overview(repo, q):
             note="缺相容签收事件，不用总Q减来源拒收标记反推。",
         ),
     ]
+    computed = decisions(blocks, previous_blocks, parameters, previous_parameters)
     result = dict(
         report=public_report(report),
         metrics=metrics,
@@ -320,13 +323,12 @@ def overview(repo, q):
                 detail="没有相容比较或有效目标时不称改善/达标，不伪造整改效果。",
             ),
         ],
-        category_risks=risks("category"),
-        style_risks=risks("style"),
+        category_risks=[] if computed else risks("category"),
+        style_risks=[] if computed else risks("style"),
         category_actions=[],
         style_actions=[],
     )
 
-    computed = decisions(blocks, previous_blocks, parameters, previous_parameters)
     if computed is not None:
         result.update(computed)
         result["scope_note"] = (

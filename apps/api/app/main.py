@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException
 
+from app.api.aftersales import prewarm_aftersales_overview
 from app.api.aftersales import router as aftersales_router
 from app.api.data_status import router as data_status_router
 from app.api.product_board import prewarm_default_overview
@@ -56,7 +57,7 @@ async def run_overview_prewarm(engine, cache, prepare, label, limiter):
                     "%s预热 version=%s cached=%s bytes=%d elapsed_ms=%.2f",
                     label,
                     version,
-                    size <= cache.MAX_BYTES,
+                    size <= cache.max_bytes,
                     size,
                     (perf_counter() - started) * 1000,
                 )
@@ -103,6 +104,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "商品推广默认总览",
                         limiter,
                     )
+                    tasks.start_soon(
+                        run_overview_prewarm,
+                        application.state.engine,
+                        application.state.aftersales_overview_cache,
+                        prewarm_aftersales_overview,
+                        "售后默认报告",
+                        limiter,
+                    )
                     try:
                         yield
                     finally:
@@ -119,6 +128,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.product_overview_cache = DefaultOverviewCache()
     application.state.product_daily_overview_cache = DefaultOverviewCache()
     application.state.promotion_product_display_cache = DefaultOverviewCache()
+    application.state.aftersales_overview_cache = DefaultOverviewCache(
+        max_entries=8, max_bytes=1024 * 1024
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=configured.cors_origins,

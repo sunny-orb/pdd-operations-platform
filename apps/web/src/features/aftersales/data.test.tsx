@@ -226,7 +226,10 @@ it("分析标签和翻页只读取分析，品类筛选重查指标但复用同�
     return response(data);
   });
   vi.stubGlobal("fetch", fetch);
-  const { result } = renderHook(() => useAftersales(), { wrapper: wrapper() });
+  const { result, rerender } = renderHook((details: boolean) => useAftersales(details), {
+    wrapper: wrapper(),
+    initialProps: false,
+  });
   await waitFor(() =>
     expect(
       result.current.overview.isSuccess &&
@@ -234,6 +237,11 @@ it("分析标签和翻页只读取分析，品类筛选重查指标但复用同�
         result.current.analysis.isSuccess,
     ).toBe(true),
   );
+  expect(
+    fetch.mock.calls
+      .filter(([url]) => url.includes("/overview?"))
+      .map(([url]) => new URL(url, "http://localhost").searchParams.get("detail")),
+  ).toEqual(["summary"]);
   fetch.mockClear();
   act(() => result.current.change({ view: "style", page: 2, size: 50 }));
   await waitFor(() => expect(result.current.analysis.data?.data.page).toBe(2));
@@ -241,6 +249,16 @@ it("分析标签和翻页只读取分析，品类筛选重查指标但复用同�
     "/api/v1/aftersales/analysis",
   ]);
   fetch.mockClear();
+  act(() => result.current.change({ view: "category", page: 1, size: 25 }));
+  await waitFor(() => expect(result.current.analysis.data?.data.scope_note).toBe("category"));
+  expect(fetch).not.toHaveBeenCalled();
+  rerender(true);
+  await waitFor(() => expect(result.current.details.isSuccess).toBe(true));
+  expect(
+    fetch.mock.calls.map(([url]) => new URL(url, "http://localhost").searchParams.get("detail")),
+  ).toEqual(["full"]);
+  fetch.mockClear();
+  rerender(false);
   act(() => result.current.change({ category: "帽子" }));
   await waitFor(() => expect(fetch.mock.calls).toHaveLength(2));
   expect(fetch.mock.calls.every(([url]) => url.includes("category=%E5%B8%BD%E5%AD%90"))).toBe(true);

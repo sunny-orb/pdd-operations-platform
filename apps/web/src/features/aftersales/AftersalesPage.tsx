@@ -25,10 +25,10 @@ const sections = [
 ];
 /** 售后整页保留原型展示顺序；筛选移正文，共享导航不承载业务查询。 */
 export function AftersalesPage() {
-  const state = useAftersales();
   const [expanded, setExpanded] = useState(false);
+  const state = useAftersales(expanded);
   const data = state.overview.data?.data;
-  const meta = state.meta.data?.data;
+  const meta = state.meta.isPlaceholderData ? state.overview.data?.meta : state.meta.data?.data;
   const sourceFailed = meta?.sources.some(
     (source) =>
       source.error_code || ["failed_retained", "source_unavailable"].includes(source.status),
@@ -97,6 +97,7 @@ export function AftersalesPage() {
         </div>
         <StableContent
           pending={!state.meta.isError && (state.meta.isPending || state.overview.isPending)}
+          ready={Boolean(data)}
           label="正在更新报告…"
         >
           {(meta?.status === "source_unavailable" || sourceFailed || pendingReport) && (
@@ -157,7 +158,15 @@ export function AftersalesPage() {
                 {
                   key: "details",
                   label: "指标与整改明细",
-                  children: <Details data={data} meta={meta} />,
+                  children: expanded ? (
+                    <Details
+                      data={state.details.data?.data ?? data}
+                      meta={meta}
+                      actionsPending={!state.details.isError && state.details.isPending}
+                      actionsError={state.details.isError}
+                      retryActions={() => void state.details.refetch()}
+                    />
+                  ) : null,
                 },
               ]}
             />

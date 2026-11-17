@@ -1799,6 +1799,8 @@ full/display overview保留`roi_exclusions`兼容审计字段：`missing_spend_r
 
 四GET为`/api/v1/aftersales/meta`、`options`、`overview`、`analysis`。参数`report_id`可选（缺省最新，历史/趋势保留目录）、`data_version`固定目录/规则定义向量、`category/keyword/focus=all|size|quality`、`view=category|style|mom|yoy|quality|history`、`page>=1,size=25|50|100`。非法参数422，变版409，数据库不可用503；无来源仍返回明确source_unavailable及完整空结构。正常`data/meta`，金额/数量/比率为普通十进制字符串或NULL，结构计数为整数。percent为0—1原比例，change_pp为已换算百分点，不重复乘100。
 
+比较表总览仅显示指标自身的变化，品类和单款才使用对象级的总退款率变化、原因明细两列。总览对应格留空；无法计算的值用「—」，真实零保留。质量按报表退货原因归类，细类可能重复，占比分母为筛选范围的实退总件数。历史表只显示实际期间与报表总体数据。`generated_at` 继续返回平台封版时间，RPA 原表生成时间无记录。
+
 金额观察说明由`modules/aftersales/amounts.py`统一生成，只消费当前固定报告及当前筛选的PG规范行；已有Metric.detail显示已知小计、实际空值数量和本地映射/适用待核原因。已知观察小计与完整金额分开，缺输入、空筛选、全空和真实零分开；售前/售后/总率的说明分别只依赖S/P、A/S、A/S/P，不以A待核阻断已具备的售前率，也不把小计填入正式指标或重算正式率。查询定义指纹覆盖该模块，更新说明不会沿用旧查询代际。
 
 来源责任判定：本地指标NULL不等于源字段NULL。当前J1实际收货金额原值均非空，A为指标映射未通过而主动门控；J2被替换明细的sfje空值须先核业务适用，不直接视为漏采；当前普通SKU未匹配及未采用物流字段为空不证明源系统缺数据。认定来源异常须具备应有记录/必填字段、交付时限、同口径对照和排除本地筛选/映射错误的证据；未满足时登记本地对接/来源适用待核。

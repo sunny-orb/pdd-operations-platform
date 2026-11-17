@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Details } from "./Details";
@@ -135,4 +135,70 @@ it("表格保留商品规格和真实零，逐行口径按需展开且不遗漏"
   await user.click(screen.getByRole("button", { name: "展开行说明" }));
   expect(screen.getByText("实退数量不是订单数")).toBeTruthy();
   expect(screen.getByText("样本不足不能判断质量趋势")).toBeTruthy();
+});
+
+it("比较表把不适用的总览格留空，缺数据仍显示横杠", () => {
+  const data = {
+    status: "observed_reference",
+    scope_note: "缺数据时，算不出的项显示 —。",
+    total: 2,
+    columns: [
+      { key: "type", label: "类型", type: "text" },
+      { key: "rate_change", label: "总退款率变化", type: "points" },
+      { key: "reasons", label: "本期原因 Top", type: "list" },
+    ],
+    rows: [
+      { id: "whole", cells: { type: { value: "总览" } } },
+      { id: "category", cells: { type: { value: "品类" } } },
+    ],
+  };
+  render(
+    <Analysis
+      state={
+        {
+          scope: { view: "mom", page: 1, size: 25 },
+          analysis: { data: { data } },
+        } as unknown as AftersalesState
+      }
+    />,
+  );
+  expect(within(screen.getByRole("row", { name: "总览" })).queryByText("—")).toBeNull();
+  expect(within(screen.getByRole("row", { name: /^品类/ })).getAllByText("—")).toHaveLength(2);
+  expect(screen.getByText(data.scope_note).closest("details")?.open).toBe(false);
+});
+
+it("历史记录用中文类型和完整区间，主表省略平台生成时间", () => {
+  const data = {
+    status: "observed_reference",
+    scope_note: "",
+    total: 1,
+    columns: [
+      { key: "type", label: "类型", type: "text" },
+      { key: "period", label: "周期", type: "text" },
+      { key: "generated_at", label: "生成时间", type: "text" },
+    ],
+    rows: [
+      {
+        id: "r1",
+        cells: {
+          type: { value: "weekly" },
+          period: { value: "2026-10-18—2026-11-16" },
+          generated_at: { value: "2026-11-17T16:44:42+08:00" },
+        },
+      },
+    ],
+  };
+  render(
+    <Analysis
+      state={
+        {
+          scope: { view: "history", page: 1, size: 25 },
+          analysis: { data: { data } },
+        } as unknown as AftersalesState
+      }
+    />,
+  );
+  expect(screen.getByRole("cell", { name: "周报" })).toBeTruthy();
+  expect(screen.getByRole("cell", { name: "2026-10-18 至 2026-11-16" })).toBeTruthy();
+  expect(screen.queryByRole("columnheader", { name: "生成时间" })).toBeNull();
 });

@@ -5,6 +5,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import type { AftersalesState } from "./data";
 import type { Focus } from "./state";
 import type { Report } from "./contracts";
+import { reportTypeLabels } from "./format";
 
 type ReportOption = {
   value: string;
@@ -12,12 +13,6 @@ type ReportOption = {
   name?: string;
   period?: string;
   "aria-label"?: string;
-};
-
-const reportTypeLabels: Record<Report["report_type"], string> = {
-  weekly: "周报",
-  monthly: "月报",
-  custom: "自定义",
 };
 
 function ReportLabel({ option }: { option: ReportOption }) {
@@ -65,7 +60,7 @@ export function Filters({ state }: { state: AftersalesState }) {
           value={scope.reportExplicit ? scope.report : ""}
           options={reports}
           virtual={false}
-          loading={state.meta.isPending || state.options.isFetching}
+          loading={!reportCatalog.length && (state.meta.isPending || state.options.isPending)}
           optionRender={(option) => <ReportLabel option={option.data} />}
           labelRender={(item) => {
             const option =

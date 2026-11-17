@@ -113,10 +113,11 @@ def feishu_revision(source, root):
 class SourceProbes:
     """只在后台需要检查时建连接；所有数仓检查复用一个连接、共用有限重试预算。"""
 
-    def __init__(self, password, root):
+    def __init__(self, password, root, *, rpa_connect=None):
         self.password, self.root = password, Path(root)
         self.reader = None
         self.weather = {}
+        self.rpa_connect = rpa_connect
 
     def close(self):
         if self.reader:
@@ -124,6 +125,14 @@ class SourceProbes:
 
     def read(self, code):
         source = BY_ID[code]
+        if source.system == "rpa":
+            from app.connectors.aftersales_rpa_status import (
+                configured_connection,
+                read_update_status,
+            )
+
+            connect = self.rpa_connect or (lambda: configured_connection(self.root))
+            return read_update_status(connect)
         if source.system == "feishu":
             return feishu_revision(source, self.root)
         if source.system == "nmc":

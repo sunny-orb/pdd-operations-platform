@@ -220,7 +220,6 @@ def comparison(repo, q):
 
 
 def analysis(repo, q):
-    note = "当前报告相同筛选；未发生退货的销售组保留，缺行不补零。"
     parameters = repo.classification_parameters()
     columns = {
         "category": CATEGORY,
@@ -231,6 +230,11 @@ def analysis(repo, q):
         "history": HISTORY,
     }[q.view]
     if q.view in ("category", "style"):
+        note = (
+            "只有销售记录时，退货数据显示 —；已有退货记录里的空白金额和数量按 0 计"
+            if repo.is_rpa()
+            else "只有销售记录时，退货数据显示 —"
+        )
         rows = object_rows(repo, q, q.view)
     elif q.view in ("mom", "yoy"):
         rows, note = comparison(repo, q)

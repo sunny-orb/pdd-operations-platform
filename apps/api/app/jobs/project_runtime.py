@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy.engine import Engine
 
 from app.jobs.project_sync import run_project
-from app.modules.data_status.schedule_policy import RECONCILIATION_TIME
+from app.modules.data_status.schedule_policy import JST_AFTERSALES_STEPS, RECONCILIATION_TIME
 
 
 @dataclass(frozen=True)
@@ -239,6 +239,7 @@ def execute_project(
     reconcile_sources=(),
     reconciliation_sources=(),
     reconciliation_time=RECONCILIATION_TIME,
+    jst_aftersales_enabled=True,
 ):
     """同一批次标识重用PG幂等/互斥；串行跑完整业务链，返回脱敏运行报告。
 
@@ -247,6 +248,8 @@ def execute_project(
     """
     if not 1 <= max_attempts <= 3:
         raise ValueError("INVALID_SYNC_ATTEMPTS")
+    if not jst_aftersales_enabled and only and set(only) & set(JST_AFTERSALES_STEPS):
+        raise ValueError("JST_AFTERSALES_DISABLED")
     steps = build_steps(
         engine,
         paths,
@@ -259,6 +262,8 @@ def execute_project(
         if not only or not set(only) <= steps.keys():
             raise ValueError("INVALID_SYNC_DATASETS")
         steps = {name: step for name, step in steps.items() if name in only}
+    if not jst_aftersales_enabled:
+        steps = {name: step for name, step in steps.items() if name not in JST_AFTERSALES_STEPS}
     return run_project(
         engine,
         slot,

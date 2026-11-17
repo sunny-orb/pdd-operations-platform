@@ -53,7 +53,11 @@ export function HistoryCoverage({ row }: { row: SourceStatus }) {
     <section className="m6-history-coverage" aria-label={`${row.name}历史记录覆盖`}>
       <strong>历史记录覆盖</strong>
       {h.state === "not_applicable" ? (
-        <p>资料、目标或天气按各自修订及发布周期更新，不套用逐日记录检查。</p>
+        <p>
+          {row.kind === "period"
+            ? "按实际报告期间更新，不套用逐日记录检查。"
+            : "资料、目标或天气按各自修订及发布周期更新，不套用逐日记录检查。"}
+        </p>
       ) : h.state === "unverified" ? (
         <p>
           此来源尚无可靠的每日应有记录范围，不能凭某日没有业务记录判定缺数，也不能据此认定数据完整。

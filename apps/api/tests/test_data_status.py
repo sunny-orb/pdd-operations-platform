@@ -13,7 +13,7 @@ pytest_plugins = ["tests.sales_pg_support"]
 def test_catalog_merges_physical_sources_and_keeps_dependencies():
     from app.modules.data_status.catalog import SOURCES
 
-    assert len(SOURCES) == len({s.locator for s in SOURCES}) == 16
+    assert len(SOURCES) == len({s.locator for s in SOURCES}) == 17
     sales = next(s for s in SOURCES if s.id == "jst_sales")
     assert sales.datasets == ("jst_shipped_sales", "jst_cancelled_sales")
     assert any(s.id == "jst_master" for s in SOURCES)
@@ -253,7 +253,7 @@ def test_monitor_obeys_project_lock_and_readonly_api(sales_pg):
         response = client.get("/api/v1/data-status")
         assert response.status_code == 200
         data = response.json()["data"]
-        assert len(data["sources"]) == 16
+        assert len(data["sources"]) == 17
         assert all(row["upstream"]["state"] == "unchecked" for row in data["sources"])
         assert all(row["platform_state"] == "unavailable" for row in data["sources"])
         assert client.post("/api/v1/data-status").status_code == 405

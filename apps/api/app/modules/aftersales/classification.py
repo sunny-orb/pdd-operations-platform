@@ -2,6 +2,7 @@
 
 from decimal import Decimal, localcontext
 
+from .decision_policy import ADVICE, EFFECT
 from .rowset import record_count
 
 EVIDENCE = "docs/source-evidence.md#m5-live-sources-20261028"
@@ -27,7 +28,7 @@ DICTIONARIES = {
 }
 
 
-def rule_parameters(*, targets_available=False):
+def rule_parameters(*, targets_available=False, risk_available=False):
     """新报告冻结的完整v1包；旧报告从自身FK重读，不调用此函数补默认词典。"""
     size = [
         ("larger", ["偏大", "太大", "买大", "码大", "大了"], []),
@@ -121,6 +122,36 @@ def rule_parameters(*, targets_available=False):
             "总体金额区间目标分别保留上下界；仅适用已绑定目标的整体滚动30日/自然月报告，"
             "不替代细类目标，不将观察值称业务已达标。"
         )
+    if risk_available:
+        enabled.update(
+            {
+                "refund_rate_change",
+                "issue_share_change",
+                "single_style_amount_review",
+                "separate_risk_ranking",
+            }
+        )
+        branch_codes.append("separate_risk_ranking")
+        thresholds["separate_risk_ranking"] = dict(
+            category_min_share="0.02",
+            style_min_share="0.005",
+            sample_cap="500",
+            baseline_floor="0.0001",
+            templates=ADVICE,
+            effect_window=EFFECT,
+        )
+        templates.update(
+            {
+                "refund_rate_change": "三种金额退款率各按SOP样本与3/5个百分点门槛独立判断。",
+                "issue_share_change": (
+                    "尺码、质量问题件数占比独立比较；质量任一标签的原行只计一次。"
+                ),
+                "single_style_amount_review": "单款实际入库金额Top10进入核查，不单凭金额排名预警。",
+                "separate_risk_ranking": (
+                    "同层0–100仅用于排序，品类与单款分开，不作为概率或业务预警等级。"
+                ),
+            }
+        )
     branches = [
         dict(
             code=code,
@@ -131,7 +162,11 @@ def rule_parameters(*, targets_available=False):
             validation_status="verified_in_scope" if code in enabled else "pending_evidence",
             contract_ref="docs/data-contract.md#business-metric-questions",
             evidence_ref=(
-                "docs/data-contract.md#metric-m5-03" if code == "target_application" else EVIDENCE
+                "docs/data-contract.md#metric-m5-03"
+                if code == "target_application"
+                else "docs/implementation/m5-aftersales-implementation.md"
+                if risk_available and code in thresholds
+                else EVIDENCE
             )
             if code in enabled
             else None,

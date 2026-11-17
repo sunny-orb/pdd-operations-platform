@@ -31,7 +31,7 @@ import "./data-update-status.css";
 import { HistoryCoverage, HistoryCoverageLabel } from "./HistoryCoverage";
 import { UpdateTimeliness, UpdateTimelinessLabel } from "./UpdateTimeliness";
 
-const systems = { warehouse: "数仓", feishu: "飞书", nmc: "气象台" };
+const systems = { warehouse: "数仓", feishu: "飞书", nmc: "气象台", rpa: "RPA数据库" };
 const syncFailureReasons: Record<string, string> = {
   ARCHIVE_CAPACITY: "归档空间不足，未完成本轮接收。",
   INCREMENTAL_BASELINE_MISMATCH: "接收基线未通过一致性校验，未完成本轮接收。",
@@ -69,6 +69,9 @@ function DatasetDetail({ item }: { item: DatasetStatus }) {
     <div className="m6-update-dataset">
       <strong>{item.name}</strong>
       <span>数据日期：{date(item.date)}</span>
+      {item.received_at && item.received_at !== item.last_success_at && (
+        <span>当前版本接收：{time(item.received_at)}</span>
+      )}
       <span>最近成功：{time(item.last_success_at ?? item.received_at)}</span>
       <span>最近尝试：{time(item.last_attempt_at)}</span>
       <span>完成时间：{time(item.last_finished_at)}</span>
@@ -105,6 +108,15 @@ function attemptLabel(status: string | null) {
 }
 
 function UpstreamUpdate({ row }: { row: SourceStatus }) {
+  if (row.system === "rpa") {
+    const updated = row.upstream.observation.source_updated;
+    return (
+      <div className="m6-update-cell-stack">
+        <span className="m6-update-time">{time(typeof updated === "string" ? updated : null)}</span>
+        <small className="m6-update-subtext">数据库写入时间</small>
+      </div>
+    );
+  }
   if (row.system === "warehouse") {
     return row.upstream.web_updated_at ? (
       <div className="m6-update-cell-stack">
@@ -304,14 +316,16 @@ function SourceDetail({ row }: { row: SourceStatus }) {
             <span role="status">{copyState}</span>
           </dd>
         </div>
-        <div>
-          <dt>网页入口</dt>
-          <dd>
-            <a href={row.source_url} target="_blank" rel="noopener noreferrer">
-              打开上游来源 <ExportOutlined aria-hidden="true" />
-            </a>
-          </dd>
-        </div>
+        {row.source_url && (
+          <div>
+            <dt>网页入口</dt>
+            <dd>
+              <a href={row.source_url} target="_blank" rel="noopener noreferrer">
+                打开上游来源 <ExportOutlined aria-hidden="true" />
+              </a>
+            </dd>
+          </div>
+        )}
         <div>
           <dt>使用页面</dt>
           <dd>{row.pages.map((p) => pageNames[p]).join("、")}</dd>
@@ -342,22 +356,30 @@ function SourceDetail({ row }: { row: SourceStatus }) {
         <div>
           <dt>检查依据</dt>
           <dd>
-            {observation.basis === "warehouse_web_metadata" ||
-            observation.basis === "warehouse_web_page"
-              ? "数仓表更新时间"
-              : observation.basis === "table_revision"
-                ? "飞书表修订号"
-                : observation.basis === "publication_content"
-                  ? "官方发布时间及正文"
-                  : observation.basis === "profile_projection"
-                    ? "已授权资料字段内容"
-                    : observation.basis === "snapshot_date"
-                      ? "货品资料快照日期"
-                      : row.reconciliation
-                        ? "近7日记录数、业务日期及来源时间；历史修订按每周对账核对"
-                        : "近7日记录数、业务日期及来源时间"}
+            {observation.basis === "rpa_table"
+              ? "全表写入时间、记录数和内容变化；与上次检查比较"
+              : observation.basis === "warehouse_web_metadata" ||
+                  observation.basis === "warehouse_web_page"
+                ? "数仓表更新时间"
+                : observation.basis === "table_revision"
+                  ? "飞书表修订号"
+                  : observation.basis === "publication_content"
+                    ? "官方发布时间及正文"
+                    : observation.basis === "profile_projection"
+                      ? "已授权资料字段内容"
+                      : observation.basis === "snapshot_date"
+                        ? "货品资料快照日期"
+                        : row.reconciliation
+                          ? "近7日记录数、业务日期及来源时间；历史修订按每周对账核对"
+                          : "近7日记录数、业务日期及来源时间"}
           </dd>
         </div>
+        {row.system === "rpa" && typeof observation.count === "number" && (
+          <div>
+            <dt>上游记录数</dt>
+            <dd>{observation.count.toLocaleString("zh-CN")}</dd>
+          </div>
+        )}
         <div>
           <dt>时间说明</dt>
           <dd>
@@ -412,19 +434,23 @@ const columns: ColumnsType<SourceStatus> = [
             title="此来源检查或同步失败，展开明细查看"
           />
         )}
-        <a
-          className="m6-update-source-link"
-          href={row.source_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`打开来源：${row.name}`}
-        >
-          {row.name} <ExportOutlined aria-hidden="true" />
-        </a>
+        {row.source_url ? (
+          <a
+            className="m6-update-source-link"
+            href={row.source_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`打开来源：${row.name}`}
+          >
+            {row.name} <ExportOutlined aria-hidden="true" />
+          </a>
+        ) : (
+          <strong className="m6-update-source-link">{row.name}</strong>
+        )}
         <Tooltip title={row.table_name} trigger={["hover", "focus"]}>
           <span
             tabIndex={0}
-            className={`m6-update-table-name${row.system === "warehouse" ? " is-physical" : ""}`}
+            className={`m6-update-table-name${row.system === "warehouse" || row.system === "rpa" ? " is-physical" : ""}`}
           >
             {row.table_name}
           </span>

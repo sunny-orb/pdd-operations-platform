@@ -119,6 +119,54 @@ function mount() {
   return { ...view, client };
 }
 
+it("RPA物理表显示真实写入时间和三类本地用途，不伪造网页入口或日缺口", async () => {
+  const data = payload();
+  data.data.sources = [
+    {
+      ...row,
+      id: "aftersales_rpa",
+      name: "RPA售后报表",
+      system: "rpa",
+      kind: "period",
+      locator: "public.aftersales_reports_rpa",
+      table_name: "aftersales_reports_rpa",
+      source_title: "RPA售后报表",
+      source_url: null as unknown as string,
+      datasets: [
+        { ...dataset, code: "rpa_returns", name: "售后退货", date: "2026-11-16" },
+        { ...dataset, code: "rpa_shipped_sales", name: "已发货销售", date: "2026-11-16" },
+        { ...dataset, code: "rpa_cancelled_sales", name: "已取消销售", date: "2026-11-16" },
+      ],
+      upstream: {
+        ...row.upstream,
+        state: "observed",
+        web_updated_at: null as unknown as string,
+        web_checked_at: null as unknown as string,
+        observation: {
+          date: "2026-11-16",
+          basis: "rpa_table",
+          source_updated: "2026-11-16T00:55:39Z",
+          count: 55462,
+        } as typeof row.upstream.observation,
+      },
+    },
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  const dialog = within(screen.getByRole("dialog"));
+  await dialog.findByText("RPA售后报表");
+  expect(dialog.getByText("2026/11/16 08:55:39")).toBeTruthy();
+  expect(dialog.getByText("数据库写入时间")).toBeTruthy();
+  expect(dialog.getByText("已检查")).toBeTruthy();
+  expect(dialog.getAllByText("2026-11-16")).toHaveLength(3);
+  expect(dialog.queryByRole("link", { name: "打开来源：RPA售后报表" })).toBeNull();
+  fireEvent.click(dialog.getByRole("button", { name: "展开来源详情" }));
+  expect(dialog.getByText("public.aftersales_reports_rpa")).toBeTruthy();
+  expect(dialog.getByText("55,462")).toBeTruthy();
+  expect(dialog.queryByText("打开上游来源")).toBeNull();
+});
+
 it("打开后只读专用状态，物理来源一行并可查看不同用途日期、按看板筛选", async () => {
   const fetcher = vi
     .spyOn(globalThis, "fetch")

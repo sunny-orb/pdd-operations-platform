@@ -20,6 +20,12 @@ WAREHOUSE_SOURCES = (
 )
 RECONCILIATION_SOURCES = (*WAREHOUSE_SOURCES, "product_regions")
 FEISHU_SOURCES = ("shop_refunds", "sales_targets")
+MONITOR_ONLY_SOURCES = ("aftersales_rpa",)
+JST_AFTERSALES_SOURCES = ("jst_returns", "jst_sales", "jst_master")
+# 退款目标被RPA共用，不随旧JST采集一起停用。
+JST_AFTERSALES_STEPS = (
+    "jst_returns", "jst_shipped_sales", "jst_cancelled_sales", "aftersales_report",
+)
 LEGACY_SOURCES = (
     "product_regions",
     "jst_returns",

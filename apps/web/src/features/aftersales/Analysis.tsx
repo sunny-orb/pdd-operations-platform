@@ -1,12 +1,27 @@
-import { Empty, Table, Tabs } from "antd";
+import { Empty, Pagination, Table, Tabs, type TableRef } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import { useRef } from "react";
 import type { Analysis as AnalysisData } from "./contracts";
 import type { AftersalesState } from "./data";
 import { views, type View } from "./state";
 import { formatValue } from "./format";
+import { Explanation } from "./Explanation";
+import { StableContent } from "./StableContent";
 export function Analysis({ state }: { state: AftersalesState }) {
   const data = state.analysis.data?.data;
   const scope = state.scope;
+  const tableRef = useRef<TableRef>(null);
+  const rowNotes = (row: AnalysisData["rows"][number]) => {
+    const grouped = new Map<string, string[]>();
+    for (const column of data?.columns ?? []) {
+      const note = row.cells[column.key]?.detail;
+      // 商品规格等文本副值仍在单元格显示；数值/问题分类的口径按行展开。
+      if (note && (column.type !== "text" || column.key === "style_code")) {
+        grouped.set(note, [...(grouped.get(note) ?? []), column.label]);
+      }
+    }
+    return [...grouped].map(([note, labels]) => ({ note, label: labels.join("、") }));
+  };
   const columns: ColumnsType<AnalysisData["rows"][number]> = (data?.columns ?? []).map(
     (column) => ({
       key: column.key,
@@ -40,7 +55,9 @@ export function Analysis({ state }: { state: AftersalesState }) {
             ) : (
               <span>{formatValue(cell?.value, column.type)}</span>
             )}
-            {cell?.detail && <small>{cell.detail}</small>}
+            {cell?.detail && column.type === "text" && column.key !== "style_code" && (
+              <small>{cell.detail}</small>
+            )}
           </div>
         );
       },
@@ -51,54 +68,96 @@ export function Analysis({ state }: { state: AftersalesState }) {
       <Tabs
         type="card"
         activeKey={scope.view}
-        onChange={(view) => state.change({ view: view as View })}
+        onChange={(view) => {
+          tableRef.current?.scrollTo({ top: 0 });
+          state.change({ view: view as View });
+        }}
         items={views.map((view) => ({ key: view.key, label: view.label }))}
       />
-      <div className="m5-panel m5-analysis-panel">
-        <div className="m5-panel-heading">
-          <div>
-            <h2>{views.find((v) => v.key === scope.view)?.label}</h2>
-            <p className="m5-scope-note">{data?.scope_note ?? "等待报告查询"}</p>
+      <StableContent
+        pending={!state.meta?.isError && (state.meta?.isPending || state.analysis.isPending)}
+        label="正在更新明细…"
+      >
+        <div className="m5-panel m5-analysis-panel">
+          <div className="m5-panel-heading">
+            <div>
+              <h2>{views.find((v) => v.key === scope.view)?.label}</h2>
+            </div>
+            <span>{data?.total ?? 0} 条</span>
           </div>
-          <span>{data?.total ?? 0} 条</span>
+          <div className="m5-analysis-note">
+            {data?.scope_note && (
+              <Explanation label="统计口径">
+                <p>{data.scope_note}</p>
+              </Explanation>
+            )}
+          </div>
+          <Table
+            ref={tableRef}
+            className="m5-analysis-table"
+            rowKey="id"
+            columns={columns}
+            dataSource={data?.rows ?? []}
+            loading={state.analysis.isFetching}
+            size="small"
+            expandable={
+              data?.rows.some((row) => rowNotes(row).length)
+                ? {
+                    columnTitle: "说明",
+                    columnWidth: 48,
+                    rowExpandable: (row) => rowNotes(row).length > 0,
+                    expandedRowRender: (row) => (
+                      <dl className="m5-row-notes">
+                        {rowNotes(row).map(({ note, label }) => (
+                          <div key={note}>
+                            <dt>{label}</dt>
+                            <dd>{note}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ),
+                  }
+                : undefined
+            }
+            scroll={{
+              x: Math.max(
+                650,
+                columns.reduce((total, column) => total + Number(column.width), 0),
+              ),
+              y: "var(--m5-analysis-body-height)",
+            }}
+            locale={{
+              expand: "展开行说明",
+              collapse: "收起行说明",
+              emptyText: (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    data?.status === "source_unavailable" ? "来源暂不可用" : "当前条件暂无记录"
+                  }
+                />
+              ),
+            }}
+            pagination={false}
+          />
+          <nav className="m5-analysis-pagination" aria-label="分析明细分页">
+            <Pagination
+              size="small"
+              current={scope.page}
+              pageSize={scope.size}
+              total={data?.total ?? 0}
+              disabled={!data?.total}
+              showSizeChanger
+              showLessItems
+              pageSizeOptions={[25, 50, 100]}
+              onChange={(page, size) => {
+                tableRef.current?.scrollTo({ top: 0 });
+                state.change({ page, size });
+              }}
+            />
+          </nav>
         </div>
-        <Table
-          className="m5-analysis-table"
-          rowKey="id"
-          columns={columns}
-          dataSource={data?.rows ?? []}
-          loading={state.analysis.isFetching}
-          size="small"
-          scroll={{
-            x: Math.max(
-              650,
-              columns.reduce((total, column) => total + Number(column.width), 0),
-            ),
-            y: 480,
-          }}
-          locale={{
-            emptyText: (
-              <Empty
-                image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={
-                  data?.status === "source_unavailable"
-                    ? "来源尚不可用，未展示经营数字"
-                    : "当前条件暂无记录"
-                }
-              />
-            ),
-          }}
-          pagination={{
-            current: scope.page,
-            pageSize: scope.size,
-            total: data?.total ?? 0,
-            showSizeChanger: true,
-            pageSizeOptions: [25, 50, 100],
-            showTotal: (total) => `共 ${total} 条`,
-            onChange: (page, size) => state.change({ page, size }),
-          }}
-        />
-      </div>
+      </StableContent>
     </section>
   );
 }

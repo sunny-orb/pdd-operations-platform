@@ -224,6 +224,7 @@ def test_cli_status_works_from_other_cwd_without_engine_or_credentials(
         "feishu_times": ["08:20", "10:10"],
         "reconciliation_time": "17:00",
         "reconciliation_retry_seconds": 300,
+        "jst_aftersales_enabled": True,
     }
 
 
@@ -247,7 +248,10 @@ def test_cli_uses_portable_execution_and_preserves_output_exitcode(
     monkeypatch.setitem(main.__globals__, "runtime_engine", lambda: engine)
     assert "execute_project" in main.__globals__, "CLI必须使用同一可迁移执行接口"
 
-    def execute(received_engine, slot, *, paths, warehouse_password, only, max_attempts):
+    def execute(
+        received_engine, slot, *, paths, warehouse_password, only, max_attempts,
+        jst_aftersales_enabled,
+    ):
         assert received_engine is engine
         assert slot.startswith("manual:")
         assert paths.ingestion_root == tmp_path / "var/ingestion"
@@ -258,6 +262,7 @@ def test_cli_uses_portable_execution_and_preserves_output_exitcode(
         assert callable(warehouse_password)
         assert only == ["weather"]
         assert max_attempts == 2
+        assert jst_aftersales_enabled is True
         return {"status": status}
 
     monkeypatch.setitem(main.__globals__, "execute_project", execute)
@@ -345,7 +350,11 @@ def test_scheduled_cli_excludes_migrated_sources_from_both_legacy_paths(
 ):
     """真实PG引擎装配CLI；在外部执行边界捕获所选范围，禁止混入迁移来源。"""
     from app.jobs import source_monitor_runtime
-    from app.modules.data_status.schedule_policy import LEGACY_SOURCES, LEGACY_STEPS
+    from app.modules.data_status.schedule_policy import (
+        LEGACY_SOURCES,
+        LEGACY_STEPS,
+        MONITOR_ONLY_SOURCES,
+    )
 
     (tmp_path / "config").mkdir()
     (tmp_path / "config/sync.toml").write_text(
@@ -375,7 +384,7 @@ def test_scheduled_cli_excludes_migrated_sources_from_both_legacy_paths(
     monkeypatch.setattr(source_monitor_runtime, "execute_source_schedule", schedule)
     assert main() == 0
     assert selections[0] == ("full", LEGACY_STEPS)
-    assert selections[1] == ("monitor", LEGACY_SOURCES)
+    assert selections[1] == ("monitor", (*LEGACY_SOURCES, *MONITOR_ONLY_SOURCES))
     assert selections[2][1][-1] == "16:10"
 
 

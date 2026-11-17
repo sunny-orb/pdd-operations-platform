@@ -470,6 +470,7 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
   },
   async load(m, signal) {
     const report = m.raw.default_report_id;
+    const rpa = m.raw.sources.some((source) => source.locator === "public.aftersales_reports_rpa");
     const base: DomainCard = {
       title: "售后退款",
       heading: "退货分析看板",
@@ -477,8 +478,10 @@ export const aftersalesSpec: DomainSpec<z.infer<typeof aftersalesMeta>> = {
       valueType: "percent",
       valueLabel: "总退款率",
       pairs: [],
-      note: "来源：聚水潭经数仓同步生成的固定期间报告；金额和比率按源域核验门禁。",
-      sourceNote: "来源：聚水潭（经数仓同步）",
+      note: rpa
+        ? "来源：RPA售后报表；按实际报告期间分析。"
+        : "来源：聚水潭经数仓同步生成的固定期间报告；金额和比率按源域核验门禁。",
+      sourceNote: rpa ? "来源：RPA售后报表" : "来源：聚水潭（经数仓同步）",
       link: report ? aftersalesLink(report) : "/aftersales",
       status: "观察",
     };

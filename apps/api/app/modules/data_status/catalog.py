@@ -21,6 +21,7 @@ class Source:
     group: str
     pages: tuple[str, ...]
     kind: str = "daily"
+    monitor_only: bool = False
 
 
 def warehouse(code, name, table, datasets, group, pages, kind="daily"):
@@ -93,6 +94,17 @@ SOURCES = (
         "sales_targets",
         ("sales", "overview"),
         "target",
+    ),
+    Source(
+        "aftersales_rpa",
+        "RPA售后报表",
+        "rpa",
+        "public.aftersales_reports_rpa",
+        ("rpa_returns", "rpa_shipped_sales", "rpa_cancelled_sales"),
+        "aftersales_rpa",
+        ("aftersales", "overview"),
+        "period",
+        monitor_only=True,
     ),
     warehouse(
         "jst_returns",
@@ -171,6 +183,12 @@ FEISHU_NAMES = {
 
 def source_identity(source):
     """返回固定清单的可读表名、网页原名与已核入口；不从上游动态取配置。"""
+    if source.system == "rpa":
+        return dict(
+            table_name=source.locator.removeprefix("public."),
+            source_title=source.name,
+            source_url=None,
+        )
     if source.system == "warehouse":
         title, table_id = WAREHOUSE_PAGES[source.id]
         return dict(
@@ -192,6 +210,9 @@ def source_identity(source):
 
 DATASET_NAMES = {s.datasets[0]: s.name for s in SOURCES if len(s.datasets) == 1}
 DATASET_NAMES.update(
+    rpa_returns="售后退货",
+    rpa_shipped_sales="已发货销售",
+    rpa_cancelled_sales="已取消销售",
     jst_shipped_sales="已发货销售",
     jst_cancelled_sales="已取消销售",
     weather_publication="全国天气",
@@ -202,6 +223,8 @@ DATASET_NAMES.update(
 
 
 def job_for(code):
+    if code in ("rpa_returns", "rpa_shipped_sales", "rpa_cancelled_sales"):
+        return "sync_rpa_aftersales"
     if code in TABLES:
         return "sync_product_board"
     return {

@@ -1,6 +1,7 @@
 import { Button } from "antd";
 import { formatFixedDecimal, isNegative } from "../../shared/format/decimal";
 import type { Overview } from "./contracts";
+import { Explanation } from "./Explanation";
 
 type DetailTarget = "aftersales-risk-overview" | "aftersales-action-list";
 
@@ -24,7 +25,7 @@ export function Brief({
       <article className="m5-decision-card m5-main-risk">
         <div className="m5-card-caption">
           <span>主风险</span>
-          <span className={`m5-decision-badge${status === "待整改" ? " is-risk" : ""}`}>
+          <span className={`m5-decision-badge${status === "预警 P1" ? " is-risk" : ""}`}>
             {status}
           </span>
         </div>
@@ -50,11 +51,14 @@ export function Brief({
           <article className="m5-decision-card m5-priority" key={slot}>
             <div className="m5-card-caption">
               <span>优先行动 {slot}</span>
-              <span className="m5-decision-badge">{item ? "待验证" : "待补充"}</span>
             </div>
-            <h3>{item?.title || "暂无可核查行动"}</h3>
+            <h3>{item?.title || "暂无优先行动"}</h3>
             <p>{item?.detail || "—"}</p>
-            <small>验证：{item?.verification || "—"}</small>
+            {item?.verification && (
+              <Explanation label="验证指标">
+                <p>{item.verification}</p>
+              </Explanation>
+            )}
             <Button type="link" onClick={() => openDetails("aftersales-action-list")}>
               查看整改清单 →
             </Button>

@@ -350,6 +350,16 @@ def publish_reports(engine, root):
             raise ValueError("M5_SYNC_RUNNING")
         try:
             with c.begin():
+                # 已切换RPA报告时，旧JST调度继续保留输入，但不能抢占报告入口。
+                active = c.execute(
+                    sa.select(v.c.id, v.c.row_schema_revision)
+                    .join(current, current.c.version_id == v.c.id)
+                    .where(current.c.dataset_code == "aftersales_report")
+                ).first()
+                from .rpa_ingestion import REVISION as RPA_REVISION
+
+                if active and active.row_schema_revision == RPA_REVISION:
+                    return dict(status="reused", version_id=active.id, reports=0)
                 heads = {
                     x["dataset_code"]: dict(x)
                     for x in c.execute(

@@ -37,10 +37,12 @@ class Schedule:
     feishu_times: tuple[str, ...] = FEISHU_TIMES
     reconciliation_time: str = RECONCILIATION_TIME
     reconciliation_retry_seconds: int = RECONCILIATION_RETRY_SECONDS
+    jst_aftersales_enabled: bool = True
 
     def __post_init__(self):
         if (
-            self.timezone != "Asia/Shanghai"
+            not isinstance(self.jst_aftersales_enabled, bool)
+            or self.timezone != "Asia/Shanghai"
             or not self.times
             or len(set(self.times)) != len(self.times)
             or any(not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", t) for t in self.times)

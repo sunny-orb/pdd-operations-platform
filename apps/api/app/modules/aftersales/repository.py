@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.modules.product_board.repository import BoardError
 
 from .rowset import exact_compaction
+from .rpa_ingestion import REVISION as RPA_REVISION
 
 ROLES = {
     "j1_returns": ("jst_returns", "read_return_records", "售后确认期间明细"),
@@ -22,6 +23,11 @@ ROLES = {
         "已取消支付期间明细",
     ),
 }
+RPA_CODES = dict(
+    j1_returns="rpa_returns",
+    j2_shipped_sales="rpa_shipped_sales",
+    j3_cancelled_sales="rpa_cancelled_sales",
+)
 IDENTITY_FIELDS = (
     "source_shop_id",
     "source_shop_name",
@@ -52,6 +58,8 @@ def revision():
             for n in (
                 "repository.py",
                 "query.py",
+                "decisions.py",
+                "decision_policy.py",
                 "metrics.py",
                 "amounts.py",
                 "analysis.py",
@@ -87,7 +95,7 @@ class Repository:
             dict(r)
             for r in c.execute(
                 sa.text("""
-            SELECT r.*,v.sealed_at,v.rule_set_id,v.content_fingerprint
+            SELECT r.*,v.sealed_at,v.rule_set_id,v.content_fingerprint,v.row_schema_revision
             FROM public.aftersales_reports r
             JOIN public.dataset_versions v ON v.id=r.dataset_version_id
             WHERE v.state='published' AND v.dataset_code='aftersales_report'
@@ -99,7 +107,16 @@ class Repository:
         ]
         logical = set()
         self.defaults = []
+        active_revision = c.scalar(
+            sa.text("""SELECT v.row_schema_revision FROM current_datasets d
+            JOIN dataset_versions v ON v.id=d.version_id
+            WHERE d.dataset_code='aftersales_report'""")
+        )
         for r in self.reports:
+            if active_revision and (active_revision == RPA_REVISION) != (
+                r["row_schema_revision"] == RPA_REVISION
+            ):
+                continue
             key = (r["report_type"], r["period_start"], r["period_end"])
             if key not in logical:
                 self.defaults.append(r)
@@ -112,6 +129,7 @@ class Repository:
             json.dumps(
                 {
                     "definition": revision(),
+                    "active_source_revision": active_revision,
                     "reports": [
                         (r["id"], r["dataset_version_id"], r["rule_set_id"]) for r in self.reports
                     ],
@@ -123,6 +141,12 @@ class Repository:
         self._inputs = {}
         self._rows = {}
         self._classification = {}
+
+    def is_rpa(self, report=None):
+        return (report or self.report or {}).get("row_schema_revision") == RPA_REVISION
+
+    def source_code(self, role, report=None):
+        return RPA_CODES[role] if self.is_rpa(report) else ROLES[role][0]
 
     def classification_parameters(self, report=None):
         """懒读所选报告固定包；旧报告未绑定/空词典不回退当前配置。"""
@@ -175,7 +199,7 @@ class Repository:
         return bool(
             source
             and source["state"] == "published"
-            and source["dataset_code"] == ROLES[role][0]
+            and source["dataset_code"] == self.source_code(role, report)
             and source["window_start"] == report["period_start"]
             and source["window_end"] == report["period_end"]
         )
@@ -190,6 +214,7 @@ class Repository:
             return self._rows[key]
         source = self.inputs(report).get(role)
         code, table, _ = ROLES[role]
+        code = self.source_code(role, report)
         if not source or source["state"] != "published" or source["dataset_code"] != code:
             self._rows[key] = None
             return None
@@ -250,7 +275,13 @@ class Repository:
                     dict(vid=source["id"], start=start, end=end),
                 ).mappings()
             ]
+            if self.is_rpa(report):
+                for row in self._rows[key]:
+                    row["_rpa"] = True
             return self._rows[key]
+        if self.is_rpa(report):
+            for row in result:
+                row["_rpa"] = True
         self._rows[key] = result
         # 元信息复用同一固定窗的完整聚合；空输入仍是已接收但无记录。
         self._summaries[key] = {
@@ -315,18 +346,21 @@ class Repository:
                     "JOIN public.dataset_versions v ON v.id=d.version_id "
                     "WHERE v.state='published' AND d.dataset_code=ANY(:codes)"
                 ),
-                dict(codes=[x[0] for x in ROLES.values()]),
+                dict(codes=[self.source_code(role) for role in ROLES]),
             ).mappings()
         }
         for role, (code, _, label) in ROLES.items():
             v = inputs.get(role)
+            rpa = self.is_rpa()
+            code = self.source_code(role)
+            job = "sync_rpa_aftersales" if rpa else "sync_" + code
             task = (
                 self.c.execute(
                     sa.text(
                         "SELECT status,started_at,finished_at,error_code FROM public.task_runs "
                         "WHERE job_code=:job ORDER BY queued_at DESC,id DESC LIMIT 1"
                     ),
-                    dict(job="sync_" + code),
+                    dict(job=job),
                 )
                 .mappings()
                 .first()
@@ -336,19 +370,30 @@ class Repository:
                     "SELECT max(finished_at) FROM public.task_runs "
                     "WHERE status='succeeded' AND job_code=:job AND result_version_id=:vid"
                 ),
-                dict(job="sync_" + code, vid=v["id"] if v else None),
+                dict(
+                    job=job,
+                    vid=self.report["dataset_version_id"] if rpa else v["id"] if v else None,
+                ),
             ).scalar_one_or_none()
             summary = self.source_summary(role)
             available = summary is not None
             no_records = available and not summary["rows"]
             head = heads.get(code)
-            pending = bool(head and (v is None or head["id"] != v["id"]))
+            pending = bool(not rpa and head and (v is None or head["id"] != v["id"]))
             note = (
                 "Q仅在1119组历史非空样本中对应，有限范围参考；A存在补贴及两倍金额反例，"
                 "实际收货金额未映射为实际入库金额。当前接收为明细行，不是原商品/原因汇总行。"
                 if role == "j1_returns"
                 else "J2只用实发金额sfje，缺值不回退销售金额；J3用已取消销售金额。"
             )
+            if rpa:
+                label = {
+                    "j1_returns": "RPA售后商品/原因期间报表",
+                    "j2_shipped_sales": "RPA已发货商品期间报表",
+                    "j3_cancelled_sales": "RPA已取消商品期间报表",
+                }[role]
+                note = "原表aftersales_reports_rpa；数值空白按业务确认计0，合计行已排除。"
+                success = v["received_at"] if v else None
             note += (
                 "完整性未确认；确认日期和支付日期不是同批订单。"
                 if available

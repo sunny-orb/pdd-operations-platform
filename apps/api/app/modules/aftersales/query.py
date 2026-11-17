@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from .amounts import amount_details
 from .classification import classify_rows, enabled, observations
+from .decisions import decisions
 from .metrics import from_values, groups, identity, matches, ratio, summarize, total
 from .repository import ROLES, public_report
 
@@ -134,6 +135,10 @@ def overview(repo, q):
     values = summarize(*blocks, parameters=parameters)
     observed = observations(blocks[0], parameters)
     metrics = [metric(key, label, type, values[key], note) for key, label, type, note in METRICS]
+    if repo.is_rpa():
+        next(m for m in metrics if m["key"] == "records")["note"] = (
+            "RPA售后商品×原因的期间原行数，不是订单数；不含销售报表合计行。"
+        )
     details = amount_details(*blocks)
     for item in metrics:
         item["detail"] = details.get(item["key"], "")
@@ -171,8 +176,19 @@ def overview(repo, q):
             "缺有效目标，暂不测算；超目标退款测算不是利润损失。",
         ),
     ]
+    previous_blocks = None
+    previous_parameters = {}
+    previous = repo.by_id.get(report["previous_report_id"]) if report else None
+    if previous and report["previous_comparison_status"] == "available":
+        previous_blocks = roles(repo, q, previous)
+        previous_parameters = repo.classification_parameters(previous)
+        old = summarize(*previous_blocks, parameters=previous_parameters)
+        if values["total_rate"] is not None and old["total_rate"] is not None:
+            next(m for m in risk_metrics if m["key"] == "change_pp").update(
+                value=(values["total_rate"] - old["total_rate"]) * 100, status="observed_reference"
+            )
     trend = []
-    for r in list(reversed(history_reports(repo, q)[:8])):
+    for r in reversed(history_reports(repo, q)[:8]):
         returns = repo.source_summary("j1_returns", r)
         trend.append(
             dict(
@@ -264,7 +280,7 @@ def overview(repo, q):
             note="缺相容签收事件，不用总Q减来源拒收标记反推。",
         ),
     ]
-    return dict(
+    result = dict(
         report=public_report(report),
         metrics=metrics,
         risk_metrics=risk_metrics,
@@ -292,7 +308,11 @@ def overview(repo, q):
             dict(
                 label="阅读口径",
                 title="实际期间与观察范围分开",
-                detail="J1确认时间、J2/J3支付时间；接收明细行不是去重订单或旧报告汇总行。",
+                detail=(
+                    "RPA售后按确认期间、销售按支付期间；商品/原因汇总原行不是订单。"
+                    if repo.is_rpa()
+                    else "J1确认时间、J2/J3支付时间；接收明细行不是去重订单或旧报告汇总行。"
+                ),
             ),
             dict(
                 label="风险与建议",
@@ -305,3 +325,19 @@ def overview(repo, q):
         category_actions=[],
         style_actions=[],
     )
+
+    computed = decisions(blocks, previous_blocks, parameters, previous_parameters)
+    if computed is not None:
+        result.update(computed)
+        result["scope_note"] = (
+            "本期已交付报告；售后按确认期间、销售按支付期间，不是同一批订单的最终退款率。"
+        )
+        result["core_insights"][1] = dict(
+            label="风险与建议",
+            title="按金额影响与SOP趋势核查",
+            detail="品类与单款分别排序；分数仅为同层核查顺序，P级按SOP阈值。建议不代表原因已确认或整改已完成。",
+        )
+        next(m for m in result["risk_metrics"] if m["key"] == "total_rate")["note"] = (
+            "(取消销售金额+实际入库金额)÷支付口径GMV"
+        )
+    return result

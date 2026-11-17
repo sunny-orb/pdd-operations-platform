@@ -62,6 +62,13 @@ def from_values(q, a, s, p, records):
 
 
 def identity(row):
+    if row.get("_rpa"):
+        return (
+            "rpa",
+            row.get("source_product_code") or ("missing", row.get("source_row_key")),
+            row.get("source_product_category"),
+            row.get("source_style_code"),
+        )
     return tuple(row.get(k) for k in IDENTITY_FIELDS)
 
 
@@ -80,6 +87,9 @@ def matches(row, q):
 
 
 def complete_key(row):
+    if row.get("_rpa"):
+        # 单款在品类×款号层独立聚合；SKU是否可配对由identity筛选处理。
+        return all(row.get(k) for k in ("source_product_category", "source_style_code"))
     return all(
         row.get(k)
         for k in (
@@ -97,12 +107,32 @@ def groups(roles, level="style", parameters=None):
     for rows in roles:
         found = {}
         for r in rows or []:
-            key = category(r) if level == "category" else identity(r)
+            key = (
+                category(r)
+                if level == "category"
+                else (
+                    ("rpa_style", category(r), r["source_style_code"])
+                    if r.get("_rpa") and r.get("source_style_code")
+                    else identity(r)
+                )
+            )
             found.setdefault(key, []).append(r)
         by_role.append(found)
     keys = set().union(*(set(g) for g in by_role))
     missing_sales_category = (
-        {i for i in (1, 2) if any(not r.get("source_product_category") for r in roles[i] or [])}
+        {
+            i
+            for i in (1, 2)
+            if any(
+                not r.get("source_product_category")
+                and not (
+                    r.get("_rpa")
+                    and r.get("sales_amount") == 0
+                    and r.get("_absolute_sales_amount", r.get("sales_amount")) == 0
+                )
+                for r in roles[i] or []
+            )
+        }
         if level == "category"
         else set()
     )
@@ -112,7 +142,7 @@ def groups(roles, level="style", parameters=None):
             g.get(key) if rows is not None else None for g, rows in zip(by_role, roles, strict=True)
         ]
         exemplar = next(r[0] for r in block if r)
-        # 分类缺失的销售组不能被静默抛除后宣称某分类分母完整。
+        # 无分类的非零/未知金额不能分配；RPA已确认的零金额对任意分类分母均无影响。
         if level == "category":
             for i in missing_sales_category:
                 block[i] = None

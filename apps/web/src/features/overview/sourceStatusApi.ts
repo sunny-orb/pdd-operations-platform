@@ -61,11 +61,11 @@ const source = z.object({
   history: historyCoverageSchema.optional(),
   id: z.string(),
   name: z.string(),
-  system: z.enum(["warehouse", "feishu", "nmc"]),
+  system: z.enum(["warehouse", "feishu", "nmc", "rpa"]),
   locator: z.string(),
   table_name: z.string(),
   source_title: z.string(),
-  source_url: z.string().url(),
+  source_url: z.string().url().nullable(),
   pages: z.array(z.string()),
   kind: z.string(),
   datasets: z.array(dataset),
@@ -83,7 +83,7 @@ const source = z.object({
     })
     .nullish(),
   upstream: z.object({
-    state: z.enum(["unchecked", "checking", "failed", "changed", "unchanged"]),
+    state: z.enum(["unchecked", "checking", "failed", "changed", "unchanged", "observed"]),
     checked_at: text,
     observed_at: text,
     web_updated_at: text,
@@ -170,6 +170,7 @@ export function upstreamLabel(row: SourceStatus) {
   if (row.upstream.state === "failed") return { text: "检查失败", color: "error" };
   if (row.upstream.stale) return { text: "检查已过期", color: "warning" };
   return {
+    observed: { text: "已检查", color: "success" },
     unchecked: { text: "尚未检查", color: "default" },
     checking: { text: "正在检查", color: "processing" },
     failed: { text: "检查失败", color: "error" },

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "apps/api"))
 from app.jobs.project_runtime import ProjectPaths, execute_project
 from app.jobs.project_sync import due_slot, read_schedule
 from app.jobs.sync_shop_daily import runtime_engine
+from app.modules.data_status.schedule_policy import JST_AFTERSALES_STEPS
 
 
 def source_password():
@@ -61,6 +62,12 @@ def main():
     engine = None
     try:
         config = read_schedule(path)
+        if (
+            not config.jst_aftersales_enabled
+            and args.only
+            and set(args.only) & set(JST_AFTERSALES_STEPS)
+        ):
+            raise ValueError("JST_AFTERSALES_DISABLED")
         if args.set_times:
             config = replace(config, times=tuple(sorted(args.set_times)))
             content = (
@@ -76,6 +83,7 @@ def main():
                 f"feishu_times = {json.dumps(list(config.feishu_times))}\n"
                 f"reconciliation_time = {json.dumps(config.reconciliation_time)}\n"
                 f"reconciliation_retry_seconds = {config.reconciliation_retry_seconds}\n"
+                f"jst_aftersales_enabled = {str(config.jst_aftersales_enabled).lower()}\n"
             )
             tmp = path.with_suffix(".tmp")
             tmp.write_text(content)
@@ -103,14 +111,35 @@ def main():
             try:
                 maintenance = compact_archives(engine, ROOT / "var/ingestion")
                 if maintenance.get("converted") or maintenance.get("collected_blocks"):
-                    print(json.dumps(dict(stage="archive_compaction", **maintenance)), flush=True)
+                    print(
+                        json.dumps(dict(stage="archive_compaction", **maintenance)),
+                        flush=True,
+                    )
             except (ValueError, OSError) as exc:
                 # 维护失败保留输入；继续正常检查，由来源本身如实记录容量或接收失败。
-                code = str(exc) if str(exc) in {
-                    "ARCHIVE_CAPACITY", "ARCHIVE_CHECKSUM", "ARCHIVE_RESTORE_REQUIRED",
-                    "ARCHIVE_PATH", "ARCHIVE_IDENTITY", "ARCHIVE_MANIFEST",
-                } else "ARCHIVE_MAINTENANCE_FAILED"
-                print(json.dumps(dict(stage="archive_compaction", status="failed", code=code)), flush=True)
+                code = (
+                    str(exc)
+                    if str(exc)
+                    in {
+                        "ARCHIVE_CAPACITY",
+                        "ARCHIVE_CHECKSUM",
+                        "ARCHIVE_RESTORE_REQUIRED",
+                        "ARCHIVE_PATH",
+                        "ARCHIVE_IDENTITY",
+                        "ARCHIVE_MANIFEST",
+                    }
+                    else "ARCHIVE_MAINTENANCE_FAILED"
+                )
+                print(
+                    json.dumps(
+                        {
+                            "stage": "archive_compaction",
+                            "status": "failed",
+                            "code": code,
+                        }
+                    ),
+                    flush=True,
+                )
         if args.only and (args.scheduled or args.check_updates):
             raise ValueError("INVALID_SYNC_DATASETS")
         paths = ProjectPaths(
@@ -124,15 +153,21 @@ def main():
             FEISHU_SOURCES,
             LEGACY_SOURCES,
             LEGACY_STEPS,
+            MONITOR_ONLY_SOURCES,
             WAREHOUSE_SOURCES,
         )
 
         manual_sources = ()
+        legacy_steps = tuple(
+            step
+            for step in LEGACY_STEPS
+            if config.jst_aftersales_enabled or step not in JST_AFTERSALES_STEPS
+        )
         manual_steps = args.only
         manual_processing = False
         if args.run_now and new_schedule:
             migrated = (*WAREHOUSE_SOURCES, *FEISHU_SOURCES)
-            allowed = {*migrated, *LEGACY_STEPS, "products", "product_scores"}
+            allowed = {*migrated, *legacy_steps, "products", "product_scores"}
             if args.only and not set(args.only) <= allowed:
                 raise ValueError("INVALID_SYNC_DATASETS")
             selected = set(args.only) if args.only else allowed
@@ -145,7 +180,7 @@ def main():
             )
             manual_steps = tuple(
                 step
-                for step in (*LEGACY_STEPS, "product_scores")
+                for step in (*legacy_steps, "product_scores")
                 if step in selected
                 and not (step == "product_scores" and manual_processing)
             )
@@ -160,7 +195,8 @@ def main():
                 slot,
                 paths=paths,
                 warehouse_password=source_password,
-                only=LEGACY_STEPS if args.scheduled and new_schedule else manual_steps,
+                only=legacy_steps if args.scheduled and new_schedule else manual_steps,
+                jst_aftersales_enabled=config.jst_aftersales_enabled,
                 max_attempts=config.max_attempts_per_slot,
                 **(
                     {
@@ -179,16 +215,26 @@ def main():
             print(json.dumps(result, ensure_ascii=False), flush=True)
         monitor_failed = False
         if monitor:
+            from app.connectors.aftersales_rpa_status import production_connection
             from app.jobs.source_monitor_runtime import execute_monitor
+
+            def production_rpa():
+                return production_connection(engine)
 
             checked = execute_monitor(
                 engine,
                 paths=paths,
                 warehouse_password=source_password,
                 interval_seconds=config.monitor_interval_seconds,
-                source_ids=LEGACY_SOURCES if new_schedule else None,
+                source_ids=(*LEGACY_SOURCES, *MONITOR_ONLY_SOURCES)
+                if new_schedule
+                else None,
                 reconciliation_sources=("product_regions",) if new_schedule else (),
                 reconciliation_time=config.reconciliation_time,
+                jst_aftersales_enabled=config.jst_aftersales_enabled,
+                rpa_connect=production_rpa
+                if os.environ.get("APP_ENV") == "production"
+                else None,
             )
             if checked.get("checked") or checked["status"] != "checked":
                 print(json.dumps(checked, ensure_ascii=False), flush=True)

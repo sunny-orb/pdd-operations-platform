@@ -1103,6 +1103,7 @@ def test_reconciliation_schema_permissions_and_guarded_downgrade(sales_pg):
         downgrade(c)
         assert c.scalar(sa.text("SELECT to_regclass('public.source_reconciliations')")) is None
         migrate(c)
+        before_revision = c.scalar(sa.text("SELECT version_num FROM alembic_version_v2"))
         assert c.scalar(sa.text("SELECT count(*) FROM source_reconciliations")) == 0
         assert c.scalar(
             sa.text("SELECT has_table_privilege('pdd_app','source_reconciliations','SELECT')")
@@ -1134,7 +1135,7 @@ def test_reconciliation_schema_permissions_and_guarded_downgrade(sales_pg):
         downgrade(c)
     with sales_pg.connect() as c:
         assert c.scalar(sa.text("SELECT status FROM source_reconciliations")) == "waiting"
-        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261114_18"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == before_revision
 
 
 def test_first_activation_registers_future_sunday_and_manual_does_not_consume_cycle(sales_pg):

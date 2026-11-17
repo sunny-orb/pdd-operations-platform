@@ -16,6 +16,13 @@ vi.mock("./Charts", () => ({
   Charts: () => <section id="aftersales-charts">历史趋势与原因结构</section>,
 }));
 beforeEach(() => {
+  const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTo");
+  Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+    configurable: true,
+    value(this: HTMLElement, { top }: ScrollToOptions) {
+      if (top !== undefined) this.scrollTop = top;
+    },
+  });
   vi.stubGlobal("matchMedia", () => ({
     matches: false,
     addListener: vi.fn(),
@@ -31,6 +38,13 @@ beforeEach(() => {
       disconnect() {}
     },
   );
+  return () => {
+    if (originalScrollTo) {
+      Object.defineProperty(HTMLElement.prototype, "scrollTo", originalScrollTo);
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+    }
+  };
 });
 afterEach(() => {
   cleanup();
@@ -242,20 +256,22 @@ it("完整空态保留共享导航和正文筛选、九卡，缺数据不假零�
   await user.click(screen.getByRole("button", { name: "指标与整改明细" }));
   await waitFor(() => expect(screen.getByRole("region", { name: "售后九项指标" })).toBeTruthy());
   const risk = within(screen.getByRole("region", { name: "风险五项指标" }));
-  expect(risk.getAllByText("待核对")).toHaveLength(5);
+  expect(risk.getAllByText("暂无数据")).toHaveLength(5);
   const insights = screen.getByRole("region", { name: "本期售后风险与优化建议" });
-  expect(within(insights).getByText("总体趋势")).toBeTruthy();
+  expect(within(insights).getByText("总退款率 —")).toBeTruthy();
   expect(
     within(insights)
       .getAllByRole("heading", { level: 3 })
       .map((item) => item.textContent),
-  ).toEqual(["异常品类 Top 5", "异常单款 Top 5", "品类优化 Top 3", "单款优化 Top 3"]);
-  const reading = screen.getByRole("region", { name: "管理层阅读口径" });
+  ).toEqual(["品类重点 Top 5", "单款重点 Top 5", "品类优化 Top 3", "单款优化 Top 3"]);
+  const reading = screen.getByLabelText("数据与计算口径");
+  await user.click(within(reading).getByText("数据与计算口径"));
   expect(within(reading).getByText("当前报告范围")).toBeTruthy();
   expect(within(reading).getByText("来源尚不可用")).toBeTruthy();
   const metrics = within(screen.getByRole("region", { name: "售后九项指标" }));
   expect(metrics.getAllByText("—")).toHaveLength(9);
-  expect(metrics.getAllByText("来源待接入")).toHaveLength(9);
+  expect(metrics.getAllByText("暂无数据")).toHaveLength(9);
+  expect(screen.getAllByText("来源待接入")).toHaveLength(9);
   const smaller = screen.getByText("偏小").closest("article")!;
   expect(within(smaller).getByText("0")).toBeTruthy();
   await user.click(screen.getByRole("tab", { name: "单款分析" }));
@@ -301,9 +317,15 @@ it("明细按后端页码请求并显示返回页，筛选改变重回第一页"
 });
 
 it("滚动30天周报对齐原版标题，并明确实际日期和非自然周", async () => {
+  const user = userEvent.setup();
   mount(false, true);
-  await screen.findByText("2026-09-28 至 2026-10-27（滚动 30 天，非自然周）");
+  await screen.findByText("2026-09-28 至 2026-10-27");
   expect(screen.getByRole("heading", { name: "近 30 天退货分析 · 周报" })).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "指标与整改明细" }));
+  const note = screen.getByText(/近30天周报采用滚动30天，非自然周/);
+  expect(note.closest("details")?.open).toBe(false);
+  await user.click(screen.getByText("数据与计算口径"));
+  expect(note.closest("details")?.open).toBe(true);
 });
 
 it("缺少行动数据时保留三个卡位，整改入口仍展开明细", async () => {

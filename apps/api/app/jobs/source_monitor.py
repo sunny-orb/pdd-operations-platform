@@ -32,17 +32,25 @@ def run_monitor(
     now=None,
     reconciliation_sources=(),
     reconciliation_time=RECONCILIATION_TIME,
+    receiving_sources=(),
 ):
     """注入来源检查函数和同步器(groups,持锁连接)；外部异常只落固定错误码。
 
     首次检查也必须实际接收，不能用观测时间认定已有平台版本与上游相同。
     synchronize返回每组来源是否成功，派生计算失败由产物状态单独表达。
     """
-    if interval_seconds < 60 or not set(probes) <= BY_ID.keys():
+    if (
+        interval_seconds < 60
+        or not set(probes) <= BY_ID.keys()
+        or not set(receiving_sources) <= probes.keys()
+    ):
         raise ValueError("INVALID_MONITOR_SCOPE")
 
     def clock():
         return now or datetime.now(UTC)
+
+    def receives(code):
+        return not BY_ID[code].monitor_only or code in receiving_sources
 
     started_at = clock()
     table = sa.Table("source_checkpoints", sa.MetaData(), schema="public", autoload_with=engine)
@@ -67,6 +75,12 @@ def run_monitor(
                 if not isinstance(value, dict) or len(json.dumps(value, default=str)) > 16000:
                     raise ValueError("INVALID_OBSERVATION")
                 digest = fingerprint(value)
+                if BY_ID[code].monitor_only:
+                    before = previous.get(code, {}).get("observed_fingerprint")
+                    value = {
+                        **value,
+                        "changed_since_previous_check": digest != before if before else None,
+                    }
                 write(
                     code,
                     checked_at=clock(),
@@ -109,6 +123,8 @@ def run_monitor(
             retry_groups = {}
             retry_interval = timedelta(seconds=SOURCE_RETRY_SECONDS)
             for code in probes:
+                if not receives(code):
+                    continue
                 prior = previous.get(code)
                 failed_tasks = [
                     task
@@ -164,12 +180,20 @@ def run_monitor(
                     else None,
                 )
                 observed[code] = digest
-                if digest and (digest != prior.get("accepted_fingerprint") or retry_at is not None):
+                if (
+                    digest
+                    and receives(code)
+                    and (digest != prior.get("accepted_fingerprint") or retry_at is not None)
+                ):
                     if group not in groups:
                         groups.append(group)
             # 同一一致性组只接收一次；先检查完所有来源，失败来源不误当已追平。
             try:
-                results = synchronize(tuple(groups), c) if observed else {}
+                results = (
+                    synchronize(tuple(groups), c)
+                    if any(receives(code) for code in observed)
+                    else {}
+                )
             except Exception as exc:
                 reason = deferred_reason(exc)
                 results = (

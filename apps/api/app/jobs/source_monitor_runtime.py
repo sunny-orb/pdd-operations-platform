@@ -4,11 +4,16 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 
+from app.connectors.aftersales_rpa import receive_stable
+from app.connectors.aftersales_rpa_status import configured_connection
 from app.connectors.source_probes import SourceProbes
 from app.jobs.project_runtime import execute_project
 from app.jobs.source_monitor import run_monitor
+from app.modules.aftersales.rpa_publisher import sync_rpa
 from app.modules.data_status.failure_codes import safe_failure_code
 from app.modules.data_status.schedule_policy import (
+    JST_AFTERSALES_SOURCES,
+    JST_AFTERSALES_STEPS,
     RECONCILIATION_RETRY_SECONDS,
     RECONCILIATION_TIME,
 )
@@ -35,6 +40,12 @@ def pending_processing(c):
     """已有相容输入但结果缺失或落后时重算；没有输入时不制造失败任务。"""
     heads = dict(c.execute(sa.text("SELECT dataset_code,version_id FROM current_datasets")).all())
     pending = []
+    rpa_active = c.scalar(
+        sa.text("""SELECT EXISTS (
+        SELECT 1 FROM current_datasets d JOIN version_inputs i ON i.output_version_id=d.version_id
+        JOIN dataset_versions v ON v.id=i.input_version_id
+        WHERE d.dataset_code='aftersales_report' AND v.dataset_code='rpa_returns')""")
+    )
     for output, required, step in (
         (
             "product_scores",
@@ -47,6 +58,9 @@ def pending_processing(c):
             "aftersales_report",
         ),
     ):
+        # RPA本地独立入口原子发布三角色；JST监测不能拿自己的日明细重算RPA期间报表。
+        if output == "aftersales_report" and rpa_active:
+            continue
         if not all(code in heads for code in required):
             continue
         inputs = dict(
@@ -79,17 +93,44 @@ def execute_monitor(
     source_ids=None,
     reconciliation_sources=(),
     reconciliation_time=RECONCILIATION_TIME,
+    jst_aftersales_enabled=True,
+    rpa_connect=None,
 ):
-    probes = SourceProbes(warehouse_password, paths.feishu_root)
+    receive_rpa = not jst_aftersales_enabled and (
+        source_ids is None or "aftersales_rpa" in source_ids
+    )
+    if rpa_connect is None:
+
+        def rpa_connect():
+            return configured_connection(paths.feishu_root)
+
+    probes = SourceProbes(warehouse_password, paths.feishu_root, rpa_connect=rpa_connect)
 
     def synchronize(groups, connection):
+        rpa_state = {}
+        if receive_rpa and "aftersales_rpa" in groups:
+            groups = tuple(group for group in groups if group != "aftersales_rpa")
+            try:
+                sync_rpa(
+                    engine,
+                    lambda: receive_stable(rpa_connect),
+                    paths.ingestion_root / "aftersales_rpa",
+                )
+                rpa_state["aftersales_rpa"] = True
+            except Exception as exc:
+                rpa_state = {
+                    "aftersales_rpa": False,
+                    "_errors": {"aftersales_rpa": safe_failure_code(str(exc))},
+                }
         with connection.begin():
             pending = pending_processing(connection)
         if source_ids is not None:
             pending = [step for step in pending if step == "aftersales_report"]
+        if not jst_aftersales_enabled:
+            pending = [step for step in pending if step not in JST_AFTERSALES_STEPS]
         steps = tuple(dict.fromkeys((*selected_steps(groups), *pending)))
         if not steps:
-            return {}
+            return rpa_state
         result = execute_project(
             engine,
             "monitor:" + str(uuid4()),
@@ -97,6 +138,7 @@ def execute_monitor(
             warehouse_password=warehouse_password,
             only=steps,
             lock_connection=connection,
+            jst_aftersales_enabled=jst_aftersales_enabled,
         )
         outputs = result.get("datasets", {})
         states = {
@@ -120,6 +162,9 @@ def execute_monitor(
             for group in groups
             if not states[group]
         }
+        if rpa_state:
+            states["aftersales_rpa"] = rpa_state["aftersales_rpa"]
+            states["_errors"].update(rpa_state.get("_errors", {}))
         states["_deferred"] = {
             group: next(
                 outputs.get(step, {}).get("error_code")
@@ -144,11 +189,17 @@ def execute_monitor(
     try:
         return run_monitor(
             engine,
-            {k: v for k, v in probes.functions().items() if source_ids is None or k in source_ids},
+            {
+                k: v
+                for k, v in probes.functions().items()
+                if (source_ids is None or k in source_ids)
+                and (jst_aftersales_enabled or k not in JST_AFTERSALES_SOURCES)
+            },
             synchronize,
             interval_seconds=interval_seconds,
             reconciliation_sources=reconciliation_sources,
             reconciliation_time=reconciliation_time,
+            receiving_sources=("aftersales_rpa",) if receive_rpa else (),
         )
     finally:
         probes.close()

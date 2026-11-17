@@ -24,6 +24,9 @@ DATE_TABLES = {
     "product_regions": ("read_product_region_records", "period_end"),
     "shop_refunds": ("shop_refund_records", "business_date"),
     "jst_returns": ("read_return_records", "period_end"),
+    "rpa_returns": ("read_return_records", "period_end"),
+    "rpa_shipped_sales": ("read_product_sales_records", "period_end"),
+    "rpa_cancelled_sales": ("read_product_sales_records", "period_end"),
     "jst_shipped_sales": ("read_product_sales_records", "period_end"),
     "jst_cancelled_sales": ("read_product_sales_records", "period_end"),
     "sales_targets": ("sales_targets", "period_end"),
@@ -36,7 +39,7 @@ def versions(c):
         for r in c.execute(
             sa.text("""
       SELECT v.id,v.dataset_code,v.received_at,v.sealed_at,v.period_start,v.period_end,
-             v.upstream_revision FROM current_datasets p
+             v.upstream_revision,v.row_schema_revision FROM current_datasets p
              JOIN dataset_versions v ON v.id=p.version_id
     """)
         ).mappings()
@@ -315,7 +318,13 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                 )
 
             rows = []
+            rpa_active = (
+                heads.get("aftersales_report", {}).get("row_schema_revision") == "m5-rpa-period-v1"
+            )
             for source in SOURCES:
+                # 运营中心也消费当前售后报告；JST旧链仅供固定历史读取，不能冒充当前来源。
+                if rpa_active and source.id in ("jst_returns", "jst_sales", "jst_master"):
+                    continue
                 p = checkpoints.get(source.id, {})
                 datasets = [dataset(code, p, source_id=source.id) for code in source.datasets]
                 fixed_times = source_times(source.id, *schedule_args) if scheduled else ()
@@ -362,6 +371,8 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                 changed = p.get("observed_fingerprint") and p["observed_fingerprint"] != p.get(
                     "accepted_fingerprint"
                 )
+                if source.monitor_only:
+                    changed = p.get("observation", {}).get("changed_since_previous_check")
                 upstream_state = (
                     "unchecked"
                     if not p
@@ -369,6 +380,8 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                     if p["check_status"] == "checking"
                     else "failed"
                     if p["check_status"] == "failed"
+                    else "observed"
+                    if source.monitor_only and changed is None
                     else "changed"
                     if changed
                     else "unchanged"
@@ -379,7 +392,11 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                     else "failed"
                     if failed
                     else "pending"
-                    if changed or deferred or fixed_times and unconfirmed_receipt(p)
+                    if changed
+                    and not source.monitor_only
+                    or deferred
+                    or fixed_times
+                    and unconfirmed_receipt(p)
                     else "available"
                     if has_data
                     else "unavailable"
@@ -419,7 +436,11 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                             web_checked_at=p.get("web_checked_at"),
                             next_check_at=retry_at
                             or (
-                                next_check(source.id, now, *schedule_args) if fixed_times else None
+                                next_check(source.id, now, *schedule_args)
+                                if fixed_times
+                                else p.get("checked_at") + timedelta(seconds=interval_seconds)
+                                if source.monitor_only and p.get("checked_at") and enabled
+                                else None
                             ),
                             check_times=list(fixed_times),
                             stale=bool(

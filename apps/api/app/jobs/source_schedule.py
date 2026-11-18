@@ -8,7 +8,11 @@ import sqlalchemy as sa
 
 from app.jobs.source_monitor import fingerprint
 from app.modules.data_status.catalog import job_for
-from app.modules.data_status.checkpoint_store import CheckpointStore, read_legacy_tasks
+from app.modules.data_status.checkpoint_store import (
+    CheckpointStore,
+    read_legacy_tasks,
+    recover_interrupted_checks,
+)
 from app.modules.data_status.failure_codes import SYNC_FAILURE_CODES, safe_failure_code
 from app.modules.data_status.schedule_policy import (
     FEISHU_SOURCES,
@@ -154,6 +158,9 @@ def run_scheduled_sources(
         if c is None:
             return {"status": "already_running", "checked": 0}
         previous = store.read(c)
+        if not force:
+            with c.begin():
+                recover_interrupted_checks(c, store.table, previous, probes, started)
         cycles = store.read(c, store.reconciliations) if not force else {}
         with c.begin():
             legacy_tasks = read_legacy_tasks(c) if cycles else {}

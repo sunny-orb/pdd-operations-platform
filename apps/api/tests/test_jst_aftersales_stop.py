@@ -192,7 +192,7 @@ def test_cli_applies_switch_to_every_project_and_monitor_entry(
     )
     from app.modules import archive_compaction
 
-    monkeypatch.setattr(archive_compaction, "compact_archives", lambda *a: {})
+    monkeypatch.setattr(archive_compaction, "compact_archives", lambda *a, **kw: {})
     calls = []
 
     def execute(*a, **kw):

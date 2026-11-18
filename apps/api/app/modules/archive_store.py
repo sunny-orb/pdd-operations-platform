@@ -13,6 +13,7 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
+from app.modules.archive_budget import consume, inventory
 from app.modules.archive_payload import PAYLOADS, open_payload, read_manifest, write_payload
 
 DEFAULT_MAX = 12 * 1024**3
@@ -36,6 +37,7 @@ def _digest(path, inode, size, mtime_ns, ctime_ns, encoded_text=False, deadline=
         digest.update(b'"')
         with open_payload(path) as raw, io.TextIOWrapper(raw, encoding="utf-8") as source:
             while chunk := source.read(1024 * 1024):
+                consume(len(chunk.encode("utf-8")))
                 if deadline is not None and time.monotonic() >= deadline:
                     raise ValueError("ARCHIVE_MAINTENANCE_BUDGET")
                 digest.update(json.dumps(chunk, ensure_ascii=False)[1:-1].encode())
@@ -43,6 +45,7 @@ def _digest(path, inode, size, mtime_ns, ctime_ns, encoded_text=False, deadline=
     else:
         with open_payload(path) as source:
             while chunk := source.read(1024 * 1024):
+                consume(len(chunk))
                 if deadline is not None and time.monotonic() >= deadline:
                     raise ValueError("ARCHIVE_MAINTENANCE_BUDGET")
                 digest.update(chunk)
@@ -132,18 +135,9 @@ class ArchiveStore:
         self.payload_dedup_enabled = payload_dedup_enabled
 
     def usage(self):
-        total = 0
         if not self.root.exists():
-            return total
-        for directory, dirs, files in os.walk(self.root, followlinks=False):
-            for name in (*dirs, *files):
-                p = Path(directory) / name
-                info = p.lstat()
-                if stat.S_ISLNK(info.st_mode) or info.st_nlink > 1 and p.is_file():
-                    raise ValueError("ARCHIVE_PATH")
-                if stat.S_ISREG(info.st_mode):
-                    total += info.st_size
-        return total
+            return 0
+        return sum(info.st_size for _, info in inventory(self.root))
 
     def check(self, additional=0):
         used = self.usage()
@@ -191,9 +185,12 @@ class ArchiveStore:
                         remaining -= len(chunk)
                     stream.flush()
                     os.fsync(stream.fileno())
-                os.link(temporary, path, follow_symlinks=False)
+                if path.exists():
+                    raise ValueError("ARCHIVE_EXISTS")
+                os.replace(temporary, path)
             finally:
-                os.unlink(temporary)
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
         finally:
             os.close(lock)
         return str(path)
@@ -266,9 +263,12 @@ def write_archive_stream(path, chunks):
                 digest = h.hexdigest()
                 if expected is not None and digest != expected:
                     raise ValueError("ARCHIVE_CHECKSUM")
-                os.link(temporary, path, follow_symlinks=False)
+                if path.exists():
+                    raise ValueError("ARCHIVE_EXISTS")
+                os.replace(temporary, path)
             finally:
-                os.unlink(temporary)
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
         if expected is None:
             atomic_bytes(sidecar, digest.encode())
         return str(path)

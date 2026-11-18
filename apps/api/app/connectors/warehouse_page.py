@@ -1,4 +1,4 @@
-"""数仓可见网页更新时间；独立浏览器会话，不读取个人浏览器或替代经营数据连接器。"""
+"""仅本机人工登录和开发验收使用；不进入生产镜像或定时同步链路。"""
 
 import fcntl
 import json
@@ -82,6 +82,8 @@ class WarehousePageReader:
 
     def start(self, *, login=False):
         """按需启动本轮浏览器；login仅供人工登录入口，不在调度中弹窗或自动提交身份。"""
+        if os.environ.get("APP_ENV") == "production":
+            raise WarehousePageError("WAREHOUSE_BROWSER_DISABLED_IN_PRODUCTION")
         if self.failure:
             raise WarehousePageError(self.failure)
         if self.context:

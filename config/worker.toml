@@ -1,0 +1,4 @@
+# 本机定时入口和容器Worker共用；超时只结束本轮进程组，不改宿主服务。
+run_timeout_seconds = 900
+termination_grace_seconds = 10
+poll_seconds = 0.1

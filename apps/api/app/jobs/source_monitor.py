@@ -8,7 +8,10 @@ from datetime import UTC, datetime, timedelta
 import sqlalchemy as sa
 
 from app.modules.data_status.catalog import BY_ID, job_for
-from app.modules.data_status.checkpoint_store import reconciliation_owned_sources
+from app.modules.data_status.checkpoint_store import (
+    reconciliation_owned_sources,
+    recover_interrupted_checks,
+)
 from app.modules.data_status.failure_codes import SYNC_FAILURE_CODES, safe_failure_code
 from app.modules.data_status.schedule_policy import (
     RECONCILIATION_TIME,
@@ -20,6 +23,9 @@ from app.modules.database_residency import deferred_reason
 
 
 def fingerprint(value):
+    # HTTP和旧可见网页是同一tableId/dataLastUpdateTime证据；切换读取方式不制造接收副本。
+    if value.get("basis") == "warehouse_web_metadata":
+        value = {**value, "basis": "warehouse_web_page"}
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -109,6 +115,7 @@ def run_monitor(
                 )
                 probes = {code: probe for code, probe in probes.items() if code not in weekly_owned}
                 previous = {r["source_id"]: dict(r) for r in c.execute(sa.select(table)).mappings()}
+                recover_interrupted_checks(c, table, previous, probes, started_at)
                 tasks = {
                     r["job_code"]: r
                     for r in c.execute(

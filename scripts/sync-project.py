@@ -31,21 +31,6 @@ def source_password():
     return values["WAREHOUSE_PASSWORD"]
 
 
-def warehouse_web_headers():
-    """仅读取用户配置的后台只读身份；不提取或长期保存浏览器登录会话。"""
-    path = ROOT / "var/local-db/warehouse-web-headers.json"
-    if not path.is_file() or path.stat().st_mode & 0o077:
-        raise ValueError("WAREHOUSE_METADATA_AUTH_REQUIRED")
-    values = json.loads(path.read_text())
-    if (
-        not isinstance(values, dict)
-        or not values
-        or any(not isinstance(v, str) for v in values.values())
-    ):
-        raise ValueError("WAREHOUSE_METADATA_AUTH_INVALID")
-    return values
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     modes = parser.add_mutually_exclusive_group(required=True)
@@ -105,41 +90,6 @@ def main():
         if not slot and not monitor and not (new_schedule and args.scheduled):
             return 0
         engine = runtime_engine()
-        if args.scheduled and config.enabled:
-            from app.modules.archive_compaction import compact_archives
-
-            try:
-                maintenance = compact_archives(engine, ROOT / "var/ingestion")
-                if maintenance.get("converted") or maintenance.get("collected_blocks"):
-                    print(
-                        json.dumps(dict(stage="archive_compaction", **maintenance)),
-                        flush=True,
-                    )
-            except (ValueError, OSError) as exc:
-                # 维护失败保留输入；继续正常检查，由来源本身如实记录容量或接收失败。
-                code = (
-                    str(exc)
-                    if str(exc)
-                    in {
-                        "ARCHIVE_CAPACITY",
-                        "ARCHIVE_CHECKSUM",
-                        "ARCHIVE_RESTORE_REQUIRED",
-                        "ARCHIVE_PATH",
-                        "ARCHIVE_IDENTITY",
-                        "ARCHIVE_MANIFEST",
-                    }
-                    else "ARCHIVE_MAINTENANCE_FAILED"
-                )
-                print(
-                    json.dumps(
-                        {
-                            "stage": "archive_compaction",
-                            "status": "failed",
-                            "code": code,
-                        }
-                    ),
-                    flush=True,
-                )
         if args.only and (args.scheduled or args.check_updates):
             raise ValueError("INVALID_SYNC_DATASETS")
         paths = ProjectPaths(
@@ -240,39 +190,68 @@ def main():
                 print(json.dumps(checked, ensure_ascii=False), flush=True)
             monitor_failed = checked["status"] in ("failed", "partial")
         if new_schedule and (args.scheduled or args.check_updates or manual_sources):
-            from app.connectors.warehouse_page import WarehousePageReader
             from app.jobs.source_monitor_runtime import execute_source_schedule
 
-            # 浏览器按实际到期来源延迟启动；调用方拥有生命周期，调度核心只依赖read。
-            with WarehousePageReader(
-                ROOT / "var/local-db/warehouse-browser/state.json",
-                channel=os.environ.get("WAREHOUSE_BROWSER_CHANNEL", "chrome"),
-            ) as reader:
-                checked = execute_source_schedule(
-                    engine,
-                    paths=paths,
-                    warehouse_password=source_password,
-                    warehouse_reader=reader,
-                    warehouse_times=config.warehouse_times,
-                    feishu_times=config.feishu_times,
-                    reconciliation_time=config.reconciliation_time,
-                    reconciliation_retry_seconds=config.reconciliation_retry_seconds,
-                    **(
-                        {
-                            "source_ids": manual_sources,
-                            "force": True,
-                            "process_products": manual_processing,
-                        }
-                        if manual_sources
-                        else {}
-                    ),
-                )
+            checked = execute_source_schedule(
+                engine,
+                paths=paths,
+                warehouse_password=source_password,
+                warehouse_times=config.warehouse_times,
+                feishu_times=config.feishu_times,
+                reconciliation_time=config.reconciliation_time,
+                reconciliation_retry_seconds=config.reconciliation_retry_seconds,
+                **(
+                    {
+                        "source_ids": manual_sources,
+                        "force": True,
+                        "process_products": manual_processing,
+                    }
+                    if manual_sources
+                    else {}
+                ),
+            )
             if checked.get("checked") or checked["status"] != "checked":
                 print(json.dumps(checked, ensure_ascii=False), flush=True)
             monitor_failed = monitor_failed or checked["status"] in (
                 "failed",
                 "partial",
             )
+        if args.scheduled and config.enabled:
+            from app.modules.archive_compaction import compact_archives
+
+            try:
+                maintenance = compact_archives(engine, ROOT / "var/ingestion", scheduled=True)
+                if (maintenance.get("converted") or maintenance.get("collected_blocks")
+                    or maintenance.get("removed_temporary_files") or maintenance.get("status") == "budget"):
+                    print(
+                        json.dumps(dict(stage="archive_compaction", **maintenance)),
+                        flush=True,
+                    )
+            except Exception as exc:  # noqa: BLE001 - 维护异常不得覆盖已成功完成的取数结果
+                # 维护失败保留输入；继续正常检查，由来源本身如实记录容量或接收失败。
+                code = (
+                    str(exc)
+                    if str(exc)
+                    in {
+                        "ARCHIVE_CAPACITY",
+                        "ARCHIVE_CHECKSUM",
+                        "ARCHIVE_RESTORE_REQUIRED",
+                        "ARCHIVE_PATH",
+                        "ARCHIVE_IDENTITY",
+                        "ARCHIVE_MANIFEST",
+                    }
+                    else "ARCHIVE_MAINTENANCE_FAILED"
+                )
+                print(
+                    json.dumps(
+                        {
+                            "stage": "archive_compaction",
+                            "status": "failed",
+                            "code": code,
+                        }
+                    ),
+                    flush=True,
+                )
         return int(result["status"] == "failed" or monitor_failed)
     except Exception as exc:  # noqa: BLE001 - CLI边界只输出异常类型，避免凭据泄漏
         print(json.dumps({"status": "failed", "error": type(exc).__name__}), flush=True)
@@ -283,4 +262,6 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from app.jobs.process_guard import scheduled_entry
+
+    sys.exit(scheduled_entry(main, ROOT))

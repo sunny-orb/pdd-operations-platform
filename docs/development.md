@@ -10,7 +10,7 @@
 
 - `npm run dev`：同时启动 Vite 和 API；也可用 `dev:web`、`dev:api` 单独启动。
 - `/health/live` 检查进程；`/health/ready` 检查应用库可连接。未配置数据库时就绪 503 是预期，健康检查不等于经营验收。
-- Node 与 Python 使用项目锁文件；后端从 `requirements-dev.in` 在独立环境解析更新 `requirements-dev.lock`，不只改输入文件。
+- Node 与 Python 使用项目锁文件；后端开发从 `requirements-dev.in` 解析 `requirements-dev.lock`；生产单独从 `requirements.in` 解析 `requirements.lock`，固定同版本公共依赖，不把浏览器或测试工具装入镜像。
 
 本地API核验脚本使用Vite中间件实例时，配置会自动使用按进程隔离的`node_modules/.vite-verification/<pid>`缓存，避免覆盖5173页面服务的预构建依赖；调用方已显式指定缓存时沿用其目录，该目录也必须与页面服务隔离。额外启动普通浏览器测试服务也应指定独立`cacheDir`。如旧会话因缓存混用出现`Invalid hook call`白屏，先停止共用缓存的核验实例，重启前端（必要时在项目根目录执行`npm run dev --workspace @pdd/web -- --force`）并刷新页面；不要删除经营归档或重装依赖来处理。验证见跳转白屏修复（2026-11-10本地验收记录）。
 
@@ -61,14 +61,14 @@ npm run check:db-schema
 
 配置唯一入口为[config/sync.toml](../config/sync.toml)，时区Asia/Shanghai，独立launchd每分钟重新读取。source_schedule_enabled=true时，warehouse_times指定8个迁移数仓来源的7个时点，feishu_times指定两张飞书表的2个时点；同槽按源持久去重。每周日按 `reconciliation_time` 进行获准范围对账，失败源按 `reconciliation_retry_seconds` 从结束时刻等待后重试。原times和monitor_interval_seconds仅继续用于聚水潭4来源、天气2来源；API和页面刷新不访问上游。开关未启用时维持原全项目行为，实际启用进度见TODO。
 
-固定策略使用独立网页读取连接器，需要本机安装Google Chrome及锁定Python依赖。先运行专用登录入口，在新浏览器窗口完成既有飞书登录；程序只保存该专用会话的数仓域登录状态，不读取个人Chrome资料，不记录密码：
+固定策略直接通过HTTP读取数仓表的dataLastUpdateTime，后台和生产不需要浏览器。已有专用登录文件可直接复用。只有首次或登录失效时，在本机安装Google Chrome及开发依赖，通过专用窗口完成既有飞书登录；程序不读取个人Chrome资料、不记录密码：
 
 ```bash
 apps/api/.venv/bin/python scripts/configure-warehouse-browser.py --login
 apps/api/.venv/bin/python scripts/configure-warehouse-browser.py --check
 ```
 
-状态文件为`var/local-db/warehouse-browser/state.json`（0600，父目录0700，Git忽略）。--check使用新的无界面浏览器逐表读取8个固定网页，成功不代表经营事实已齐；两命令都不启用计划、不下载经营数据。后台仅到期才启动浏览器，一轮复用、串行读取，结束后关闭；每次重新加载目标文档，不能复用hash切表前的旧时间。登录失效本轮停止重复登录，平台显示检查失败并保留旧数据；用户重跑--login后下个固定槽继续。不会自动回退到后台账号或复制个人浏览器Cookie。
+状态文件为`var/local-db/warehouse-browser/state.json`（0600，父目录0700，Git忽略），沿用历史路径，不表示生产安装了浏览器。`--check`串行HTTP读取8表，完全不启动浏览器，不启用计划或接收经营数据。生产仅安装`requirements.lock`，Playwright只在开发依赖；浏览器登录模块也排除在生产镜像之外。认证失效保留旧观测和可用数据，按原5分钟规则重查；用户在本机续登后仅更新获准项目内的认证文件。不会自动回退SQL账号或复制个人浏览器Cookie。
 
 启用前迁移到当前head，完成真实网页读取、实际接收及无变化不下载验证。`source_schedule_enabled=true`切换8数仓和2飞书，两个旧自动路径只保留聚水潭4来源和天气2来源。--set-times只改旧时点并保留新配置；手动--run-now/--only仍走同一来源状态机，不消费固定槽或每周对账周期。Playwright和Chrome为网页适配器的运行依赖，未来平台可注入另一个warehouse_reader，不需改调度策略。
 
@@ -123,3 +123,9 @@ npm run format:check
 ## 本地文件保留
 
 `var/`、`.env`、依赖环境、经营输入、模型材料、归档和日志保持 Git 忽略。本轮整理不删除业务库、持久卷、原始输入或运行凭据；保留策略批准前不启用自动清理。五页来源、金额、版本与未决口径统一见[数据契约](data-contract.md)，不在运行手册另维护一套指标定义。
+
+### 定时任务资源保护
+
+本机`scripts/sync-project.py --scheduled`与容器Worker共用`config/worker.toml`整轮监督：默认900秒，终止宽限10秒，按本轮新进程组回收。手工单次导入命令保持原行为；不得通过设置内部监督标记绕过本机定时入口。
+
+归档自动维护在取数之后，参数见`config/archive.toml`；每小时一次、20秒、最多2文件、4MiB/s及500个新目录项/s。根内`.maintenance.json`只有冷却和目录栈，可跨重启继续；旧输入按原格式读取。维护budget表示保留输入并等待下次，不代表数据同步失败或回收成功。完整GC不能在预算内验证时保留块，绝不为腾空间降低历史保护。

@@ -223,7 +223,10 @@ def execute_source_schedule(
     process_products=True,
 ):
     """外部调度复用入口；所有路径/认证/时刻显式注入，不在API进程创建定时器。"""
-    from app.connectors.warehouse_metadata import WarehouseMetadataReader
+    from app.connectors.warehouse_metadata import (
+        WarehouseMetadataReader,
+        configured_warehouse_reader,
+    )
     from app.jobs.source_schedule import run_scheduled_sources
     from app.modules.data_status.schedule_policy import (
         FEISHU_SOURCES,
@@ -233,8 +236,10 @@ def execute_source_schedule(
     )
     from app.modules.product_board.source import TABLES
 
-    metadata = warehouse_reader or WarehouseMetadataReader(
-        warehouse_headers, session=warehouse_session
+    metadata = warehouse_reader or (
+        WarehouseMetadataReader(warehouse_headers, session=warehouse_session)
+        if warehouse_headers is not None or warehouse_session is not None
+        else configured_warehouse_reader(paths.feishu_root)
     )
     feishu = SourceProbes(warehouse_password, paths.feishu_root)
     probes = {code: lambda code=code: metadata.read(code) for code in WAREHOUSE_SOURCES}

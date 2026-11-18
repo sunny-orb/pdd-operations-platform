@@ -10,13 +10,18 @@
 !apps/api/migrations_v2/
 !apps/api/migrations_v2/**
 !apps/api/alembic-v2.ini
-!apps/api/requirements-dev.lock
+!apps/api/requirements.lock
 !config/
 !config/**
 !scripts/
 !scripts/render-db-schema.py
 !scripts/init-deployment-db.py
+!scripts/upgrade-deployment-db.py
 !scripts/sync-project.py
+!scripts/archive-maintenance.py
+!scripts/storage-policy.py
+!scripts/database-maintenance.py
+!scripts/cleanup-legacy-aftersales.py
 !deploy/
 !deploy/Dockerfile.*
 !deploy/nginx.conf
@@ -28,3 +33,4 @@
 **/.env*
 **/*.log
 **/tests
+apps/api/app/connectors/warehouse_page.py

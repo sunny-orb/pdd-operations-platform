@@ -12,7 +12,7 @@
 | 公司增量升级 | `upgrade-deployment-db.py [--apply]`                         | 批准起点12/16/17→18，默认只读，维护窗口内显式执行，见[部署方案](../docs/implementation/deployment.md)                                         |
 | 生产复用策略 | `storage-policy.py [preflight/enable/disable]`               | 容器内固定范围入口；宿主统一调用`deploy/storage.py`，默认只读，见[启用与停用](../docs/implementation/deployment.md#production-storage-policy) |
 | 项目同步     | `sync-project.py`、`install-sync-schedule.py`                | 同一执行链的状态、补跑、钟点及 launchd 安装                                                                                                   |
-| 数仓网页采集 | `configure-warehouse-browser.py --login / --check`           | 专用浏览器飞书登录、无界面8表网页时间验证；不启用调度、不接收经营数据                                                                         |
+| 数仓网页采集 | `configure-warehouse-browser.py --login / --check`           | 仅本机人工飞书登录；--check通过HTTP验证8表时间，不启动浏览器、不启用调度或接收经营数据                                                        |
 | 历史推广补齐 | `import-promotion-history.py --input <私有JSON> [--publish]` | 默认只校验11条授权范围，显式发布走本机受控身份及全局锁                                                                                        |
 | 销售独立接收 | `sync-sales.py`、`sync-sales-sources.py`                     | 现行销售来源 CLI 适配                                                                                                                         |
 | 受控升级     | `upgrade-*-local.py`                                         | 既有库逐项升级；按对应设计、版本和备份条件选择                                                                                                |

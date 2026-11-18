@@ -4,6 +4,10 @@
 
 ## 验证记录索引
 
+[整轮超时、归档节流与中断恢复（2026-11-18，本地）](validation/2026-11-18.md#resource-guard)。
+
+[数仓HTTP更新时间与生产浏览器移除（2026-11-18，本地）](validation/2026-11-18.md#warehouse-http)。
+
 [售后页头与报告周期独立核验（2026-11-18）](validation/2026-11-18.md#aftersales-platform-cutoff)。
 [售后筛选读取复用与本地测速（2026-11-18）](validation/2026-11-18.md#aftersales-filter-performance)。
 

@@ -13,6 +13,8 @@ import zlib
 from contextlib import contextmanager
 from pathlib import Path
 
+from app.modules.archive_budget import consume
+
 MAGIC = b"PDD-ARCHIVE-CHUNKS-V1\n"
 PAYLOADS = frozenset(
     {
@@ -67,6 +69,7 @@ def read_block(root, item):
     ):
         raise ValueError("ARCHIVE_MANIFEST")
     path = block_path(root, item["sha256"])
+    consume(item["size"])
     try:
         if path.stat().st_size > MAX_CHUNK + 4096:
             raise ValueError("ARCHIVE_CHECKSUM")
@@ -104,10 +107,12 @@ def read_manifest(path):
 
 
 def _read_manifest(path, checked):
+    consume()
     path = _checked_path(path, checked)
     with path.open("rb") as f:
         if f.read(len(MAGIC)) != MAGIC:
             return None
+        consume(min(path.stat().st_size, MAX_MANIFEST + 1))
         raw = f.read(MAX_MANIFEST + 1)
     if len(raw) > MAX_MANIFEST:
         raise ValueError("ARCHIVE_MANIFEST")
@@ -225,6 +230,7 @@ def logical_chunks(pieces):
 
 
 def atomic_bytes(path, data, replace=False):
+    consume(len(data))
     path = safe(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     safe(path.parent)
@@ -234,10 +240,10 @@ def atomic_bytes(path, data, replace=False):
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        if replace:
-            os.replace(tmp, path)
-        else:
-            os.link(tmp, path, follow_symlinks=False)
+        # 调用方持归档排他锁；rename不留下SIGKILL时的canonical/.pending双硬链接。
+        if not replace and path.exists():
+            raise ValueError("ARCHIVE_EXISTS")
+        os.replace(tmp, path)
         fd = os.open(path.parent, os.O_RDONLY)
         try:
             os.fsync(fd)
@@ -248,7 +254,17 @@ def atomic_bytes(path, data, replace=False):
             os.unlink(tmp)
 
 
-def write_payload(path, pieces, store, *, replace=False, expected=None, allowance=0, deadline=None):
+def write_payload(
+    path,
+    pieces,
+    store,
+    *,
+    replace=False,
+    expected=None,
+    allowance=0,
+    deadline=None,
+    base_usage=None,
+):
     """调用方持.archive.lock；每块写前限额，失败只移除本调用新建且未发布的块。"""
     path = safe(path)
     root = payload_root(path)
@@ -257,7 +273,7 @@ def write_payload(path, pieces, store, *, replace=False, expected=None, allowanc
     if path.exists() and not replace:
         raise ValueError("ARCHIVE_EXISTS")
     before = path.stat() if path.exists() else None
-    base_usage = store.usage()
+    base_usage = store.usage() if base_usage is None else base_usage
     new_bytes = 0
     created = []
     items = []

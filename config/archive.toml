@@ -3,5 +3,12 @@
 max_archive_bytes = 12884901888
 min_free_bytes = 2147483648
 
-# 历史逻辑输入不删除；新归档使用透明压缩内容块，调度前逐批转换旧输入。
+# 历史逻辑输入不删除；新归档使用透明压缩内容块，正常取数后逐批转换旧输入。
 payload_dedup_enabled = true
+
+# 正常取数后维护；失败/预算退出也冷却，重启不反复扫描。
+maintenance_interval_seconds = 3600
+maintenance_max_files = 2
+maintenance_max_seconds = 20
+maintenance_bytes_per_second = 4194304
+maintenance_entries_per_second = 500

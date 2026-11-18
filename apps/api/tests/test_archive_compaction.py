@@ -9,6 +9,174 @@ import sqlalchemy as sa
 pytest_plugins = ["sales_pg_support"]
 
 
+def test_scheduled_maintenance_cooldown_skips_scan_across_invocations(
+    sales_pg, tmp_path, monkeypatch
+):
+    from app.modules.archive_compaction import compact_archives
+    from app.modules.archive_payload import open_payload
+    from app.modules.archive_store import ArchiveStore
+
+    root = tmp_path / "ingestion"
+    policy(tmp_path)
+    path, data = raw_archive(root)
+    assert compact_archives(sales_pg, root, scheduled=True)["converted"] == 1
+    with open_payload(path) as source:
+        assert source.read() == data
+
+    def unwanted_scan(*args, **kwargs):
+        raise AssertionError("cooldown must not rescan archives")
+
+    monkeypatch.setattr(ArchiveStore, "usage", unwanted_scan)
+    assert compact_archives(sales_pg, root, scheduled=True)["status"] == "not_due"
+
+
+def test_maintenance_zero_budget_does_not_start_full_tree_scan(sales_pg, tmp_path, monkeypatch):
+    from app.modules.archive_compaction import compact_archives
+    from app.modules.archive_store import ArchiveStore
+
+    root = tmp_path / "ingestion"
+    policy(tmp_path)
+    path, data = raw_archive(root)
+
+    def unwanted_scan(*args, **kwargs):
+        raise AssertionError("exhausted budget still scanned the archive tree")
+
+    monkeypatch.setattr(ArchiveStore, "usage", unwanted_scan)
+    assert compact_archives(sales_pg, root, max_seconds=0)["status"] == "budget"
+    assert path.read_bytes() == data
+
+
+def test_maintenance_removes_only_reserved_interrupted_temporary_files(sales_pg, tmp_path):
+    from app.modules.archive_compaction import compact_archives
+
+    root = tmp_path / "ingestion"
+    policy(tmp_path)
+    path, data = raw_archive(root, data=b"small retained history")
+    pending = path.parent / ".pending-ab12_cd3"
+    pending.write_bytes(b"interrupted write")
+    unknown = path.parent / "notes.tmp"
+    unknown.write_bytes(b"unrelated retain")
+    compact_archives(sales_pg, root)
+    assert not pending.exists()
+    assert path.read_bytes() == data and unknown.read_bytes() == b"unrelated retain"
+
+
+@pytest.mark.parametrize("scheduled", [False, True])
+def test_interrupted_link_commit_is_repaired_without_allowing_external_hardlinks(
+    sales_pg, tmp_path, scheduled
+):
+    import os
+
+    from app.modules.archive_compaction import compact_archives
+    from app.modules.archive_store import ArchiveStore
+
+    root = tmp_path / "ingestion"
+    policy(tmp_path)
+    path, data = raw_archive(root, data=b"retained canonical")
+    pending = path.parent / ".pending-ab12_cd3"
+    os.link(path, pending)
+    compact_archives(sales_pg, root, scheduled=scheduled)
+    assert path.read_bytes() == data and path.stat().st_nlink == 1
+    assert not pending.exists()
+    assert ArchiveStore(root).usage() > 0
+    external = tmp_path / "outside"
+    os.link(path, external)
+    with pytest.raises(ValueError, match="ARCHIVE_PATH"):
+        compact_archives(sales_pg, root)
+    assert path.read_bytes() == external.read_bytes() == data
+
+
+def test_resumed_large_directory_repairs_block_link_without_rescanning_prefix(
+    tmp_path, monkeypatch
+):
+    import os
+
+    from app.modules.archive_budget import maintenance_budget, resume_inventory
+
+    root = tmp_path / "ingestion"
+    directory = root / ".payloads/ab"
+    directory.mkdir(parents=True)
+    for i in range(10001):
+        (directory / f"old-{i:05d}").touch()
+    target = directory / "retained.gz"
+    target.write_bytes(b"retained content")
+    pending = directory / ".pending-abcdefgh"
+    os.link(target, pending)
+    # 文件系统顺序不保证词法顺序，游标按真实scandir序号保存。
+    with os.scandir(directory) as entries:
+        names = [e.name for e in entries]
+    offset = min(names.index(target.name), names.index(pending.name))
+    state = {"scan_stack": [{"path": ".payloads/ab", "offset": offset}]}
+    progress = {}
+    with maintenance_budget(1, entries_per_second=100):
+        for _path, _ in resume_inventory(root, state, progress):
+            if target.stat().st_nlink == 1:
+                break
+    assert target.read_bytes() == b"retained content" and not pending.exists()
+    assert progress["removed_temporary_files"] == 1
+
+
+def test_scheduled_batches_advance_when_entire_tree_exceeds_scan_budget(
+    sales_pg, tmp_path, monkeypatch
+):
+    import time
+    import types
+
+    from app.modules import archive_compaction as module
+
+    root = tmp_path / "ingestion"
+    root.mkdir()
+    policy(tmp_path)
+    config = tmp_path / "config/archive.toml"
+    config.write_text(
+        config.read_text() + "maintenance_max_seconds=0.1\nmaintenance_entries_per_second=100\n"
+    )
+    for i in range(30):
+        (root / f".pending-{i:08d}").write_bytes(b"incomplete")
+    module.compact_archives(sales_pg, root, scheduled=True)
+    remaining = len(list(root.glob(".pending-*")))
+    assert 0 < remaining < 30
+    now = time.time()
+    monkeypatch.setattr(
+        module, "time", types.SimpleNamespace(time=lambda: now + 3601, monotonic=time.monotonic)
+    )
+    module.compact_archives(sales_pg, root, scheduled=True)
+    assert len(list(root.glob(".pending-*"))) < remaining
+
+
+def test_budget_failure_is_cooled_down_and_later_resumes_without_a_new_copy(
+    sales_pg, tmp_path, monkeypatch
+):
+    import time
+    import types
+
+    from app.modules import archive_compaction as module
+    from app.modules.archive_payload import open_payload
+
+    root = tmp_path / "ingestion"
+    policy(tmp_path)
+    config = tmp_path / "config/archive.toml"
+    config.write_text(config.read_text() + "maintenance_bytes_per_second=1\n")
+    path, data = raw_archive(root)
+    assert module.compact_archives(sales_pg, root, scheduled=True)["status"] == "budget"
+    assert path.read_bytes() == data
+    assert not list(root.rglob(".pending-*"))
+    assert module.compact_archives(sales_pg, root, scheduled=True)["status"] == "not_due"
+    config.write_text(
+        config.read_text().replace(
+            "maintenance_bytes_per_second=1", "maintenance_bytes_per_second=4194304"
+        )
+    )
+    now = time.time()
+    monkeypatch.setattr(
+        module, "time", types.SimpleNamespace(time=lambda: now + 3601, monotonic=time.monotonic)
+    )
+    assert module.compact_archives(sales_pg, root, scheduled=True)["converted"] == 1
+    with open_payload(path) as source:
+        assert source.read() == data
+    assert len(list(root.rglob("input.ndjson"))) == 1
+
+
 def raw_archive(root, name="a", data=None):
     data = data or b'{"id":"123","history":"same","amount":"10.50"}\n' * 30000
     path = root / "source" / name / "input.ndjson"

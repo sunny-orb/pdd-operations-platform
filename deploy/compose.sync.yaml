@@ -1,4 +1,4 @@
-# 独立显式启用；需先准备来源身份、浏览器登录和归档目录。
+# 独立显式启用；需先准备来源身份、本机完成的数仓专用认证和归档目录。
 services:
   worker:
     image: ${WORKER_IMAGE:?必须配置WORKER_IMAGE}

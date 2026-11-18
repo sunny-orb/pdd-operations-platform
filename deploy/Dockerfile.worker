@@ -2,12 +2,10 @@ ARG API_BASE=pdd-operations-api:local
 FROM node:24-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS node
 FROM ${API_BASE}
 USER root
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright WAREHOUSE_BROWSER_CHANNEL=chromium
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && npm install -g @larksuite/cli@1.0.98
-RUN python -m playwright install --with-deps chromium
 COPY deploy/worker.py deploy/worker.py
 USER app
 CMD ["python", "deploy/worker.py"]

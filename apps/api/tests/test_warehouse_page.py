@@ -65,6 +65,16 @@ def test_missing_or_public_state_does_not_launch_browser(tmp_path):
         assert reader.context is None
 
 
+def test_browser_login_is_forbidden_in_production(tmp_path, monkeypatch):
+    from app.connectors.warehouse_page import WarehousePageReader
+
+    monkeypatch.setenv("APP_ENV", "production")
+    with WarehousePageReader(tmp_path / "state.json") as reader:
+        with pytest.raises(ValueError, match="WAREHOUSE_BROWSER_DISABLED_IN_PRODUCTION"):
+            reader.start(login=True)
+        assert reader.browser is None
+
+
 @pytest.fixture
 def browser_reader(tmp_path):
     from app.connectors.warehouse_page import WarehousePageReader

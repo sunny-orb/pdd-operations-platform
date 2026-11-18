@@ -8,6 +8,17 @@ from app.modules.data_status.schedule_policy import first_reconciliation, next_r
 from app.modules.data_status.timeliness import merge_update_timing
 
 
+def recover_interrupted_checks(c, table, previous, codes, now):
+    """调用方已持项目会话锁：遗留checking已无执行者，保留成功证据并从发现时重试。"""
+    for code in codes:
+        prior = previous.get(code, {})
+        if prior.get("check_status") != "checking":
+            continue
+        values = dict(check_status="failed", checked_at=now, error_code="CHECK_FAILED")
+        c.execute(table.update().where(table.c.source_id == code).values(**values))
+        previous[code] = {**prior, **values}
+
+
 def reconciliation_owned_sources(c, codes, now, reconciliation_time):
     """项目锁内判定周路径负责的来源；失败等待期间也不交给普通路径重复接收。"""
     if not codes:

@@ -13,6 +13,181 @@ def at(value):
     return datetime.fromisoformat("2026-11-04T" + value).replace(tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
+@pytest.mark.parametrize("fixed", [True, False])
+def test_interrupted_check_keeps_success_and_retries_five_minutes_after_recovery(sales_pg, fixed):
+    from app.jobs.source_monitor import run_monitor
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    runner = run_scheduled_sources if fixed else run_monitor
+    calls = []
+    received = []
+
+    def probe():
+        calls.append(True)
+        return {"revision": "same"}
+
+    def sync(ids, connection):
+        received.extend(ids)
+        return dict.fromkeys(ids, True)
+
+    runner(sales_pg, {"shop_daily": probe}, sync, now=at("08:30"))
+    with sales_pg.begin() as c:
+        old = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        c.execute(
+            sa.text("UPDATE source_checkpoints SET check_status='checking', checked_at=:at"),
+            {"at": at("08:31")},
+        )
+    runner(sales_pg, {"shop_daily": probe}, sync, now=at("08:50"))
+    with sales_pg.connect() as c:
+        row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+        assert row["check_status"] == "failed"
+        assert row["observed_at"] == old["observed_at"]
+        assert row["accepted_fingerprint"] == old["accepted_fingerprint"]
+    runner(sales_pg, {"shop_daily": probe}, sync, now=at("08:54:59"))
+    assert len(calls) == 2  # 初次接收前后核对；恢复/冷却都不能请求上游。
+    runner(sales_pg, {"shop_daily": probe}, sync, now=at("08:55"))
+    runner(sales_pg, {"shop_daily": probe}, sync, now=at("08:56"))
+    assert len(calls) == 3 and received == ["shop_daily"]
+
+
+def test_http_replaces_page_without_reingesting_unchanged_source(sales_pg):
+    import hashlib
+    import json
+
+    from app.jobs.source_schedule import run_scheduled_sources
+
+    page = dict(basis="warehouse_web_page", table_id="cAc3IVT4i3", updated_at="2026-11-04 08:00:00")
+    old_digest = hashlib.sha256(json.dumps(page, sort_keys=True).encode()).hexdigest()
+    calls = []
+
+    def sync(ids, c):
+        calls.extend(ids)
+        return dict.fromkeys(ids, True)
+
+    run_scheduled_sources(sales_pg, {"shop_daily": lambda: page}, sync, now=at("08:30"))
+    with sales_pg.connect() as c:
+        assert (
+            c.scalar(sa.text("SELECT accepted_fingerprint FROM source_checkpoints")) == old_digest
+        )
+    metadata = dict(page, basis="warehouse_web_metadata")
+    run_scheduled_sources(sales_pg, {"shop_daily": lambda: metadata}, sync, now=at("09:40"))
+    assert calls == ["shop_daily"]
+    metadata["updated_at"] = "2026-11-04 10:01:00"
+    run_scheduled_sources(sales_pg, {"shop_daily": lambda: metadata}, sync, now=at("10:10"))
+    assert calls == ["shop_daily", "shop_daily"]
+
+
+def test_default_runtime_http_auth_failure_retries_in_five_minutes_without_browser(
+    sales_pg, tmp_path, monkeypatch
+):
+    import builtins
+    import json
+    import time
+    from email.message import Message
+    from io import BytesIO
+    from urllib.error import HTTPError
+    from urllib.request import HTTPSHandler, build_opener
+    from urllib.response import addinfourl
+
+    from app.connectors import warehouse_metadata
+    from app.jobs import source_monitor_runtime as runtime
+    from tests.test_project_sync_runtime import paths_for
+
+    paths = paths_for(tmp_path)
+    state = paths.feishu_root / "var/local-db/warehouse-browser/state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text(
+        json.dumps(
+            {
+                "cookies": [
+                    {
+                        "name": "YCSESSIONID",
+                        "value": "fixture-session",
+                        "domain": "bi.kktree.cn",
+                        "path": "/",
+                        "expires": time.time() + 3600,
+                        "secure": False,
+                    }
+                ]
+            }
+        )
+    )
+    state.chmod(0o600)
+    calls, received = [], []
+    expired = [False]
+
+    class Protocol(HTTPSHandler):
+        def https_open(self, request):
+            assert request.full_url == warehouse_metadata.ENDPOINT + "?tableId=cAc3IVT4i3"
+            assert request.get_header("Cookie") == "YCSESSIONID=fixture-session"
+            calls.append(request.full_url)
+            if expired[0]:
+                raise HTTPError(request.full_url, 401, "private detail", {}, None)
+            response = addinfourl(
+                BytesIO(
+                    json.dumps(
+                        {
+                            "success": True,
+                            "code": 200,
+                            "data": {
+                                "id": "cAc3IVT4i3",
+                                "tableName": "ods_rpa_pdd_traffic_kanban_overview_f",
+                                "dataLastUpdateTime": "2026-11-04 08:00:00",
+                            },
+                        }
+                    ).encode()
+                ),
+                Message(),
+                request.full_url,
+                200,
+            )
+            response.msg = "OK"
+            return response
+
+    original_import = builtins.__import__
+
+    def no_browser(name, *args, **kwargs):
+        assert not name.startswith("playwright") and name != "app.connectors.warehouse_page"
+        return original_import(name, *args, **kwargs)
+
+    def receive(*args, **kwargs):
+        received.extend(kwargs["only"])
+        return {"datasets": {code: {"status": "succeeded"} for code in kwargs["only"]}}
+
+    monkeypatch.setattr(builtins, "__import__", no_browser)
+    monkeypatch.setattr(warehouse_metadata, "build_opener", lambda *h: build_opener(*h, Protocol()))
+    monkeypatch.setattr(runtime, "execute_project", receive)
+
+    def run(t):
+        return runtime.execute_source_schedule(
+            sales_pg,
+            paths=paths,
+            warehouse_password=lambda: pytest.fail("不应读取数仓SQL密码"),
+            source_ids=("shop_daily",),
+            now=at(t),
+        )
+
+    assert run("08:30")["checked"] == 1
+    expired[0] = True
+    run("09:40")
+    with sales_pg.connect() as c:
+        row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+    assert row["error_code"] == "WAREHOUSE_WEB_LOGIN_REQUIRED"
+    assert row["accepted_at"] == at("08:30")
+    assert row["web_checked_at"] == at("08:30")
+    before = len(calls)
+    assert run("09:44:59")["checked"] == 0
+    assert len(calls) == before
+    expired[0] = False
+    assert run("09:45")["checked"] == 1
+    assert run("09:50")["checked"] == 0
+    assert received == ["shop_daily"]
+    with sales_pg.connect() as c:
+        row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+    assert row["check_status"] == "succeeded" and row["error_code"] is None
+    assert row["web_checked_at"] == at("09:45")
+
+
 def test_source_policy_checks_every_slot_and_preserves_legacy_scope():
     from app.modules.data_status.schedule_policy import LEGACY_SOURCES, LEGACY_STEPS, due_sources
 

@@ -228,6 +228,8 @@ branches每项精确键为`{code, enabled, confirmation_status, validation_statu
 | overview：same_object_grouping                                                                     | `{}`                                                                                                                                                                                                                                                                     | 同款多异常集中、父子金额不重加，不猜跨域对象映射                                                                            |
 | overview：exception_count                                                                          | `{}`                                                                                                                                                                                                                                                                     | enabled=false、pending_confirmation、依赖M6-01；列表长度不冒充正式异常总计                                                  |
 
+本地RPA扩展（2026-11-16，JSON结构仍v1）：mixed_risk_ranking保持关闭；新增separate_risk_ranking分支，thresholds冻结category_min_share=0.02、style_min_share=0.005、sample_cap=500、baseline_floor=0.0001，以及建议模板和效果窗口。前三个SOP分支在新RPA报告启用；质量、主原因及目标按已确认M5-01～04和报告绑定执行。分支状态与文案随每份报告的rule_sets冻结，不改变旧包；不新增数据库列或约束。公式及边界见[M5方案](../implementation/m5-aftersales-implementation.md)。
+
 问题码全集为`M1-01/M1-02/M2-01/M2-02/M2-03/M3-01/M3-02/M3-03/M5-01/M5-02/M5-03/M5-04/M6-01`，分支只能引用真实依赖。M3-01已确认为A，业务确认依赖不再按待决阻断；问题码为历史/追溯保留。M2跨渠道合计、M3退款匹配/地区日期仍由负责域和解释门控，不新增业务规则或完成额表。overview不允许40/25/20/15权重、90/70/50分界、原型固定分或统一加权predicate；天气不在五域包内。
 
 ### 词典、建议模板与发布校验

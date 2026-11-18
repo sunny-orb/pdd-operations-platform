@@ -144,6 +144,7 @@ def connection(
         {"host": "other"},
         {"ssl": False},
         {"head": "20261111_16"},
+        {"head": "20261116_19"},
     ],
 )
 def test_actual_session_transport_and_head_are_checked(context, change):
@@ -163,6 +164,13 @@ def test_new_policy_does_not_change_local_or_unconfigured_environment(context, m
 def test_scoped_production_policy_reuses_pg_content_and_leaves_aftersales_legacy(
     context, sales_pg, monkeypatch, tmp_path
 ):
+    from tests.test_return_summary_index import revision_sql
+
+    # 公司生产契约仍固定18；19仅为本地说明修订，不扩大生产接受的head。
+    with sales_pg.begin() as c:
+        c.connection.driver_connection.execute(
+            revision_sql("20261116_19", "20261114_18", downgrade=True), prepare=False
+        )
     m, root = context
     save(m, root)
     # 只替代生产传输身份边界；业务发布/事务/视图/旧报告均走真实隔离PG。

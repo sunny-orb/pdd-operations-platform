@@ -66,19 +66,20 @@ def revision():
                 "classification.py",
                 "targets.py",
                 "rowset.py",
+                "read_cache.py",
             )
         )
     ).hexdigest()
 
 
 @contextmanager
-def snapshot(engine, report_id=None, token=None):
+def snapshot(engine, report_id=None, token=None, *, rows_cache=None):
     if engine is None:
         raise BoardError("DATABASE_UNAVAILABLE", 503)
     try:
         with engine.connect().execution_options(isolation_level="REPEATABLE READ") as c, c.begin():
             c.execute(sa.text("SET TRANSACTION READ ONLY"))
-            repo = Repository(c, report_id)
+            repo = Repository(c, report_id, rows_cache=rows_cache)
             if token is not None and token != repo.token:
                 raise BoardError("DATA_VERSION_CHANGED", 409)
             with localcontext() as ctx:
@@ -89,8 +90,10 @@ def snapshot(engine, report_id=None, token=None):
 
 
 class Repository:
-    def __init__(self, c, report_id):
+    def __init__(self, c, report_id, *, rows_cache=None):
         self.c = c
+        self.rows_cache = rows_cache
+        self._filtered_roles = {}
         self.reports = [
             dict(r)
             for r in c.execute(
@@ -222,6 +225,15 @@ class Repository:
         if start != report["period_start"] or end != report["period_end"]:
             self._rows[key] = None
             return None
+        cache_key = (self.token, source["id"], role, start, end)
+        if self.rows_cache is not None:
+            cached = self.rows_cache.get(cache_key)
+            if cached is not None:
+                rows, summary = cached
+                self._rows[key] = rows
+                if summary is not None:
+                    self._summaries[key] = summary
+                return rows
         dimensions = (
             (*IDENTITY_FIELDS, "source_return_reason", "source_aftersale_type")
             if role == "j1_returns"
@@ -278,6 +290,8 @@ class Repository:
             if self.is_rpa(report):
                 for row in self._rows[key]:
                     row["_rpa"] = True
+            if self.rows_cache is not None:
+                self.rows_cache.put(cache_key, self._rows[key])
             return self._rows[key]
         if self.is_rpa(report):
             for row in result:
@@ -297,6 +311,8 @@ class Repository:
                 for field in fields
             },
         }
+        if self.rows_cache is not None:
+            self.rows_cache.put(cache_key, result, self._summaries[key])
         return result
 
     def source_summary(self, role, report=None, *, include_categories=False):

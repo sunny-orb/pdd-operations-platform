@@ -132,15 +132,36 @@ def test_complete_pg_dump_preserves_both_formats_and_shared_members(sales_pg, tm
 
 
 def test_initializer_rejects_missing_shared_read_view(sales_pg):
+    from alembic import command
+    from alembic.config import Config
+
+    from migrations_v2.company_db_objects import TARGET_REVISION
     from tests.test_deployment_database import load_script
 
     script = load_script("content_initializer", "init-deployment-db.py")
     with sales_pg.begin() as c:
+        # 公司入口固定18；先使用其实际目标，再验证缺视图的目录保护。
+        config = Config(str(ROOT / "apps/api/alembic-v2.ini"))
+        config.attributes.update(connection=c, v2_expected_database=c.engine.url.database)
+        command.downgrade(config, TARGET_REVISION)
         c.execute(sa.text("DROP VIEW read_product_daily_facts"))
     with sales_pg.connect() as c, pytest.raises(ValueError, match="DEPLOY_SCHEMA_MISMATCH"):
         script.initialize(
             c.connection.driver_connection, database=sales_pg.url.database, account="pdd_admin"
         )
+
+
+def test_company_initializer_rejects_unapproved_local_comment_head(sales_pg):
+    from tests.test_deployment_database import load_script
+
+    script = load_script("local_comment_initializer", "init-deployment-db.py")
+    with sales_pg.connect() as c, pytest.raises(ValueError, match="DEPLOY_REVISION_MISMATCH"):
+        script.initialize(
+            c.connection.driver_connection, database=sales_pg.url.database, account="pdd_admin"
+        )
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261116_19"
+        assert c.scalar(sa.text("SELECT to_regclass('public.read_product_daily_facts')"))
 
 
 @pytest.mark.parametrize(
@@ -218,6 +239,7 @@ def test_nonempty_shared_downgrade_refuses_without_deleting_data(sales_pg):
 
     a = version(sales_pg, "a")
     with sales_pg.begin() as c:
+        before_revision = c.scalar(sa.text("SELECT version_num FROM alembic_version_v2"))
         write_version(c, "product_sales_records", a, rows())
         seal(c, a)
     with pytest.raises(sa.exc.DBAPIError, match="CONTENT_DOWNGRADE_REQUIRES_EMPTY"):
@@ -225,4 +247,4 @@ def test_nonempty_shared_downgrade_refuses_without_deleting_data(sales_pg):
             downgrade_to_13(c)
     with sales_pg.connect() as c:
         assert c.scalar(sa.text("SELECT count(*) FROM read_product_sales_records")) == 2
-        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261114_18"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == before_revision

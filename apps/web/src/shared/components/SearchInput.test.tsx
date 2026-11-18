@@ -92,3 +92,23 @@ it("卸载后不再提交草稿", async () => {
   await tick();
   expect(search).not.toHaveBeenCalled();
 });
+
+it("较快筛选可缩短停顿，连续输入仍合并且组词结束前不提交", async () => {
+  const search = vi.fn();
+  render(<SearchInput value="" onSearch={search} debounceMs={200} />);
+  fireEvent.change(input(), { target: { value: "糖" } });
+  await tick(150);
+  fireEvent.change(input(), { target: { value: "糖豆" } });
+  await tick(199);
+  expect(search).not.toHaveBeenCalled();
+  await tick(1);
+  expect(search).toHaveBeenCalledExactlyOnceWith("糖豆");
+  fireEvent.compositionStart(input());
+  fireEvent.change(input(), { target: { value: "huaxue" } });
+  await tick(500);
+  expect(search).toHaveBeenCalledTimes(1);
+  fireEvent.change(input(), { target: { value: "滑雪" } });
+  fireEvent.compositionEnd(input());
+  await tick(200);
+  expect(search.mock.calls).toEqual([["糖豆"], ["滑雪"]]);
+});

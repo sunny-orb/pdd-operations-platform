@@ -15,6 +15,8 @@ type Props = Omit<
   onSearch: (value: string) => void;
   /** 重置或更换所属筛选范围时取消草稿；不随查询响应改变。 */
   resetKey?: string;
+  /** 已验证轻量查询可缩短停顿；默认保持其他页面的节流行为。 */
+  debounceMs?: number;
 };
 
 const SEARCH_DELAY_MS = 500;
@@ -22,7 +24,13 @@ const SEARCH_DELAY_MS = 500;
 /** 输入草稿同步更新；中文组词结束后停顿提交，普通回车/清空立即提交。
  * value是已应用条件，onSearch只提交完整关键词；请求结果不参与输入状态。
  */
-export function SearchInput({ value, onSearch, resetKey, ...props }: Props) {
+export function SearchInput({
+  value,
+  onSearch,
+  resetKey,
+  debounceMs = SEARCH_DELAY_MS,
+  ...props
+}: Props) {
   const [draft, setDraft] = useState(value);
   const composing = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -65,7 +73,7 @@ export function SearchInput({ value, onSearch, resetKey, ...props }: Props) {
   const schedule = (next: string) => {
     cancel();
     if (next === "") submit(next);
-    else timer.current = setTimeout(() => submit(next), SEARCH_DELAY_MS);
+    else timer.current = setTimeout(() => submit(next), debounceMs);
   };
 
   return (

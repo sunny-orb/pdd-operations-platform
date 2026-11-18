@@ -39,6 +39,7 @@ export function AftersalesPage() {
   const report = data?.report;
   const errors = [
     state.meta.error,
+    state.latestMeta.error,
     state.options.error,
     state.overview.error,
     state.analysis.error,
@@ -69,7 +70,7 @@ export function AftersalesPage() {
           </div>
           <div className="m5-snapshot">
             <i aria-hidden="true" />
-            数据截止：<time>{meta?.observed_to ?? "—"}</time>
+            数据截止：<time>{state.latestMeta.data?.data.observed_to ?? "—"}</time>
           </div>
         </section>
         <Filters state={state} />
@@ -83,7 +84,7 @@ export function AftersalesPage() {
                 <Button
                   size="small"
                   onClick={() => {
-                    void state.meta.refetch();
+                    state.refreshMetadata();
                     void state.options.refetch();
                     void state.overview.refetch();
                     void state.analysis.refetch();

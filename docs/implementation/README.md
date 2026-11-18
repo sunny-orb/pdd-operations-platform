@@ -12,7 +12,8 @@
 | M6 运营中心      | [四域复用与天气扩展](m6-overview-implementation.md)                                                                 |
 | 店铺身份改名     | [新旧别名接入、历史归档兼容与统一展示](shop-rename.md)                                                              |
 | 全项目同步       | [来源编排与一致性](project-sync-implementation.md)                                                                  |
-| AI能力规划       | [页面AI分析、项目问答与商品建议兜底草案](ai-assistance.md)（仅规划，规则待用户确认）                                |
+| AI能力规划       | [全系统右侧AI问答及五页用例](ai-assistance.md)（页面保留规则，固定AI分析不安排；含首批问题讨论稿）                  |
+| AI选型调研       | [公司共用问答：PydanticAI、DeepSeek Harness 与实际复用条件](ai-reusable-assistant-research.md)                      |
 | 看板性能         | [API计算与复测](api-performance.md)、[全库索引](database-performance.md)、[前端请求与渲染](frontend-performance.md) |
 | 跨页筛选         | [共用能力、等级投影及联动统一建议](filter-consistency.md)（业务调整待确认实施）                                     |
 | 采集归档         | [去重、容量与离线保留](archive-retention.md)                                                                        |

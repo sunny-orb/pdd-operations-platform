@@ -61,7 +61,7 @@ function setup(sourceStatus = "observed") {
         data_version: "v1",
         status: "partial",
         default_report_id: id,
-        observed_to: "2026-10-31",
+        observed_to: id === "r1" ? "2026-10-31" : "2026-09-30",
         complete_through: null,
         last_success_at: null,
         last_attempt_at: null,
@@ -72,7 +72,7 @@ function setup(sourceStatus = "observed") {
             locator: null,
             status: sourceStatus,
             observed_from: "2026-10-01",
-            observed_to: "2026-10-31",
+            observed_to: id === "r1" ? "2026-10-31" : "2026-09-30",
             last_success_at: null,
             last_attempt_at: null,
             error_code: null,
@@ -203,4 +203,20 @@ it("改选报告请求失败时退出等待并显示重试，不将旧指标当�
   expect(await screen.findByRole("button", { name: "重试本地查询" })).toBeTruthy();
   expect(screen.queryByText("正在更新报告…")).toBeNull();
   expect(screen.queryByRole("heading", { name: "风险r1" })).toBeNull();
+});
+
+it("切换历史报告后页头仍显示平台最新数据覆盖日", async () => {
+  const user = userEvent.setup();
+  const { pending } = setup();
+  await screen.findByRole("heading", { name: "风险r1" });
+  await user.click(screen.getByRole("combobox", { name: "报告周期" }));
+  await user.click(await screen.findByRole("option", { name: label("r2") }));
+  await waitFor(() => expect(pending.has("r2/meta")).toBe(true));
+  await act(async () => pending.get("r2/meta")!());
+  await waitFor(() => expect(pending.has("r2/analysis")).toBe(true));
+  await act(async () => {
+    for (const path of ["overview", "analysis", "options"]) pending.get(`r2/${path}`)!();
+  });
+  await screen.findByRole("heading", { name: "风险r2" });
+  expect(document.querySelector(".m5-snapshot time")?.textContent).toBe("2026-10-31");
 });

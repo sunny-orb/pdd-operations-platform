@@ -48,7 +48,11 @@ def render_upgrade_sql(start_revision: str = START_REVISION) -> str:
         raise RuntimeError("DEPLOY_MIGRATION_START_INVALID")
     output = io.StringIO()
     config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
-    if ScriptDirectory.from_config(config).get_current_head() != TARGET_REVISION:
+    scripts = ScriptDirectory.from_config(config)
+    # 公司已批准增量仍止于18；后续本地head不能自动扩大线上目标。
+    if TARGET_REVISION not in {
+        revision.revision for revision in scripts.iterate_revisions("head", "base")
+    }:
         raise RuntimeError("DEPLOY_MIGRATION_HEAD_CHANGED")
     command.upgrade(config, f"{start_revision}:{TARGET_REVISION}", sql=True)
     body = transaction_body(output.getvalue().strip())
@@ -159,7 +163,9 @@ def render_sql(
     runtime_account: str | None = None,
     database: str = "pdd_operations",
 ) -> str:
-    """完整迁移有序渲染并绑定内容摘要；head附空库保护和原运行权限。"""
+    """完整迁移有序渲染；head或单账号明确历史目标均附空库保护。"""
+    if runtime_account is not None and target not in ("head", TARGET_REVISION):
+        raise ValueError("单账号交付只允许base到head或已批准公司目标初始化")
     output = io.StringIO()
     config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
     scripts = ScriptDirectory.from_config(config)
@@ -179,7 +185,7 @@ def render_sql(
         digest.update(str(path.relative_to(ROOT)).encode() + b"\0" + path.read_bytes())
     command.upgrade(config, target, sql=True)
     sql = output.getvalue().strip()
-    if target == "head":
+    if target == "head" or runtime_account is not None:
         # Alembic单事务离线输出：在同一事务内加前置保护及部署运行权限。
         body = transaction_body(sql)
         if runtime_account is None:
@@ -213,8 +219,6 @@ def render_sql(
                 + body
                 + "\nCOMMIT;"
             )
-    elif runtime_account is not None:
-        raise ValueError("单账号交付只允许首次base到head初始化")
     usage = (
         "-- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。\n"
         "-- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。\n"

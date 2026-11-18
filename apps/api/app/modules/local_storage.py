@@ -100,9 +100,11 @@ def require_content_write(c, table):
         if not content_enabled(c.engine, table):
             raise ValueError("CONTENT_LOCAL_TABLE_DISABLED")
         verify_connection(c)
-        from app.modules.database_retention import HEAD
+        from app.modules.database_retention import compatible_local_schema_head
 
-        if c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2")) != HEAD:
+        if not compatible_local_schema_head(
+            c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2"))
+        ):
             raise ValueError("CONTENT_SCHEMA_HEAD")
     else:
         from app.modules.database_retention import require_local_test

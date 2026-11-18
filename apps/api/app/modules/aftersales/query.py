@@ -26,6 +26,10 @@ def roles(repo, q, report=None):
     parameters = repo.classification_parameters(report)
     if q.focus != "all" and not enabled(parameters, q.focus):
         return [None, None, None]
+    cache = getattr(repo, "_filtered_roles", {})
+    key = ((report or repo.report or {}).get("id"), q.category, q.keyword, q.focus)
+    if key in cache:
+        return cache[key]
     blocks = [repo.rows(role, report) for role in ROLES]
     if not q.category and not q.keyword and q.focus == "all":
         return blocks
@@ -37,10 +41,11 @@ def roles(repo, q, report=None):
             if result[q.focus]
         }
         chosen &= focused
-    return [
+    cache[key] = [
         [row for row in block if identity(row) in chosen] if block is not None else None
         for block in blocks
     ]
+    return cache[key]
 
 
 def options(repo, q):

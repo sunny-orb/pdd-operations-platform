@@ -97,6 +97,8 @@ GitHub production仅允许main；SSH_PRIVATE_KEY及SSH_KNOWN_HOSTS已设置，�
 
 历史revision不改写，本机多角色schema.sql保留；公司schema-songbing.sql由同一迁移链派生，固定songbing/pdd_dashboard/PG17，由songbing创建并拥有应用对象。空库维护CLI默认只读，显式--apply才允许首次初始化。初始化与版本标记在同一事务中，不创建角色或修改数据库和monitor权限；已有库走[增量入口](#deployment-upgrade-command)。
 
+2026-11-16本地注释19不改变公司批准目标：`init-deployment-db.py`明确渲染base→18，`upgrade-deployment-db.py`仍只升级到18并校验原增量哈希。当前两份schema完整审阅稿包含19，不直接用于公司初始化或已有库升级；19未获生产执行授权。维护及归档数据格式继续18，本地19兼容说明见[字段字典](../database-schema/README.md#schema-comments-19)。
+
 按[PG17 pg_depend](https://www.postgresql.org/docs/17/catalog-pg-depend.html)的e成员及i内部依赖识别预装扩展，不按schema名或函数前缀放行未知对象；n/a/x依赖不等于扩展成员。前置与基线关系检查均保留，模板变化停止生成。现行重复核验仅在RPA表符合保护契约时排除该表及附属对象，并用应用目录指纹校验结构和归属。
 
 本机PG17专项26项通过，覆盖扩展、monitor保留、未知对象拒绝与失败回滚；公司实际库已获准只读核查通过empty，含pg_repack的repack目录，前后元数据一致，见[只读证据](../validation/2026-11-04.md#company-db-readonly-preflight-20261104)。未实际建表。正式初始化前应再次只读预检，避免状态已变。

@@ -15,6 +15,7 @@ from psycopg import sql
 from app.modules.local_storage import require_local_maintenance, verify_connection
 from migrations_v2.baseline_20261028.schema import build_metadata
 
+# 归档数据结构格式；19仅增加COMMENT，不能令现有18归档失效或扩大公司升级范围。
 HEAD = "20261114_18"
 RECONCILIATIONS = "source_reconciliations"
 RECONCILIATION_COLUMNS = (
@@ -85,8 +86,15 @@ def require_local_test(engine):
         raise ValueError("RETENTION_PRODUCTION_DISABLED")
 
 
+def compatible_local_schema_head(actual):
+    """本地仅显式认可18的说明兼容版19；未知修订和其他历史格式仍拒绝。"""
+    return actual == HEAD or (HEAD == "20261114_18" and actual == "20261116_19")
+
+
 def validate_schema(c):
-    if c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2")) != HEAD:
+    if not compatible_local_schema_head(
+        c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2"))
+    ):
         raise ValueError("RETENTION_SCHEMA_HEAD")
     from app.modules import deployment_storage
 

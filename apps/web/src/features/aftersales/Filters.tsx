@@ -95,6 +95,7 @@ export function Filters({ state }: { state: AftersalesState }) {
       <label className="m5-search">
         单款/原因搜索
         <SearchInput
+          debounceMs={200}
           type="search"
           aria-label="单款/原因搜索"
           placeholder="款式编码、商品名、原因"

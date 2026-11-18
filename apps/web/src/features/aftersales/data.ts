@@ -9,20 +9,17 @@ import { z } from "zod";
 import { get, params, AftersalesError } from "./api";
 import { metadata, overview, options, analysis } from "./contracts";
 import { readScope, patchScope, resetScope, type Scope } from "./state";
-/** 默认报告跟随当前目录；自选报告保留。发布变化只查本地，旧请求使用AbortSignal取消。 */
-export function useAftersales(includeDetails = false) {
+function useReportMetadata(reportId: string, enabled = true) {
   const client = useQueryClient();
-  const [search, setSearch] = useSearchParams();
-  const searchRestoreKey = useSearchRestoreKey();
-  const selectedReport = search.get("report_id") || "";
-  const meta = useQuery({
-    queryKey: ["m5", "meta", selectedReport],
+  return useQuery({
+    queryKey: ["m5", "meta", reportId],
+    enabled,
     queryFn: async ({ signal }) => {
       await waitForPublicationBaseline(client, signal);
       return get(
         "meta",
         metadata,
-        new URLSearchParams(selectedReport ? { report_id: selectedReport } : {}),
+        new URLSearchParams(reportId ? { report_id: reportId } : {}),
         signal,
       );
     },
@@ -32,9 +29,22 @@ export function useAftersales(includeDetails = false) {
     refetchInterval: false,
     refetchOnWindowFocus: false,
   });
-  usePublishedDomainRefresh("aftersales", () => {
+}
+
+/** 默认报告跟随当前目录；自选报告保留。发布变化只查本地，旧请求使用AbortSignal取消。 */
+export function useAftersales(includeDetails = false) {
+  const [search, setSearch] = useSearchParams();
+  const searchRestoreKey = useSearchRestoreKey();
+  const selectedReport = search.get("report_id") || "";
+  // 页头读平台最新发布的数据；历史报告单独读取自身元信息。
+  const latestMeta = useReportMetadata("");
+  const selectedMeta = useReportMetadata(selectedReport, Boolean(selectedReport));
+  const meta = selectedReport ? selectedMeta : latestMeta;
+  const refreshMetadata = () => {
     void meta.refetch();
-  });
+    if (selectedReport) void latestMeta.refetch();
+  };
+  usePublishedDomainRefresh("aftersales", refreshMetadata);
   const version = meta.data?.meta.data_version ?? null;
   const scope = readScope(search, meta.data?.data.default_report_id ?? "");
   const enabled = meta.isSuccess;
@@ -73,6 +83,8 @@ export function useAftersales(includeDetails = false) {
     reset,
     version,
     meta,
+    latestMeta,
+    refreshMetadata,
     overview: overviewResult,
     details: detailsResult,
     analysis: analysisResult,

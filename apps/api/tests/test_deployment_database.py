@@ -86,7 +86,7 @@ def test_single_account_initializes_without_database_ownership_and_preserves_mon
         )
         assert (
             c.exec_driver_sql("SELECT version_num FROM public.alembic_version_v2").scalar_one()
-            == "20261114_18"
+            == "20261116_19"
         )
         assert (
             c.exec_driver_sql(
@@ -169,6 +169,9 @@ def test_deployment_check_is_read_only_and_apply_is_repeatable(allocated_databas
         assert (
             initializer.initialize(raw, database=name, account="pdd_app", apply=True)
             == "initialized"
+        )
+        assert c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar() == (
+            "20261114_18"
         )
         assert (
             initializer.initialize(raw, database=name, account="pdd_app", apply=True)
@@ -277,6 +280,7 @@ def test_registered_extensions_survive_initialization(allocated_database, schema
         if entrypoint == "sql":
             raw.execute(
                 initializer.renderer.render_sql(
+                    "20261114_18",
                     runtime_account="pdd_app", database=args["database"]
                 ),
                 prepare=False,

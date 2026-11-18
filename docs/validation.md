@@ -4,6 +4,11 @@
 
 ## 验证记录索引
 
+[售后页头与报告周期独立核验（2026-11-18）](validation/2026-11-18.md#aftersales-platform-cutoff)。
+[售后筛选读取复用与本地测速（2026-11-18）](validation/2026-11-18.md#aftersales-filter-performance)。
+
+[售后页头日期与实际来源核验（2026-11-17）](validation/2026-11-17.md)。
+
 [同步恢复、持续容量治理及内存验证（2026-11-16）](validation/2026-11-16.md)。
 
 [三表复用生产验收及发布交接修复（2026-11-14）](validation/2026-11-14.md)。

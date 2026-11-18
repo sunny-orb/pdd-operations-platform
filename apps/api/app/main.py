@@ -35,6 +35,7 @@ from app.core.database_diagnostics import (
 )
 from app.core.overview_cache import DefaultOverviewCache
 from app.db.connection import build_engine
+from app.modules.aftersales.read_cache import AftersalesCache
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.contracts import SalesError
 
@@ -128,9 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.product_overview_cache = DefaultOverviewCache()
     application.state.product_daily_overview_cache = DefaultOverviewCache()
     application.state.promotion_product_display_cache = DefaultOverviewCache()
-    application.state.aftersales_overview_cache = DefaultOverviewCache(
-        max_entries=8, max_bytes=1024 * 1024
-    )
+    application.state.aftersales_overview_cache = AftersalesCache()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=configured.cors_origins,

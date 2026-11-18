@@ -18,7 +18,11 @@ spec = importlib.util.spec_from_file_location(
 renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
 
-from migrations_v2.company_db_objects import rpa_manifest, verify_application
+from migrations_v2.company_db_objects import (
+    TARGET_REVISION,
+    rpa_manifest,
+    verify_application,
+)
 
 
 def initialize(connection, *, database: str, account: str, apply: bool = False) -> str:
@@ -39,12 +43,7 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
             "SELECT to_regclass('public.alembic_version_v2')"
         ).fetchone()[0]
         if exists:
-            from alembic.config import Config
-            from alembic.script import ScriptDirectory
-
-            head = ScriptDirectory.from_config(
-                Config(str(ROOT / "apps/api/alembic-v2.ini"))
-            ).get_current_head()
+            head = TARGET_REVISION
             versions = connection.execute(
                 "SELECT version_num FROM public.alembic_version_v2"
             ).fetchall()
@@ -69,7 +68,7 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
         connection.execute(preflight, prepare=False)
         if not apply:
             return "empty"
-        sql = renderer.render_sql(runtime_account=account, database=database)
+        sql = renderer.render_sql(TARGET_REVISION, runtime_account=account, database=database)
         body = renderer.transaction_body(sql[sql.index("BEGIN;") :].strip())
         connection.execute(body, prepare=False)
         return "initialized"

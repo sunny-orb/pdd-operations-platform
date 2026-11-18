@@ -67,14 +67,14 @@ def overview_payload(repo, q, cache):
 
 def prewarm_aftersales_overview(engine, cache, previous_version):
     """发布变化时串行准备默认报告与最近三个可选周期。"""
-    with snapshot(engine) as repo:
+    with snapshot(engine, rows_cache=getattr(cache, "rows", None)) as repo:
         version = repo.token
         if version == previous_version or not repo.report:
             return version, None
         report_ids = [report["id"] for report in repo.defaults[1:4]]
         size = len(overview_payload(repo, AfterQuery(), cache))
     for report_id in report_ids:
-        with snapshot(engine, report_id, version) as repo:
+        with snapshot(engine, report_id, version, rows_cache=getattr(cache, "rows", None)) as repo:
             overview_payload(repo, AfterQuery(report_id=report_id), cache)
     return version, size
 
@@ -92,7 +92,12 @@ def get_options(
     q: Annotated[AfterQuery, Depends(query)],
     data_version: str | None = Query(None, min_length=1, max_length=100),
 ):
-    with snapshot(request.app.state.engine, q.report_id, data_version) as repo:
+    with snapshot(
+        request.app.state.engine,
+        q.report_id,
+        data_version,
+        rows_cache=request.app.state.aftersales_overview_cache.rows,
+    ) as repo:
         return response(repo, options(repo, q))
 
 
@@ -103,7 +108,12 @@ def get_overview(
     data_version: str | None = Query(None, min_length=1, max_length=100),
     detail: Literal["full", "summary"] = "full",
 ):
-    with snapshot(request.app.state.engine, q.report_id, data_version) as repo:
+    with snapshot(
+        request.app.state.engine,
+        q.report_id,
+        data_version,
+        rows_cache=request.app.state.aftersales_overview_cache.rows,
+    ) as repo:
         data = json.loads(overview_payload(repo, q, request.app.state.aftersales_overview_cache))
         if q.report_id:
             # 最新默认模式与点选最新一期共用指标，趋势仍严格按当前模式展示。
@@ -121,5 +131,10 @@ def get_analysis(
     q: Annotated[AfterQuery, Depends(query)],
     data_version: str | None = Query(None, min_length=1, max_length=100),
 ):
-    with snapshot(request.app.state.engine, q.report_id, data_version) as repo:
+    with snapshot(
+        request.app.state.engine,
+        q.report_id,
+        data_version,
+        rows_cache=request.app.state.aftersales_overview_cache.rows,
+    ) as repo:
         return response(repo, analysis(repo, q))

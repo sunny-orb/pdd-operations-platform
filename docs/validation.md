@@ -4,6 +4,8 @@
 
 ## 验证记录索引
 
+[历史存量可行性、RPA输入复用与冷查询生产验收（2026-11-18）](validation/2026-11-18.md#history-cold-followup)。
+
 [去浏览器、整轮超时与归档节流生产验收（2026-11-18）](validation/2026-11-18.md#resource-production)。
 
 [整轮超时、归档节流与中断恢复（2026-11-18，本地）](validation/2026-11-18.md#resource-guard)。

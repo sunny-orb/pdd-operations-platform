@@ -90,6 +90,7 @@ def test_upgrade18_refuses_concurrent_maintenance_or_running_tasks(allocated_dat
 
 
 def test_controlled_upgrade17_preserves_company_objects_and_history(deployed12):
+    from migrations_v2.company_db_objects import TARGET_REVISION
     from tests.test_aftersales_api import publish
 
     publish(deployed12)
@@ -105,7 +106,10 @@ def test_controlled_upgrade17_preserves_company_objects_and_history(deployed12):
         before = data_snapshot(c)
         assert upgrade.upgrade(c.connection.driver_connection, apply=False) == "ready"
         assert upgrade.upgrade(c.connection.driver_connection, apply=True) == "upgraded"
-        assert c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar() == HEAD
+        assert (
+            c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar()
+            == TARGET_REVISION
+        )
         assert data_snapshot(c) == before
         assert upgrade.upgrade(c.connection.driver_connection, apply=True) == "already_upgraded"
         c.exec_driver_sql("RESET ROLE")
@@ -303,11 +307,11 @@ def test_database_guard_uses_real_database_and_session_identity():
 
 
 def test_reviewed15_increment_remains_available_for_isolated_validation(allocated_database):
-    from migrations_v2.company_db_objects import verify_application
+    from migrations_v2.company_db_objects import TARGET_REVISION, verify_application
 
     renderer = install(allocated_database, "20261111_15")
     with allocated_database.connect() as c:
         raw = c.connection.driver_connection
         with raw.transaction():
             raw.execute(renderer.render_upgrade_sql("20261111_15"), prepare=False)
-        verify_application(raw, HEAD, has_rpa=False)
+        verify_application(raw, TARGET_REVISION, has_rpa=False)

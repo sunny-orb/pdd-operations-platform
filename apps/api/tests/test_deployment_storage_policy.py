@@ -144,7 +144,7 @@ def connection(
         {"host": "other"},
         {"ssl": False},
         {"head": "20261111_16"},
-        {"head": "20261116_19"},
+        {"head": "20261118_21"},
     ],
 )
 def test_actual_session_transport_and_head_are_checked(context, change):
@@ -154,6 +154,14 @@ def test_actual_session_transport_and_head_are_checked(context, change):
     m.require_session(connection())
 
 
+@pytest.mark.parametrize("head", ["20261114_18", "20261116_19", "20261118_20"])
+def test_known_runtime_schemas_keep_existing_content_write_enabled(context, head):
+    m, root = context
+    save(m, root)
+    assert m.require_session(connection(head=head)) == head
+    m.require_content_write(connection(head=head), "product_region_records")
+
+
 def test_new_policy_does_not_change_local_or_unconfigured_environment(context, monkeypatch):
     m, root = context
     save(m, root)
@@ -161,16 +169,18 @@ def test_new_policy_does_not_change_local_or_unconfigured_environment(context, m
     assert not m.content_enabled(engine(), "product_daily_facts")
 
 
+@pytest.mark.parametrize("revision", ["20261114_18", "20261116_19", "20261118_20"])
 def test_scoped_production_policy_reuses_pg_content_and_leaves_aftersales_legacy(
-    context, sales_pg, monkeypatch, tmp_path
+    context, sales_pg, monkeypatch, tmp_path, revision
 ):
     from tests.test_return_summary_index import revision_sql
 
-    # 公司生产契约仍固定18；19仅为本地说明修订，不扩大生产接受的head。
-    with sales_pg.begin() as c:
-        c.connection.driver_connection.execute(
-            revision_sql("20261116_19", "20261114_18", downgrade=True), prepare=False
-        )
+    # 新镜像须在18/19保持既有共享写，并在20继续沿原业务契约读取。
+    if revision != "20261118_20":
+        with sales_pg.begin() as c:
+            c.connection.driver_connection.execute(
+                revision_sql("20261118_20", revision, downgrade=True), prepare=False
+            )
     m, root = context
     save(m, root)
     # 只替代生产传输身份边界；业务发布/事务/视图/旧报告均走真实隔离PG。
@@ -178,7 +188,8 @@ def test_scoped_production_policy_reuses_pg_content_and_leaves_aftersales_legacy
 
     def identity(c):
         assert c.scalar(sa.text("SELECT current_database()")) == sales_pg.url.database
-        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261114_18"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == revision
+        return revision
 
     monkeypatch.setattr(m, "require_session", identity)
     from tests.test_aftersales_ingestion import (

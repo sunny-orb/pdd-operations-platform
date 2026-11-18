@@ -190,6 +190,25 @@ def test_retained_input_includes_recoverable_producer_code(sales_pg, tmp_path):
     assert manifest["producer_revision"] == "sha256:" + fingerprint(sources)
 
 
+def test_changed_region_recovery_code_requires_worker_restart(sales_pg, tmp_path, monkeypatch):
+    """新恢复模块参与生产者身份；进程启动后换代码不得混用旧解释发布。"""
+    from pathlib import Path
+
+    window = ReadWindow(date(2026, 10, 26), date(2026, 10, 27), tuple(SHOPS))
+    store = ShopDailyStore(sales_pg, archive_root=tmp_path, approved=window)
+    read = Path.read_text
+
+    def changed(path, *args, **kwargs):
+        content = read(path, *args, **kwargs)
+        return content + "\n# changed" if path.name == "region_retention.py" else content
+
+    monkeypatch.setattr(Path, "read_text", changed)
+    with pytest.raises(SalesError, match="PRODUCER_CODE_CHANGED"):
+        store.run(lambda heartbeat: pytest.fail("代码变化后不得开始取数"))
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT count(*) FROM task_runs")) == 0
+
+
 def test_archive_replay_preserves_source_types_and_matches_postgresql(sales_pg, tmp_path):
     from decimal import Decimal
 

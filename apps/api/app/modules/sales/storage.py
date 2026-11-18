@@ -314,7 +314,7 @@ class ShopDailyStore:
             ).first()
         if previous:
             with connection.begin():
-                ensure_online(connection, [previous.id])
+                self._ensure_reusable(connection, previous.id, candidate, heartbeat)
             archive = require_archive(previous.retained_input_ref)
             heartbeat()
             interpretation = require_archive(previous.interpretation_ref)
@@ -328,6 +328,9 @@ class ShopDailyStore:
         readable = fact_content.read_table(connection, self.fact_table)
         with connection.begin():
             heartbeat(force=True)
+            connection.execute(
+                sa.text("SELECT pg_advisory_xact_lock_shared(hashtext('pdd-database-maintenance'))")
+            )
             old = connection.execute(
                 sa.select(current.c.version_id)
                 .where(current.c.dataset_code == self.code)
@@ -361,6 +364,7 @@ class ShopDailyStore:
                 )
             ).scalar_one_or_none()
             if reuse:
+                self._ensure_reusable(connection, reuse, candidate, heartbeat)
                 version_id = reuse
             else:
                 for _, (id, name, _) in SHOPS.items():
@@ -416,8 +420,13 @@ class ShopDailyStore:
         with connection.begin():
             heartbeat(force=True)
             connection.execute(
+                sa.text("SELECT pg_advisory_xact_lock_shared(hashtext('pdd-database-maintenance'))")
+            )
+            connection.execute(
                 sa.select(versions.c.id).where(versions.c.id == version_id).with_for_update()
             ).one()
+            if reuse:
+                self._ensure_reusable(connection, version_id, candidate, heartbeat)
             if not reuse:
                 # 内容触发器的FOR SHARE锁与这里的FOR UPDATE冲突；封版前拒绝遗漏或改写。
                 count = 0
@@ -514,12 +523,29 @@ class ShopDailyStore:
                 raise SalesError("TASK_LEASE_LOST", 409)
         return PublishResult(run_id, version_id, bool(reuse), "succeeded")
 
+    def _ensure_reusable(self, connection, version_id, candidate, heartbeat):
+        """地区回收版用本次完整候选恢复；其他域和既有offline仍按原规则拒绝。"""
+        if self.code == "product_regions":
+            from app.modules.region_retention import rebuild_version
+
+            rebuild_version(
+                connection,
+                version_id,
+                candidate.rows,
+                content_fingerprint=candidate.fingerprint,
+                row_schema_revision=self.revision,
+                heartbeat=heartbeat,
+            )
+        else:
+            ensure_online(connection, [version_id])
+
 
 def producer_sources():
     """仅首链必要实现的版本内容；无配置文件、凭据、依赖或其他业务域。"""
     root = Path(__file__).resolve().parents[2]
     names = [
         "modules/fact_content.py",
+        "modules/region_retention.py",
         "modules/sales/contracts.py",
         "modules/sales/product_regions_incremental.py",
         "modules/sales/window_incremental.py",

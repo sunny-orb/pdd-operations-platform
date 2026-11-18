@@ -10,16 +10,22 @@ from tests.test_deployment_upgrade import data_snapshot, deployed12
 __all__ = ["allocated_database", "deployed12", "context"]
 
 
+@pytest.mark.parametrize("revision", ["20261114_18", "20261116_19", "20261118_20"])
 def test_company_policy_preflight_preserves_external_objects_and_rejects_drift(
-    context, deployed12, monkeypatch
+    context, deployed12, monkeypatch, revision
 ):
     from migrations_v2 import company_db_objects as objects
+    from tests.test_return_summary_index import revision_sql
 
     m, root = context
     upgrade = load_script("storage_company_upgrade", "upgrade-deployment-db.py")
     with deployed12.connect() as c:
         c.exec_driver_sql("SET ROLE pdd_app")
         assert upgrade.upgrade(c.connection.driver_connection, apply=True) == "upgraded"
+        if revision != "20261118_20":
+            c.connection.driver_connection.execute(
+                revision_sql("20261118_20", revision, downgrade=True), prepare=False
+            )
         c.exec_driver_sql("RESET ROLE")
         c.exec_driver_sql("GRANT USAGE ON SCHEMA monitor TO pdd_app")
         c.exec_driver_sql("GRANT SELECT ON monitor.sentinel, extension_data TO pdd_app")
@@ -32,7 +38,8 @@ def test_company_policy_preflight_preserves_external_objects_and_rejects_drift(
     def identity(c):
         c.exec_driver_sql("SET LOCAL ROLE pdd_app")
         assert c.scalar(sa.text("SELECT current_database()")) == deployed12.url.database
-        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261114_18"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == revision
+        return revision
 
     monkeypatch.setattr(m, "require_session", identity)
     rpa = objects.rpa_manifest
@@ -44,7 +51,7 @@ def test_company_policy_preflight_preserves_external_objects_and_rejects_drift(
 
     monkeypatch.setattr(objects, "verify_company_protections", local_company)
     result = m.configure(deployed12)
-    assert result["schema_head"] == "20261114_18"
+    assert result["schema_head"] == revision
     assert result["candidate_versions"] == 0
     assert result["production_delete_enabled"] is False
     assert not (root / "var/storage-policy.json").exists()

@@ -222,14 +222,15 @@ def main():
         if args.scheduled and config.enabled:
             from app.modules.aftersales.statistics import maintain_statistics
             from app.modules.archive_compaction import compact_archives
+            from app.modules.region_retention_runtime import maintain_regions
 
             try:
                 statistics = maintain_statistics(engine, ROOT, sync_complete=maintenance_ready)
                 if statistics["status"] not in ("disabled", "unchanged", "not_due", "no_rpa"):
                     print(json.dumps(dict(stage="aftersales_statistics", **statistics)), flush=True)
             except Exception:  # noqa: BLE001 - 维护失败不覆盖已经完成的来源结果
-                print(json.dumps(dict(stage="aftersales_statistics", status="failed",
-                                      code="STATISTICS_FAILED")), flush=True)
+                print(json.dumps({"stage": "aftersales_statistics", "status": "failed",
+                                  "code": "STATISTICS_FAILED"}), flush=True)
             try:
                 maintenance = compact_archives(engine, ROOT / "var/ingestion", scheduled=True)
                 if (maintenance.get("converted") or maintenance.get("collected_blocks")
@@ -263,6 +264,13 @@ def main():
                     ),
                     flush=True,
                 )
+            try:
+                regions = maintain_regions(engine, ROOT, sync_complete=maintenance_ready)
+                if regions["status"] not in ("disabled", "idle", "not_due", "schema_pending"):
+                    print(json.dumps(dict(stage="region_retention", **regions)), flush=True)
+            except Exception:  # noqa: BLE001 - 回收异常不改变来源的同步成功/失败
+                print(json.dumps({"stage": "region_retention", "status": "failed",
+                                  "code": "REGION_RETENTION_FAILED"}), flush=True)
         return int(result["status"] == "failed" or monitor_failed)
     except Exception as exc:  # noqa: BLE001 - CLI边界只输出异常类型，避免凭据泄漏
         print(json.dumps({"status": "failed", "error": type(exc).__name__}), flush=True)

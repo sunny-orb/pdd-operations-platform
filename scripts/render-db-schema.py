@@ -20,19 +20,47 @@ DEPLOY_OUTPUT = ROOT / "docs/database-schema/schema-songbing.sql"
 
 
 from migrations_v2.company_db_objects import (
+    COMPATIBLE_RUNTIME_REVISIONS,
     EXTENSION_MEMBERS,
     START_REVISION,
     TARGET_REVISION,
 )
 
 DEPLOY_DATABASE = "pdd_dashboard"
-# 精确离线增量：公司CLI允许12/16/17→18，15仅用于隔离副本验证。
+# 精确离线增量：公司CLI允许12/16/17/18/19→20，15仅用于隔离副本验证。
 UPGRADE_SQL_SHA256 = {
-    "20261104_12": "3896140dacd1ced70611877d4f758a07110f54b6f9340c5e3d82af10bace7b39",
-    "20261111_15": "a2fa717e3f8ff82929945a099dab29abe23743b4d5fba3bc20222e1369939104",
-    "20261111_16": "593974ad7961f70881af10958a8854f7605bf5b6bc5f4be31eeaca28cfccff24",
-    "20261113_17": "d70ff79fe83b0962bc94b2d8a5f4551a795a760bda2981b5f1179b2a53fc1e46",
+    "20261104_12": "bd8ed332ecdbd0081fbbb378b4bab20dbb22cebd8ad4de15765ec36132776948",
+    "20261111_15": "79cb98068aa8ad0b47392161ac3df4d058b3ea7d456980c555d995f0ab9fd95a",
+    "20261111_16": "ee56f561c3d08d669dad2953a80554a40a8ed8cb3215994dbbf38f3168a3e4c3",
+    "20261113_17": "defc6fbc0a694c6fab8674bb138b86786f349ac5f03a4f69a66e6e453ecd1266",
+    "20261114_18": "51f842336d49387fc4894375e6114fe586fad96804032fd6b1495c3f90d2ca32",
+    "20261116_19": "73f065fe90d5d304e459e71939a6628d4e71f47af7eb25feff691085100df47f",
 }
+
+REGION_GRANTS = (
+    "GRANT SELECT ON public.region_retirements TO pdd_app,pdd_ingest;\n",
+    "GRANT EXECUTE ON FUNCTION public.pdd_region_retire_step(integer) TO pdd_ingest;\n",
+    "GRANT EXECUTE ON FUNCTION public.pdd_region_rebuild_begin(text,text,text) TO pdd_ingest;\n",
+    "GRANT EXECUTE ON FUNCTION public.pdd_region_rebuild_finish(text) TO pdd_ingest;\n",
+    "GRANT EXECUTE ON FUNCTION public.pdd_region_gc_block(integer) TO pdd_ingest;\n",
+)
+
+
+def strip_region_grants(body: str) -> str:
+    """公司账号拥有对象；只移除20中五条已审本机授权，不改保护函数身份条件。"""
+    for statement in REGION_GRANTS:
+        if body.count(statement) != 1:
+            raise RuntimeError("DEPLOY_MIGRATION_PERMISSIONS_CHANGED")
+        body = body.replace(statement, "")
+    return body
+
+
+def has_local_role_dependency(body: str) -> bool:
+    # 仅允许守卫内部本机身份比较的已知字面量；其他角色引用仍拒绝。
+    body = body.replace(
+        "session_user IN ('pdd_admin','pdd_ingest')", "session_user IS NOT NULL"
+    )
+    return re.search(r"\bpdd_(?:app|ingest)\b", body) is not None
 
 
 def transaction_body(sql: str) -> str:
@@ -43,13 +71,13 @@ def transaction_body(sql: str) -> str:
 
 
 def render_upgrade_sql(start_revision: str = START_REVISION) -> str:
-    """只生成12/15/16/17→18精确增量；起点与正文均校验。"""
+    """只生成12/15/16/17/18/19→20精确增量；起点与正文均校验。"""
     if start_revision not in UPGRADE_SQL_SHA256:
         raise RuntimeError("DEPLOY_MIGRATION_START_INVALID")
     output = io.StringIO()
     config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
     scripts = ScriptDirectory.from_config(config)
-    # 公司已批准增量仍止于18；后续本地head不能自动扩大线上目标。
+    # 公司目标显式固定；后续本地head不能自动扩大线上目标。
     if TARGET_REVISION not in {
         revision.revision for revision in scripts.iterate_revisions("head", "base")
     }:
@@ -58,14 +86,19 @@ def render_upgrade_sql(start_revision: str = START_REVISION) -> str:
     body = transaction_body(output.getvalue().strip())
     if hashlib.sha256(body.encode()).hexdigest() != UPGRADE_SQL_SHA256[start_revision]:
         raise RuntimeError("DEPLOY_MIGRATION_SQL_CHANGED")
+    body = strip_region_grants(body)
     body, count = re.subn(
         r"(?m)^GRANT (?:SELECT|SELECT\(version_num\)|INSERT|UPDATE\(state\)|SELECT,INSERT,UPDATE) "
         r"ON public\.[a-z_][a-z0-9_]* TO pdd_(?:app|ingest);\n",
         "",
         body,
     )
-    expected_grants = 48 if start_revision == START_REVISION else 1
-    if count != expected_grants or re.search(r"\bpdd_(?:app|ingest)\b", body):
+    expected_grants = (
+        48
+        if start_revision == START_REVISION
+        else (0 if start_revision in ("20261114_18", "20261116_19") else 1)
+    )
+    if count != expected_grants or has_local_role_dependency(body):
         raise RuntimeError("DEPLOY_MIGRATION_PERMISSIONS_CHANGED")
     return body
 
@@ -164,7 +197,10 @@ def render_sql(
     database: str = "pdd_operations",
 ) -> str:
     """完整迁移有序渲染；head或单账号明确历史目标均附空库保护。"""
-    if runtime_account is not None and target not in ("head", TARGET_REVISION):
+    if runtime_account is not None and target not in (
+        "head",
+        *COMPATIBLE_RUNTIME_REVISIONS,
+    ):
         raise ValueError("单账号交付只允许base到head或已批准公司目标初始化")
     output = io.StringIO()
     config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
@@ -210,8 +246,10 @@ def render_sql(
             )
             # 仅移除Alembic离线输出的完整单行角色GRANT；历史revision不改写。
             # 若未来授权格式变化，拒绝生成，防止静默遗漏角色依赖。
+            if target in ("head", TARGET_REVISION):
+                body = strip_region_grants(body)
             body = re.sub(r"(?m)^GRANT [^;\n]+ TO pdd_(?:app|ingest);\n", "", body)
-            if re.search(r"\bpdd_(?:app|ingest)\b", body):
+            if has_local_role_dependency(body):
                 raise RuntimeError("部署授权输出变化，须先核对生成器")
             sql = (
                 "BEGIN;\n\n"

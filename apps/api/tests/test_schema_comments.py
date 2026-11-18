@@ -29,8 +29,8 @@ def comments(c):
         ORDER BY r.relname,a.attnum""").all()
 
 
-def test_head_has_chinese_comments_for_every_table_view_and_column(allocated_database):
-    install(allocated_database, "head")
+def test_comment_revision_has_chinese_comments_for_every_table_view_and_column(allocated_database):
+    install(allocated_database, HEAD)
     with allocated_database.connect() as c:
         values = comments(c)
         assert len([r for r in values if r[1] == 0]) == 52
@@ -119,3 +119,70 @@ def test_unregistered_head_is_not_accepted_as_metadata_compatible(allocated_data
         c.exec_driver_sql("UPDATE alembic_version_v2 SET version_num='20261116_20'")
         with pytest.raises(ValueError, match="RETENTION_SCHEMA_HEAD"):
             validate_schema(c)
+
+
+def test_region_schema_does_not_relabel_old_offline_archive_as_compatible(
+    allocated_database, tmp_path
+):
+    from app.modules import database_archive as archive
+    from app.modules import database_retention as retention
+    from tests.test_database_archive import old_candidate
+
+    install(allocated_database, PREVIOUS)
+    engine = allocated_database.execution_options(isolation_level="READ COMMITTED")
+    old_candidate(engine)
+    key = os.urandom(32)
+    selected = retention.plan(engine)
+    bundle = archive.export(engine, selected, tmp_path / "before-region-schema", key)
+    archive.drill(bundle, key)
+    assert archive.verify(bundle, key)["schema_head"] == "20261114_18"
+    assert retention.apply(engine, selected, bundle, key)["state"] == "offline"
+    with allocated_database.connect() as c:
+        c.connection.driver_connection.execute(revision_sql(PREVIOUS, "20261118_20"), prepare=False)
+    with pytest.raises(ValueError, match="ARCHIVE_SCHEMA_ADAPTER_REQUIRED"):
+        retention.restore(engine, bundle, key)
+    with allocated_database.connect() as c:
+        assert (
+            c.exec_driver_sql(
+                "SELECT state FROM dataset_storage WHERE version_id='product_daily-a'"
+            ).scalar()
+            == "offline"
+        )
+        c.connection.driver_connection.execute(
+            revision_sql("20261118_20", PREVIOUS, downgrade=True), prepare=False
+        )
+    assert retention.restore(engine, bundle, key)["state"] == "online"
+
+
+@pytest.mark.parametrize("revision", ["20261114_18", "20261118_20"])
+def test_local_ingest_verifies_fixed_migration_owner_without_role_change(
+    allocated_database, revision
+):
+    import sqlalchemy as sa
+
+    from app.modules.database_retention import require_local_test, validate_schema
+    from migrations_v2.local import ROOT, local_url
+
+    install(allocated_database, revision)
+    password = (ROOT / "var/local-db/sync.env").read_text().strip().split("=", 1)[1]
+    ingest = sa.create_engine(
+        local_url(allocated_database.url.database).set(username="pdd_ingest", password=password)
+    )
+    try:
+        with pytest.raises(ValueError, match="RETENTION_PRODUCTION_DISABLED"):
+            require_local_test(ingest)
+        require_local_test(ingest, roles=("pdd_admin", "pdd_ingest"))
+        with allocated_database.connect() as c:
+            expected = validate_schema(c)
+        with ingest.connect() as c:
+            assert validate_schema(c) == expected
+            assert c.exec_driver_sql("SELECT session_user,current_user").one() == (
+                "pdd_ingest",
+                "pdd_ingest",
+            )
+        with allocated_database.connect() as c:
+            c.exec_driver_sql("ALTER TABLE shops OWNER TO pdd_app")
+        with ingest.connect() as c, pytest.raises(ValueError, match="RETENTION_SCHEMA_SIGNATURE"):
+            validate_schema(c)
+    finally:
+        ingest.dispose()

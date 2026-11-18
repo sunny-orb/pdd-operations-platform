@@ -1,5 +1,17 @@
 # 数据库离线保留字段设计
 
+## 20：商品地区无用副本回收
+
+2026-11-18追加 `region_retirements`，只记录一个地区版本的证明与回收进度，不保存经营事实或新备份。`version_id`为PK/FK，`replacement_version_id`为替代已发布共享版FK，均RESTRICT；`status`为verifying/retained/reclaiming/reclaimed/rebuilding/restored；`representation`为legacy/shared；`cursor`为来源键，或共享表示的JSON二元组[内容桶,来源键]；`checked_rows`、`deleted_rows`为非负累计逻辑行数；`original_rows`在完整证明前为空；`content_sha256`为有序全部业务行的滚动摘要；`transaction_id`绑定受控本事务；`reason_code`记录保留原因；`created_at`、`changed_at`为数据库时刻。索引覆盖替代版本，验证/回收活动记录最多一个；完整事务恢复可独立执行。摘要与游标均依赖版本主键，符合3NF，无事实宽表或缓存。
+
+`dataset_storage.state`扩展为online/offline/reclaiming/reclaimed/rebuilding；仅offline必须绑定归档，原offline规则不变，pin仍只允许online。地区新增状态只能由受控DB函数推进，普通DELETE/UPDATE无法移除封版事实或直接改变驻留。验证候选保护当前、上一成功版、所有其他域版本的递归输入、保留钉与活动替代版；真实退出事件至少24小时。未知退出、draft和不同schema保留。
+
+legacy按来源键每批最多1000行，与替代共享版全部业务字段严格核对，仅排除物理id和dataset_version_id；任何差异整版保留。共享版先按不可变块成员子集证明包含关系，再按[内容桶,来源键]每批最多1000实际业务行形成恢复摘要，不能只凭可由写入者提供的block_id认定恢复正确。全部证明完成后才进入reclaiming，分批移除旧行或成员；reclaimed不可发布。恢复用本次完整候选，在同一事务内核对原指纹、行结构修订、行数和全部业务行摘要，保留published身份，重建共享表示后online。恢复完整内容核验沿同步整轮预算；它不属于10秒GC小批事务。现有事实物理ID不属于地区API/入站FK消费者；发现新入站FK则拒绝清理。
+
+审计、驻留转换及受控删除还验证PG_CONTEXT最后实际调用帧与固定入口签名一致，不把用户可写GUC当作授权。普通数据库所有者DML同样不可伪造证明；修改函数/禁用触发器等DDL仍属于数据库所有者权限边界。NULL批量预算在数据库直接拒绝。恢复后再次退出当前且超过24小时可以重新证明；保护条件解除或替代版变化时可重试已保留版本，不永久遗留可用副本。
+
+所有写块事务先持维护共享锁；每一维护批次同时尝试project-source-sync及维护独占锁，拒绝运行任务。共享孤块须无任何成员引用（含draft/rebuilding），整块行及块头同事务删除，超过1000行的块保留。原始归档、coverage、version_inputs、published身份和业务指纹均不修改。现阶段不执行VACUUM FULL、repack或全表重写。
+
 本地第一阶段；实施目标与保护规则见[专用方案](../implementation/database-retention.md)。不改变经营事实、report_id、输入及比较关系。五个运维对象与现有版本形成关系；全部FK使用RESTRICT，密钥和业务行不进入运维字段。生产维护入口本阶段硬关闭；18新增精确本机业务库管理员apply/restore，原随机隔离库用于恢复演练，具体边界见下节。
 
 | 表                        | 字段及类型                                                                                                                                                                                                                                                           | 约束与关系                                                                                                                                                                                                                                                                                     |

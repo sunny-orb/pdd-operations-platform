@@ -4,8 +4,9 @@ import hashlib
 import json
 
 START_REVISION = "20261104_12"
-TARGET_REVISION = "20261114_18"
-UPGRADE_STARTS = (START_REVISION, "20261111_16", "20261113_17")
+TARGET_REVISION = "20261118_20"
+COMPATIBLE_RUNTIME_REVISIONS = ("20261114_18", "20261116_19", TARGET_REVISION)
+UPGRADE_STARTS = (START_REVISION, "20261111_16", "20261113_17", "20261114_18", "20261116_19")
 RPA_TABLE = "aftersales_reports_rpa"
 RPA_INDEX = "aftersale_reports_rpa_pkey"
 RPA_SEQUENCE = "aftersale_reports_rpa_id_seq"
@@ -28,6 +29,7 @@ COMPANY_EXTENSIONS = {
     "plpgsql": "pg_catalog",
     "postgres_fdw": "public",
 }
+
 RPA_COLUMNS = [
     ("id", "bigint"),
     ("start_date", "date"),
@@ -38,7 +40,7 @@ RPA_COLUMNS = [
     ("end_date", "date"),
 ]
 
-# 冻结的PG17目录指纹由隔离库迁移12、15、16、17及18后取得。按对象类别分开，错误不打印目录内容。
+# 冻结PG17目录指纹来自隔离库的12、15、16、17、18及20；19与18结构相同。
 SCHEMA_SIGNATURES = {
     START_REVISION: {
         "columns": "d1ed987fceefdba4589b86d6f7f0fa1c5de19bb6406e1db3da9454d8585b75aa",
@@ -76,7 +78,7 @@ SCHEMA_SIGNATURES = {
         "functions": "d7431d3f56c7af0bc39076256d90fbfa3abcf1de0787c1c5c8d72dd38e6d01b7",
         "types": "0560d24afec221311356e168b60600dd707906cb76ce88fe1da6c699de43256e",
     },
-    TARGET_REVISION: {
+    "20261114_18": {
         "relations": "e64fbae3c6609e5893b28413b77ac38acbe4d16e80b73d9a877d022227f3ea23",
         "columns": "ab6725b4a7ab55e52f1d12755091dd76c4c4de6eeaa0210e9383323845e3d06b",
         "constraints": "6c0e2392ad7b8203d41eea33391637c4f1ff853f90fc141609b72f5c0f267714",
@@ -86,6 +88,19 @@ SCHEMA_SIGNATURES = {
         "types": "0560d24afec221311356e168b60600dd707906cb76ce88fe1da6c699de43256e",
     },
 }
+
+SCHEMA_SIGNATURES[TARGET_REVISION] = {
+    "relations": "f7b7fe850e8da588c9c7c4001906831dc5d98195b58b73d1522cd343534cc26d",
+    "columns": "2fc2a1a678ee471c1c43d6dbbb6818f4faca58f2b9a067f9411dd82ce0e9fdcb",
+    "constraints": "68ed7d5db40be7e99774dfc887ba4cf158bc7e95e0a38e1c755db08ecdc6bdbd",
+    "triggers": "ee6ccdf7b90464c5bbe66b56699cbbf4b1fe562d8e7195904815be8b842010b2",
+    "internal_triggers": "a29dc1f2fbd4dbf9363ee868f6bf3bdcdb6e691c17feb7bf097be1a80ad71321",
+    "functions": "6a534c475b40126adcc2cc02be212ee68f79dbb5f4b6524f312f7fc729346e12",
+    "types": "c7e794c123549553debb3d8f2bc40d0c161b362cbd6358e058aee29ce8406b41",
+}
+
+# 19只补目录说明；目录签名不含COMMENT，所有结构和保护函数仍与18相同。
+SCHEMA_SIGNATURES["20261116_19"] = SCHEMA_SIGNATURES["20261114_18"].copy()
 
 # 只沿扩展成员(e)及不可独立存在的内部实现(i)识别归属。
 # 普通/自动依赖(n/a/x)并不代表扩展成员，不能据此放行业务对象。
@@ -287,10 +302,15 @@ WHERE c.relkind NOT IN ('v','m') OR r.rulename <> '_RETURN'
 )
 
 
-def application_signature(connection, *, has_rpa):
-    """按对象类别生成无OID和实际角色名的目录指纹；不读取业务行。"""
+def application_signature(connection, *, has_rpa, expected_owner=None):
+    """目录指纹不读业务行；默认当前所有者，本机任务可校验固定迁移所有者。"""
+    query = APP_SIGNATURE
+    parameters = (has_rpa, RPA_RELATIONS)
+    if expected_owner is not None:
+        parameters += (expected_owner,) * query.count("current_user::regrole")
+        query = query.replace("current_user::regrole", "%s::regrole")
     categories = {}
-    for category, value in connection.execute(APP_SIGNATURE, (has_rpa, RPA_RELATIONS)):
+    for category, value in connection.execute(query, parameters):
         categories.setdefault(category, []).append(
             json.dumps(value, ensure_ascii=False, separators=(",", ":"))
         )
@@ -300,18 +320,18 @@ def application_signature(connection, *, has_rpa):
     }
 
 
-def verify_application(connection, revision, *, has_rpa):
+def verify_application(connection, revision, *, has_rpa, expected_owner=None):
     # 事件触发器全库生效，monitor或扩展的schema不构成DDL回调许可；本次无已审核回调。
     if connection.execute("SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_event_trigger)").fetchone()[0]:
         raise ValueError("DEPLOY_EVENT_TRIGGER_MISMATCH")
-    if revision in ("20261111_16", "20261113_17", TARGET_REVISION):
+    if revision in ("20261111_16", "20261113_17", *COMPATIBLE_RUNTIME_REVISIONS):
         state = connection.execute(
             "SELECT indisvalid,indisready FROM pg_index WHERE indexrelid="
             "to_regclass('public.ix_return_records_summary_window')"
         ).fetchone()
         if state != (True, True):
             raise ValueError("DEPLOY_SCHEMA_MISMATCH:index_state")
-    actual = application_signature(connection, has_rpa=has_rpa)
+    actual = application_signature(connection, has_rpa=has_rpa, expected_owner=expected_owner)
     expected = SCHEMA_SIGNATURES[revision]
     mismatches = sorted(
         category

@@ -19,6 +19,7 @@ renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
 
 from migrations_v2.company_db_objects import (
+    COMPATIBLE_RUNTIME_REVISIONS,
     TARGET_REVISION,
     rpa_manifest,
     verify_application,
@@ -35,20 +36,19 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
         ).fetchone()
         if actual[:2] != (database, account) or actual[2] // 10000 != 17:
             raise ValueError("DEPLOY_TARGET_MISMATCH")
-        if apply:
-            connection.execute("SELECT pg_advisory_xact_lock(726411,20261104)")
-        else:
+        if not apply:
             connection.execute("SET TRANSACTION READ ONLY")
         exists = connection.execute(
             "SELECT to_regclass('public.alembic_version_v2')"
         ).fetchone()[0]
         if exists:
-            head = TARGET_REVISION
             versions = connection.execute(
                 "SELECT version_num FROM public.alembic_version_v2"
             ).fetchall()
-            if versions != [(head,)]:
+            if len(versions) != 1 or versions[0][0] not in COMPATIBLE_RUNTIME_REVISIONS:
                 raise ValueError("DEPLOY_REVISION_MISMATCH")
+            head = versions[0][0]
+            connection.execute("SET TRANSACTION READ ONLY")
             connection.execute("SET LOCAL search_path=pg_catalog,public")
             owner = (
                 "pdd_admin"
@@ -59,6 +59,8 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
             manifest = rpa_manifest(connection, owner=owner)
             verify_application(connection, head, has_rpa=manifest is not None)
             return "already_initialized"
+        if apply:
+            connection.execute("SELECT pg_advisory_xact_lock(726411,20261104)")
         # 与派生SQL共用前置检查；只读检查不申请事务写锁。
         preflight = renderer.deployment_preflight(account, database)
         if not apply:
@@ -68,7 +70,9 @@ def initialize(connection, *, database: str, account: str, apply: bool = False) 
         connection.execute(preflight, prepare=False)
         if not apply:
             return "empty"
-        sql = renderer.render_sql(TARGET_REVISION, runtime_account=account, database=database)
+        sql = renderer.render_sql(
+            TARGET_REVISION, runtime_account=account, database=database
+        )
         body = renderer.transaction_body(sql[sql.index("BEGIN;") :].strip())
         connection.execute(body, prepare=False)
         return "initialized"

@@ -86,7 +86,7 @@ def test_single_account_initializes_without_database_ownership_and_preserves_mon
         )
         assert (
             c.exec_driver_sql("SELECT version_num FROM public.alembic_version_v2").scalar_one()
-            == "20261116_19"
+            == "20261118_20"
         )
         assert (
             c.exec_driver_sql(
@@ -94,7 +94,7 @@ def test_single_account_initializes_without_database_ownership_and_preserves_mon
                 "WHERE table_schema='public' AND table_name <> 'alembic_version_v2' "
                 "AND table_name NOT LIKE 'read_%%'"
             ).scalar_one()
-            == 719
+            == 732
         )
         assert (
             c.exec_driver_sql(
@@ -171,7 +171,7 @@ def test_deployment_check_is_read_only_and_apply_is_repeatable(allocated_databas
             == "initialized"
         )
         assert c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar() == (
-            "20261114_18"
+            "20261118_20"
         )
         assert (
             initializer.initialize(raw, database=name, account="pdd_app", apply=True)
@@ -180,6 +180,66 @@ def test_deployment_check_is_read_only_and_apply_is_repeatable(allocated_databas
         c.exec_driver_sql("UPDATE alembic_version_v2 SET version_num='20261031_09'")
         with pytest.raises(ValueError, match="DEPLOY_REVISION_MISMATCH"):
             initializer.initialize(raw, database=name, account="pdd_app", apply=True)
+
+
+@pytest.mark.parametrize("revision", ["20261114_18", "20261116_19", "20261118_20"])
+def test_initialized_compatible_schema_is_verified_without_migration(allocated_database, revision):
+    from tests.test_return_summary_index import revision_sql
+
+    renderer = load_script("compatibility_renderer", "render-db-schema.py")
+    initializer = load_script("compatibility_initializer", "init-deployment-db.py")
+    with allocated_database.connect() as c:
+        c.exec_driver_sql("SET ROLE pdd_app")
+        raw = c.connection.driver_connection
+        raw.execute(
+            renderer.render_sql(
+                "20261114_18", runtime_account="pdd_app", database=allocated_database.url.database
+            ),
+            prepare=False,
+        )
+        if revision != "20261114_18":
+            raw.execute(revision_sql("20261114_18", revision), prepare=False)
+        for apply in (False, True):
+            assert (
+                initializer.initialize(
+                    raw, database=allocated_database.url.database, account="pdd_app", apply=apply
+                )
+                == "already_initialized"
+            )
+            assert (
+                c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar() == revision
+            )
+            assert bool(
+                c.exec_driver_sql("SELECT to_regclass('public.region_retirements')").scalar()
+            ) == (revision == "20261118_20")
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "ALTER TABLE region_retirements ADD COLUMN unexpected text",
+        "ALTER TABLE dataset_storage DROP CONSTRAINT dataset_storage_state_check",
+        "ALTER TABLE region_retirements DISABLE TRIGGER pdd_region_audit_guard",
+        "CREATE OR REPLACE FUNCTION public.pdd_region_context(version_key text) "
+        "RETURNS boolean LANGUAGE sql AS 'SELECT true'",
+    ],
+)
+def test_region_schema_drift_rejects_initialized_database(allocated_database, statement):
+    from app.modules.database_retention import validate_schema
+
+    initializer = load_script("region_drift_initializer", "init-deployment-db.py")
+    with allocated_database.connect() as c:
+        c.exec_driver_sql("SET ROLE pdd_app")
+        raw = c.connection.driver_connection
+        initializer.initialize(
+            raw, database=allocated_database.url.database, account="pdd_app", apply=True
+        )
+        assert validate_schema(c)
+        c.exec_driver_sql(statement)
+        with pytest.raises(ValueError, match="DEPLOY_SCHEMA_MISMATCH"):
+            initializer.initialize(raw, database=allocated_database.url.database, account="pdd_app")
+        with pytest.raises(ValueError, match="RETENTION_SCHEMA"):
+            validate_schema(c)
 
 
 def test_sync_runtime_accepts_explicit_allocated_connection(allocated_database, monkeypatch):
@@ -280,8 +340,7 @@ def test_registered_extensions_survive_initialization(allocated_database, schema
         if entrypoint == "sql":
             raw.execute(
                 initializer.renderer.render_sql(
-                    "20261114_18",
-                    runtime_account="pdd_app", database=args["database"]
+                    "20261114_18", runtime_account="pdd_app", database=args["database"]
                 ),
                 prepare=False,
             )

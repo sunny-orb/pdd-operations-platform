@@ -14,9 +14,11 @@ from psycopg import sql
 
 from app.modules.local_storage import require_local_maintenance, verify_connection
 from migrations_v2.baseline_20261028.schema import build_metadata
+from migrations_v2.company_db_objects import COMPATIBLE_RUNTIME_REVISIONS, TARGET_REVISION
 
-# 归档数据结构格式；19仅增加COMMENT，不能令现有18归档失效或扩大公司升级范围。
+# 旧离线包和回执格式保持18；数据库schema独立演进，不用改格式放宽恢复边界。
 HEAD = "20261114_18"
+CURRENT_SCHEMA_HEAD = TARGET_REVISION
 RECONCILIATIONS = "source_reconciliations"
 RECONCILIATION_COLUMNS = (
     "source_id",
@@ -74,27 +76,48 @@ def code_revision():
     )
 
 
-def require_local_test(engine):
-    """第一阶段不提供生产apply旁路，环境变量/CLI参数不能解除这个边界。"""
+def require_local_test(engine, *, roles=("pdd_admin",)):
+    """默认仅随机测试管理员；地区任务可显式选择任务角色，不提供生产旁路。"""
     u = engine.url
     if (
         u.host != "127.0.0.1"
         or u.port != 55432
-        or u.username != "pdd_admin"
+        or u.username not in roles
         or not re.fullmatch(r"pdd_operations_v2_test_[0-9a-f]{12}", u.database or "")
     ):
         raise ValueError("RETENTION_PRODUCTION_DISABLED")
 
 
 def compatible_local_schema_head(actual):
-    """本地仅显式认可18的说明兼容版19；未知修订和其他历史格式仍拒绝。"""
-    return actual == HEAD or (HEAD == "20261114_18" and actual == "20261116_19")
+    """显式认可经验证的18/19/20；历史格式测试仍只能使用其对应修订。"""
+    return actual == HEAD or (HEAD == "20261114_18" and actual in COMPATIBLE_RUNTIME_REVISIONS)
+
+
+def _schema_owner(c):
+    """本机任务只读核对pdd_admin所属结构；不切角色，不放宽公司所有权。"""
+    u = c.engine.url
+    if u.username != "pdd_ingest":
+        return None
+    raw = c.connection.driver_connection
+    if (
+        u.drivername != "postgresql+psycopg"
+        or (u.host, u.port) != ("127.0.0.1", 55432)
+        or dict(u.query)
+        or (raw.info.host, raw.info.port) != ("127.0.0.1", 55432)
+        or not (
+            u.database == "pdd_operations"
+            or re.fullmatch(r"pdd_operations_v2_test_[0-9a-f]{12}", u.database or "")
+        )
+    ):
+        raise ValueError("RETENTION_SCHEMA_OWNER")
+    verify_connection(c)
+    return "pdd_admin"
 
 
 def validate_schema(c):
-    if not compatible_local_schema_head(
-        c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2"))
-    ):
+    expected_owner = _schema_owner(c)
+    revision = c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2"))
+    if not compatible_local_schema_head(revision):
         raise ValueError("RETENTION_SCHEMA_HEAD")
     from app.modules import deployment_storage
 
@@ -109,6 +132,8 @@ def validate_schema(c):
         *CONTENT.TABLES,
         *CONTENT.VIEWS,
     }
+    if revision == CURRENT_SCHEMA_HEAD:
+        expected.add("region_retirements")
     actual = set(
         c.execute(
             sa.text("""SELECT relname FROM pg_class t JOIN pg_namespace n
@@ -137,15 +162,10 @@ def validate_schema(c):
         for key, value in signature.items()
         if not key.endswith(":fks") and key not in CONTENT.VIEWS
     )
-    expected_fk_count = len(
-        re.findall(
-            r"REFERENCES public\.[a-z_]+\s*\(",
-            (ROOT / "docs/database-schema/schema.sql").read_text(),
-        )
-    )
-    if (
-        column_count != 720
-        or sum(len(v) for k, v in signature.items() if k.endswith(":fks")) != expected_fk_count
+    # 18/19格式固定720列/72外键，不能随当前head派生SQL增加对象而变化。
+    # 20新增对象在下方按真实PG取得的完整目录签名精确校验。
+    if revision != CURRENT_SCHEMA_HEAD and (
+        column_count != 720 or sum(len(v) for k, v in signature.items() if k.endswith(":fks")) != 72
     ):
         raise ValueError("RETENTION_SCHEMA_RELATIONSHIPS")
     if c.scalar(
@@ -201,6 +221,14 @@ def validate_schema(c):
     if not required <= guards:
         raise ValueError("RETENTION_SCHEMA_GUARDS: " + repr(sorted(required - guards)))
     signature["guards"] = sorted(guards)
+    from migrations_v2.company_db_objects import verify_application
+
+    try:
+        verify_application(
+            c.connection.driver_connection, revision, has_rpa=False, expected_owner=expected_owner
+        )
+    except ValueError as exc:
+        raise ValueError("RETENTION_SCHEMA_SIGNATURE") from exc
     return digest(signature)
 
 

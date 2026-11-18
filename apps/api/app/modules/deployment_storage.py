@@ -107,7 +107,7 @@ def content_enabled(engine, table):
 
 def require_session(c):
     """在真实连接核对库/会话/执行身份、TLS、端点与当前迁移，避免伪造URL。"""
-    from app.modules.database_retention import HEAD
+    from migrations_v2.company_db_objects import COMPATIBLE_RUNTIME_REVISIONS
 
     require_endpoint(c.engine)
     require_context()
@@ -125,8 +125,10 @@ def require_session(c):
         or not raw.pgconn.ssl_in_use
     ):
         raise ValueError("STORAGE_SESSION")
-    if c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2")) != HEAD:
+    head = c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2"))
+    if head not in COMPATIBLE_RUNTIME_REVISIONS:
         raise ValueError("STORAGE_HEAD")
+    return head
 
 
 def require_content_write(c, table):
@@ -137,7 +139,7 @@ def require_content_write(c, table):
 
 def verify_catalog(c):
     """公司对象只读检查复用既有部署校验；外部RPA和monitor不参与维护候选。"""
-    from app.modules.database_retention import HEAD, digest
+    from app.modules.database_retention import digest
     from migrations_v2.company_db_objects import (
         application_signature,
         rpa_manifest,
@@ -145,24 +147,24 @@ def verify_catalog(c):
         verify_company_protections,
     )
 
-    require_session(c)
+    head = require_session(c)
     raw = c.connection.driver_connection
     if rpa_manifest(raw) is None:
         raise ValueError("STORAGE_RPA_REQUIRED")
     verify_company_protections(raw)
-    verify_application(raw, HEAD, has_rpa=True)
+    verify_application(raw, head, has_rpa=True)
     return digest(application_signature(raw, has_rpa=True))
 
 
 def inspect(c):
     """只读元数据，不COPY事实或创建备份；未知退出时间仍保留。"""
-    from app.modules.database_retention import HEAD, snapshot
+    from app.modules.database_retention import snapshot
 
-    require_session(c)
+    head = require_session(c)
     plan = snapshot(c, with_content=False)
     value = read_policy()
     return {
-        "schema_head": HEAD,
+        "schema_head": head,
         "enabled_tables": value["tables"] if value else [],
         "current_datasets": len(plan["heads"]),
         "protected_versions": len(plan["protected"]),

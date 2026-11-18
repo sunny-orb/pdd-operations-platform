@@ -1,0 +1,12 @@
+# 只回收已逐批证明可替代、无业务依赖的商品地区旧表示，不创建备份。
+enabled = true
+interval_seconds = 300
+minimum_hours = 24
+batch_rows = 1000
+max_batches = 10
+max_seconds = 10
+batch_pause_seconds = 0.25
+statement_timeout_ms = 1500
+lock_timeout_ms = 100
+transaction_timeout_ms = 2000
+max_load_average = 2.0

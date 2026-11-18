@@ -160,6 +160,8 @@ def write_version(c, table_name, version_id, rows, *, heartbeat=None):
     from app.modules.local_storage import require_content_write
 
     require_content_write(c, table_name)
+    # 身份检查后先于任何版本/块行锁；孤块回收持同一锁的独占模式。
+    c.execute(sa.text("SELECT pg_advisory_xact_lock_shared(hashtext('pdd-database-maintenance'))"))
     if table_name not in FACTS:
         raise ValueError("CONTENT_TABLE")
     version = (
@@ -171,7 +173,14 @@ def write_version(c, table_name, version_id, rows, *, heartbeat=None):
         .one()
     )
     if version["state"] != "draft":
-        raise ValueError("CONTENT_VERSION_SEALED")
+        rebuilding = table_name == "product_region_records" and c.scalar(
+            sa.text("SELECT state='rebuilding' FROM public.dataset_storage WHERE version_id=:v"),
+            {"v": version_id},
+        )
+        if not rebuilding or not c.scalar(
+            sa.text("SELECT public.pdd_region_context(:v)"), {"v": version_id}
+        ):
+            raise ValueError("CONTENT_VERSION_SEALED")
     if version["dataset_code"] not in FACTS[table_name]:
         raise ValueError("CONTENT_NAMESPACE")
     blocks = _blocks(table_name, version, rows, heartbeat)

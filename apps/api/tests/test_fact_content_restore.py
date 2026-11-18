@@ -140,7 +140,7 @@ def test_initializer_rejects_missing_shared_read_view(sales_pg):
 
     script = load_script("content_initializer", "init-deployment-db.py")
     with sales_pg.begin() as c:
-        # 公司入口固定18；先使用其实际目标，再验证缺视图的目录保护。
+        # 先使用公司入口当前目标，再验证缺视图的目录保护。
         config = Config(str(ROOT / "apps/api/alembic-v2.ini"))
         config.attributes.update(connection=c, v2_expected_database=c.engine.url.database)
         command.downgrade(config, TARGET_REVISION)
@@ -151,16 +151,19 @@ def test_initializer_rejects_missing_shared_read_view(sales_pg):
         )
 
 
-def test_company_initializer_rejects_unapproved_local_comment_head(sales_pg):
+def test_company_initializer_accepts_reviewed_current_schema_without_changing_it(sales_pg):
     from tests.test_deployment_database import load_script
 
     script = load_script("local_comment_initializer", "init-deployment-db.py")
-    with sales_pg.connect() as c, pytest.raises(ValueError, match="DEPLOY_REVISION_MISMATCH"):
-        script.initialize(
-            c.connection.driver_connection, database=sales_pg.url.database, account="pdd_admin"
+    with sales_pg.connect() as c:
+        assert (
+            script.initialize(
+                c.connection.driver_connection, database=sales_pg.url.database, account="pdd_admin"
+            )
+            == "already_initialized"
         )
     with sales_pg.connect() as c:
-        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261116_19"
+        assert c.scalar(sa.text("SELECT version_num FROM alembic_version_v2")) == "20261118_20"
         assert c.scalar(sa.text("SELECT to_regclass('public.read_product_daily_facts')"))
 
 

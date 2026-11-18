@@ -267,7 +267,7 @@ def test_upgrade_rolls_back_versions_tables_and_data_after_late_ddl_failure(
         DO $$ BEGIN
           IF to_regclass('public.source_reconciliations') IS NULL OR
              NOT EXISTS (SELECT 1 FROM public.alembic_version_v2
-                         WHERE version_num='20261114_18') THEN
+                         WHERE version_num='20261118_20') THEN
             RAISE EXCEPTION 'injection point did not reach final migration';
           END IF;
           RAISE EXCEPTION 'injected final migration failure';
@@ -357,8 +357,43 @@ def test_index_timeout_rolls_back_direct_12_to_16(deployed12, monkeypatch):
         assert c.exec_driver_sql("SELECT count(*) FROM aftersales_reports_rpa").scalar() == 1
 
 
-@pytest.mark.parametrize("start", ["20261110_13", "20261110_14", "20261114_18", "head", "unknown"])
+@pytest.mark.parametrize("start", ["20261110_13", "20261110_14", "20261118_20", "head", "unknown"])
 def test_increment_renderer_refuses_unreviewed_start(start):
     renderer = load_script("bounded_index_renderer", "render-db-schema.py")
     with pytest.raises(RuntimeError, match="DEPLOY_MIGRATION_START_INVALID"):
         renderer.render_upgrade_sql(start)
+
+
+@pytest.mark.parametrize("start", ["20261114_18", "20261116_19"])
+def test_region_upgrade_preserves_readers_and_company_objects(deployed12, start):
+    from tests.test_return_summary_index import revision_sql
+
+    publish(deployed12)
+    upgrade = load_script("region_upgrade", "upgrade-deployment-db.py")
+    with deployed12.connect() as c, deployed12.connect() as reader:
+        c.exec_driver_sql("SET ROLE pdd_app")
+        raw = c.connection.driver_connection
+        raw.execute(revision_sql("20261104_12", start), prepare=False)
+        data = data_snapshot(c)
+        reader.exec_driver_sql("SET ROLE pdd_app")
+        before_rpa = upgrade.rpa_manifest(raw, owner="pdd_admin")
+        before_acl = upgrade.application_acl(raw, has_rpa=True)
+        before_company = upgrade.protected_catalog(raw)
+        assert upgrade.upgrade(raw) == "ready"
+        assert c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar() == start
+        with reader.connection.driver_connection.transaction():
+            reader.exec_driver_sql("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            assert data_snapshot(reader) == data
+            assert upgrade.upgrade(raw, apply=True) == "upgraded"
+            assert data_snapshot(reader) == data
+        assert (
+            c.exec_driver_sql("SELECT version_num FROM alembic_version_v2").scalar()
+            == "20261118_20"
+        )
+        assert c.exec_driver_sql("SELECT count(*) FROM region_retirements").scalar() == 0
+        assert data_snapshot(c) == data
+        assert upgrade.rpa_manifest(raw, owner="pdd_admin") == before_rpa
+        assert upgrade.protected_catalog(raw) == before_company
+        after_acl = upgrade.application_acl(raw, has_rpa=True)
+        assert all(after_acl[key] == value for key, value in before_acl.items())
+        assert upgrade.upgrade(raw, apply=True) == "already_upgraded"

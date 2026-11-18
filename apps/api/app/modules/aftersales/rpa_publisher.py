@@ -1,5 +1,7 @@
 """RPA三角色整批原子发布，复用事实/版本/报告与归档，不触及上游。"""
 
+import hashlib
+import json
 from collections import defaultdict
 from datetime import timedelta
 from pathlib import Path
@@ -8,8 +10,10 @@ from uuid import uuid4
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
+from app.modules.archive_budget import consume
+from app.modules.archive_payload import open_payload
 from app.modules.archive_store import require_archive, write_archive_stream
-from app.modules.streaming_json import fingerprint, fingerprint_rows
+from app.modules.streaming_json import canonical_chunks, fingerprint, fingerprint_rows
 
 from .classification import rule_parameters
 from .publisher import canonical, private, reflect, source_chunks
@@ -43,16 +47,75 @@ def seal(c, versions, vid, digest, evidence):
     c.execute(versions.update().where(versions.c.id == vid).values(state="published"))
 
 
+def input_digest(raw, rows, *, exclude_updated_at=True):
+    """流式摘要只排除原行顶层写入时间；原字段、精度、次序与规范规则均参与。"""
+    digest = hashlib.sha256(b'{"raw":[')
+    separator = b""
+    for row in raw:
+        digest.update(separator)
+        value = {k: v for k, v in row.items() if k != "updated_at"} if exclude_updated_at else row
+        for chunk in canonical_chunks(value):
+            digest.update(chunk)
+        separator = b","
+    digest.update(b'],"revision":')
+    for chunk in canonical_chunks(REVISION):
+        digest.update(chunk)
+    digest.update(b',"rows":')
+    for chunk in canonical_chunks(rows):
+        digest.update(chunk)
+    digest.update(b"}")
+    return digest.hexdigest()
+
+
+def legacy_input_matches(old, group):
+    """仅核对同组最近封版；原归档和当前规范行重算旧摘要一致才复用原身份。"""
+    path = require_archive(old["retained_input_ref"])
+    require_archive(old["interpretation_ref"])
+    matched, count = True, 0
+
+    def archived_rows():
+        nonlocal matched, count
+        with open_payload(path) as source:
+            for line in source:
+                consume(len(line))
+                count += 1
+                if count > 300000:
+                    raise ValueError("RPA_ARCHIVE_ROW_LIMIT")
+                try:
+                    row = json.loads(line)
+                except (ValueError, UnicodeError) as exc:
+                    raise ValueError("RPA_ARCHIVE_CONTENT_MISMATCH") from exc
+                if not isinstance(row, dict):
+                    raise ValueError("RPA_ARCHIVE_CONTENT_MISMATCH")
+                # 逐行比规范字节而非Python数值相等，保留小数位、类型与未知JSON字段。
+                expected = group.raw[count - 1] if count <= len(group.raw) else None
+                if expected is None or canonical(
+                    {k: v for k, v in row.items() if k != "updated_at"}
+                ) != canonical({k: v for k, v in expected.items() if k != "updated_at"}):
+                    matched = False
+                yield row
+
+    legacy_digest = input_digest(archived_rows(), group.rows, exclude_updated_at=False)
+    if not matched or count != len(group.raw):
+        return False
+    if legacy_digest != old["content_fingerprint"]:
+        raise ValueError("RPA_ARCHIVE_CONTENT_MISMATCH")
+    return True
+
+
 def receive_group(c, tables, group, root, code_hash):
     versions = tables["dataset_versions"]
-    digest = fingerprint(dict(revision=REVISION, raw=group.raw, rows=group.rows))
+    digest = input_digest(group.raw, group.rows)
+    scope = (
+        versions.c.dataset_code == group.code,
+        versions.c.period_start == group.start,
+        versions.c.period_end == group.end,
+        versions.c.row_schema_revision == REVISION,
+        versions.c.state == "published",
+    )
     old = (
         c.execute(
-            sa.select(versions).where(
-                versions.c.dataset_code == group.code,
-                versions.c.content_fingerprint == digest,
-                versions.c.state == "published",
-            )
+            sa.select(versions).where(*scope, versions.c.content_fingerprint == digest).limit(1)
         )
         .mappings()
         .first()
@@ -61,6 +124,34 @@ def receive_group(c, tables, group, root, code_hash):
         require_archive(old["retained_input_ref"])
         require_archive(old["interpretation_ref"])
         return old["id"], False
+    inputs, reports = tables["version_inputs"], tables["aftersales_reports"]
+    # 30天自然月可与滚动周报同窗；用原报告绑定选同类型，不试读另一类型的大归档。
+    same_kind = (
+        sa.select(1)
+        .select_from(
+            inputs.join(reports, reports.c.dataset_version_id == inputs.c.output_version_id)
+        )
+        .where(
+            inputs.c.input_version_id == versions.c.id,
+            inputs.c.input_role == group.role,
+            reports.c.report_type == group.kind,
+            reports.c.period_start == group.start,
+            reports.c.period_end == group.end,
+        )
+        .exists()
+    )
+    previous = (
+        c.execute(
+            sa.select(versions)
+            .where(*scope, same_kind)
+            .order_by(versions.c.sealed_at.desc(), versions.c.created_at.desc(), versions.c.id)
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    if previous and legacy_input_matches(previous, group):
+        return previous["id"], False
     vid = str(uuid4())
     # 使用项目已支持压缩分块的输入文件类型，避免逐原行扫描全局归档配额。
     archive = write_archive_stream(root / vid / "input.ndjson", source_chunks(group.raw))

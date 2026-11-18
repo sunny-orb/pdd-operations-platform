@@ -221,7 +221,7 @@ class Repository:
         )
 
     def rows(self, role, report=None):
-        """固定窗原行→完整身份/原原因等价组；保留计数及逐字段NULL证据。"""
+        """固定窗读取；RPA保留期间原行，JST压缩等价组，计数/NULL/精度不变。"""
         report = report or self.report
         if not report:
             return None
@@ -263,31 +263,66 @@ class Repository:
             f"SUM(ABS({field})) AS _absolute_{field}"
             for field in fields
         )
-        result = [
-            dict(r)
-            for r in self.c.execute(
-                sa.text(
-                    f"SELECT {','.join(dimensions)},{sums},COUNT(*) AS _record_count,"
-                    "MIN(source_row_key) AS source_row_key,MIN(period_start) AS period_start,"
-                    "MAX(period_end) AS period_end,"
-                    f"COUNT({amount}) AS _amount_known_count,"
-                    f"COUNT(*) FILTER (WHERE {amount}=0) AS _amount_zero_count,"
-                    f"SUM({amount}) AS _amount_known_subtotal "
-                    f"FROM public.{table} WHERE dataset_version_id=:vid "
-                    "AND row_kind='detail' AND period_start>=:start AND period_end<=:end "
-                    "AND period_start IS NOT NULL AND period_end IS NOT NULL "
-                    f"GROUP BY {','.join(dimensions)} ORDER BY MIN(source_row_key) LIMIT 300001"
-                ),
-                dict(vid=source["id"], start=start, end=end),
-            ).mappings()
-        ]
-        count = sum(row["_record_count"] for row in result)
+        raw_fields = (*COMMON_FIELDS, *fields, *dimensions[len(IDENTITY_FIELDS) :])
+        rpa = self.is_rpa(report)
+
+        # RPA本身是期间商品/原因报表，直接读原行避免再次宽字段聚合；仍按原键顺序。
+        # ABS只供已有50位精度证明；不能证明时，固定摘要继续由精确SQL汇总。
+        def read_fixed_rows(raw):
+            projection = (
+                f"{','.join(raw_fields)},"
+                + ",".join(f"ABS({field}) AS _absolute_{field}" for field in fields)
+                if raw
+                else f"{','.join(dimensions)},{sums},COUNT(*) AS _record_count,"
+                "MIN(source_row_key) AS source_row_key,MIN(period_start) AS period_start,"
+                "MAX(period_end) AS period_end,"
+                f"COUNT({amount}) AS _amount_known_count,"
+                f"COUNT(*) FILTER (WHERE {amount}=0) AS _amount_zero_count,"
+                f"SUM({amount}) AS _amount_known_subtotal"
+            )
+            ordering = (
+                "ORDER BY source_row_key"
+                if raw
+                else f"GROUP BY {','.join(dimensions)} ORDER BY MIN(source_row_key)"
+            )
+            return [
+                dict(r)
+                for r in self.c.execute(
+                    sa.text(
+                        f"SELECT {projection} "
+                        f"FROM public.{table} WHERE dataset_version_id=:vid "
+                        "AND row_kind='detail' AND period_start>=:start AND period_end<=:end "
+                        "AND period_start IS NOT NULL AND period_end IS NOT NULL "
+                        f"{ordering} LIMIT 300001"
+                    ),
+                    dict(vid=source["id"], start=start, end=end),
+                ).mappings()
+            ]
+
+        raw_rpa = rpa
+        result = read_fixed_rows(raw_rpa)
+        count = sum(row.get("_record_count", 1) for row in result)
         if count > 300000:
             raise BoardError("REPORT_SCOPE_ROW_LIMIT", 503)
-        if not exact_compaction(result, fields):
+        if raw_rpa:
+            missing_keys = set()
+            for row in result:
+                if row["source_product_code"]:
+                    continue
+                dimension_key = tuple(row[field] for field in dimensions)
+                if dimension_key in missing_keys:
+                    # 缺SKU的重复组用旧MIN原行键确定身份；交回原SQL，保留NULL/空串区别。
+                    raw_rpa = False
+                    break
+                missing_keys.add(dimension_key)
+            del missing_keys
+            if not raw_rpa:
+                result.clear()
+                result = read_fixed_rows(False)
+        exact = exact_compaction(result, fields)
+        if not exact and not raw_rpa:
             # 超出已证50位精确范围时维持原行顺序和原Decimal算法，不能因SQL重排改数字。
-            raw_fields = (*COMMON_FIELDS, *fields, *dimensions[len(IDENTITY_FIELDS) :])
-            self._rows[key] = [
+            result = [
                 dict(row)
                 for row in self.c.execute(
                     sa.text(
@@ -300,16 +335,17 @@ class Repository:
                     dict(vid=source["id"], start=start, end=end),
                 ).mappings()
             ]
-            if self.is_rpa(report):
-                for row in self._rows[key]:
-                    row["_rpa"] = True
+        if rpa:
+            for row in result:
+                row["_rpa"] = True
+                if raw_rpa:
+                    for field in fields:
+                        del row["_absolute_" + field]
+        self._rows[key] = result
+        if not exact:
             if self.rows_cache is not None:
                 self.rows_cache.put(cache_key, self._rows[key])
             return self._rows[key]
-        if self.is_rpa(report):
-            for row in result:
-                row["_rpa"] = True
-        self._rows[key] = result
         # 元信息复用同一固定窗的完整聚合；空输入仍是已接收但无记录。
         self._summaries[key] = {
             "rows": count,

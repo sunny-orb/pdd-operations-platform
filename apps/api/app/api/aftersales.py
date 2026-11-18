@@ -81,7 +81,11 @@ def prewarm_aftersales_overview(engine, cache, previous_version):
 
 @router.get("/meta", response_model=Envelope[Meta])
 def get_meta(request: Request, report_id: str | None = Query(None, min_length=1, max_length=128)):
-    with snapshot(request.app.state.engine, report_id) as repo:
+    with snapshot(
+        request.app.state.engine,
+        report_id,
+        rows_cache=request.app.state.aftersales_overview_cache.rows,
+    ) as repo:
         metadata = repo.metadata()
         return dict(data=metadata, meta=metadata)
 

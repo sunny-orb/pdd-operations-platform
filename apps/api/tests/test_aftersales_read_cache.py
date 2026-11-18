@@ -294,3 +294,58 @@ def test_concurrent_cold_report_and_summary_reads_preserve_each_fixed_version(sa
             assert list(pool.map(read, scopes)) == expected
         assert cache.rows._bytes <= cache.rows.max_bytes
         assert sum(map(len, cache._entries.values())) + cache.rows._bytes <= 8 * 1024 * 1024
+
+
+def test_prewarmed_meta_avoids_fact_scans_and_keeps_sync_status_live(sales_pg):
+    from datetime import UTC, datetime
+
+    from app.api.aftersales import prewarm_aftersales_overview
+    from migrations_v2.baseline_20261028.schema import build_metadata
+
+    publish(sales_pg, rules=rule_parameters())
+    statements = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    with client_for(sales_pg) as client:
+        cold = client.get("/api/v1/aftersales/meta").json()
+        prewarm_aftersales_overview(sales_pg, client.app.state.aftersales_overview_cache, None)
+        sa.event.listen(sales_pg, "before_cursor_execute", capture)
+        try:
+            warm = client.get("/api/v1/aftersales/meta")
+            assert warm.status_code == 200 and warm.json() == cold
+            with sales_pg.begin() as c:
+                c.execute(
+                    build_metadata()
+                    .tables["public.task_runs"]
+                    .insert()
+                    .values(
+                        id="failed-after-meta-prewarm",
+                        job_code="sync_jst_returns",
+                        request_ref="synthetic",
+                        lock_key="synthetic",
+                        status="failed",
+                        queued_at=datetime.now(UTC),
+                        started_at=datetime.now(UTC),
+                        finished_at=datetime.now(UTC),
+                        error_code="SYNTHETIC_FAILURE",
+                    )
+                )
+            response = client.get("/api/v1/aftersales/meta")
+        finally:
+            sa.event.remove(sales_pg, "before_cursor_execute", capture)
+        assert response.status_code == 200
+        value = response.json()
+        source = next(s for s in value["data"]["sources"] if s["code"] == "jst_returns")
+        assert source["status"] == "failed_retained"
+        assert source["error_code"] == "SYNTHETIC_FAILURE"
+        assert value["data"]["data_version"] == cold["data"]["data_version"]
+        assert value["data"]["observed_to"] == cold["data"]["observed_to"]
+        fact_reads = [
+            sql
+            for sql in statements
+            if "FROM public.read_return_records " in sql
+            or "FROM public.read_product_sales_records " in sql
+        ]
+        assert len(fact_reads) == 0

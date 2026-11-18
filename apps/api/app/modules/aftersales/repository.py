@@ -179,19 +179,32 @@ class Repository:
         report = report or self.report
         if not report:
             return {}
-        if report["id"] not in self._inputs:
-            self._inputs[report["id"]] = {
-                r["input_role"]: dict(r)
-                for r in self.c.execute(
-                    sa.text("""
-                SELECT i.input_role,i.window_start,i.window_end,v.* FROM public.version_inputs i
-                JOIN public.dataset_versions v ON v.id=i.input_version_id
-                WHERE i.output_version_id=:id AND i.input_role=ANY(:roles)
-            """),
-                    dict(id=report["dataset_version_id"], roles=list(ROLES)),
-                ).mappings()
-            }
+        self.prefetch_inputs([report])
         return self._inputs[report["id"]]
+
+    def prefetch_inputs(self, reports):
+        """同一RR请求批量读将使用的固定报告输入；缺角色保持缺失，不接当前版本。"""
+        pending = {
+            report["dataset_version_id"]: report["id"]
+            for report in reports
+            if report and report["id"] not in self._inputs
+        }
+        if not pending:
+            return
+        found = {report_id: {} for report_id in pending.values()}
+        for row in self.c.execute(
+            sa.text("""
+                SELECT i.output_version_id,i.input_role,i.window_start,i.window_end,v.*
+                FROM public.version_inputs i
+                JOIN public.dataset_versions v ON v.id=i.input_version_id
+                WHERE i.output_version_id=ANY(:ids) AND i.input_role=ANY(:roles)
+            """),
+            dict(ids=list(pending), roles=list(ROLES)),
+        ).mappings():
+            source = dict(row)
+            report_id = pending[source.pop("output_version_id")]
+            found[report_id][source["input_role"]] = source
+        self._inputs.update(found)
 
     def source_available(self, role, report=None):
         """元信息只核版本与窗口，不扫描事实；供轻量轮询。"""
@@ -326,6 +339,12 @@ class Repository:
         ):
             return self._summaries[key]
         src = self.inputs(report)[role]
+        if self.rows_cache is not None and not include_categories:
+            cache_key = (self.token, src["id"], role, src["window_start"], src["window_end"])
+            summary = self.rows_cache.get_summary(cache_key)
+            if summary is not None:
+                self._summaries[key] = summary
+                return summary
         fields = (
             ("actual_returned_qty", "actual_inbound_amount")
             if role == "j1_returns"

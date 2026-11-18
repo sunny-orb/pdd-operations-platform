@@ -137,6 +137,15 @@ def report_totals(repo, report):
 
 
 def overview(repo, q):
+    report = repo.report
+    previous = repo.by_id.get(report["previous_report_id"]) if report else None
+    repo.prefetch_inputs(
+        [
+            report,
+            previous if report and report["previous_comparison_status"] == "available" else None,
+            *history_reports(repo, q)[:8],
+        ]
+    )
     blocks = roles(repo, q)
     parameters = repo.classification_parameters()
     values = summarize(*blocks, parameters=parameters)
@@ -149,7 +158,6 @@ def overview(repo, q):
     details = amount_details(*blocks)
     for item in metrics:
         item["detail"] = details.get(item["key"], "")
-    report = repo.report
     scope = (
         "关键词/重点先选完整对象，指标和原因统计所选对象的全部明细；"
         "金额/比率为已观察参考，完整日未知。"
@@ -185,7 +193,6 @@ def overview(repo, q):
     ]
     previous_blocks = None
     previous_parameters = {}
-    previous = repo.by_id.get(report["previous_report_id"]) if report else None
     if previous and report["previous_comparison_status"] == "available":
         previous_blocks = roles(repo, q, previous)
         previous_parameters = repo.classification_parameters(previous)

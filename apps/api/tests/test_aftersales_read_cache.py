@@ -139,3 +139,158 @@ def test_summary_budget_is_total_not_per_filter_and_large_reports_still_fit():
     assert sum(map(len, cache._entries.values())) <= 4 * 1024 * 1024
     assert cache.get(("result", 0)) is None
     assert len(cache.get(("result", 7))) == 800 * 1024
+
+
+def test_prewarmed_filter_batches_inputs_and_reuses_fixed_history_summaries(sales_pg):
+    from app.api.aftersales import prewarm_aftersales_overview
+    from app.modules.aftersales.read_cache import AftersalesCache
+
+    for number in range(1, 5):
+        publish(
+            sales_pg,
+            suffix=str(number),
+            end=date(2026, 10, 24 + number),
+            rules=rule_parameters(),
+            previous_report_id=f"report{number - 1}" if number > 1 else None,
+        )
+    statements = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    with client_for(sales_pg) as client:
+        expected = client.get("/api/v1/aftersales/overview?category=帽子").json()["data"]
+        cache = AftersalesCache()
+        client.app.state.aftersales_overview_cache = cache
+        prewarm_aftersales_overview(sales_pg, cache, None)
+        sa.event.listen(sales_pg, "before_cursor_execute", capture)
+        try:
+            response = client.get("/api/v1/aftersales/overview?category=帽子")
+        finally:
+            sa.event.remove(sales_pg, "before_cursor_execute", capture)
+        assert response.status_code == 200
+        assert response.json()["data"] == expected
+        assert not any(
+            "FROM public.read_return_records " in sql
+            or "FROM public.read_product_sales_records " in sql
+            for sql in statements
+        )
+        input_reads = [
+            sql for sql in statements if "version_inputs i" in sql and "input_role=ANY" in sql
+        ]
+        assert len(input_reads) == 1
+
+
+def test_cached_overview_reuses_summary_but_observes_new_sync_failure(sales_pg):
+    from datetime import UTC, datetime
+
+    from migrations_v2.baseline_20261028.schema import build_metadata
+
+    publish(sales_pg, rules=rule_parameters())
+    statements = []
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+
+    with client_for(sales_pg) as client:
+        first = client.get("/api/v1/aftersales/overview").json()
+        with sales_pg.begin() as c:
+            c.execute(
+                build_metadata()
+                .tables["public.task_runs"]
+                .insert()
+                .values(
+                    id="failed-after-cache",
+                    job_code="sync_jst_returns",
+                    request_ref="synthetic",
+                    lock_key="synthetic",
+                    status="failed",
+                    queued_at=datetime.now(UTC),
+                    started_at=datetime.now(UTC),
+                    finished_at=datetime.now(UTC),
+                    error_code="SYNTHETIC_FAILURE",
+                )
+            )
+        sa.event.listen(sales_pg, "before_cursor_execute", capture)
+        try:
+            response = client.get("/api/v1/aftersales/overview")
+        finally:
+            sa.event.remove(sales_pg, "before_cursor_execute", capture)
+        assert response.status_code == 200
+        value = response.json()
+        assert value["data"] == first["data"]
+        source = next(s for s in value["meta"]["sources"] if s["code"] == "jst_returns")
+        assert source["status"] == "failed_retained"
+        assert source["error_code"] == "SYNTHETIC_FAILURE"
+        assert not any(
+            "FROM public.read_return_records " in sql
+            or "FROM public.read_product_sales_records " in sql
+            for sql in statements
+        )
+
+
+def test_summary_is_independent_exact_and_shares_row_entry_eviction():
+    from decimal import Decimal
+
+    from app.modules.aftersales.read_cache import ReportRowsCache
+
+    cache = ReportRowsCache(max_bytes=1024, max_entries=2)
+    rows = [{"source_product_code": "001", "sales_amount": Decimal("0")}]
+    expected = {
+        "rows": 1,
+        "first": date(2026, 10, 27),
+        "last": None,
+        "sales_amount": Decimal("123456789012345678901234.0000000000000000007"),
+        "source_sales_qty": Decimal("0"),
+        "actual_inbound_amount": None,
+    }
+    cache.put("v1", rows, dict(expected))
+    summary = cache.get_summary("v1")
+    assert summary == expected
+    summary["sales_amount"] = Decimal("7")
+    assert cache.get("v1") == (rows, expected)
+    assert cache.get_summary("v1") == expected
+    for n in range(2, 12):
+        cache.put(f"v{n}", rows, expected)
+        assert cache._bytes == sum(map(len, cache._entries.values()))
+        assert cache._bytes <= cache.max_bytes
+    assert cache.get_summary("v1") is None
+    assert cache.get("v1") is None
+    assert cache.get_summary("v11") == expected
+
+
+def test_concurrent_cold_report_and_summary_reads_preserve_each_fixed_version(sales_pg):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.modules.aftersales.read_cache import AftersalesCache
+
+    publish(sales_pg, rules=rule_parameters())
+    publish(
+        sales_pg,
+        suffix="2",
+        rules=rule_parameters(),
+        end=date(2026, 10, 28),
+        previous_report_id="report1",
+        missing=True,
+    )
+    scopes = [
+        {"report_id": "report1", "category": "帽子"},
+        {"report_id": "report2", "category": "帽子"},
+        {"report_id": "report1", "keyword": "不存在"},
+        {"report_id": "report2", "focus": "quality"},
+    ]
+    with client_for(sales_pg) as client:
+
+        def read(scope):
+            response = client.get("/api/v1/aftersales/overview", params=scope)
+            assert response.status_code == 200
+            return response.json()
+
+        expected = [read(scope) for scope in scopes]
+        cache = AftersalesCache()
+        client.app.state.aftersales_overview_cache = cache
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            assert list(pool.map(read, scopes)) == expected
+            assert list(pool.map(read, scopes)) == expected
+        assert cache.rows._bytes <= cache.rows.max_bytes
+        assert sum(map(len, cache._entries.values())) + cache.rows._bytes <= 8 * 1024 * 1024

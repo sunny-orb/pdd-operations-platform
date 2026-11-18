@@ -164,6 +164,7 @@ def main():
         ):
             print(json.dumps(result, ensure_ascii=False), flush=True)
         monitor_failed = False
+        maintenance_ready = result["status"] in ("succeeded", "already_succeeded", "not_due")
         if monitor:
             from app.connectors.aftersales_rpa_status import production_connection
             from app.jobs.source_monitor_runtime import execute_monitor
@@ -189,6 +190,7 @@ def main():
             if checked.get("checked") or checked["status"] != "checked":
                 print(json.dumps(checked, ensure_ascii=False), flush=True)
             monitor_failed = checked["status"] in ("failed", "partial")
+            maintenance_ready = maintenance_ready and checked["status"] in ("checked", "not_due")
         if new_schedule and (args.scheduled or args.check_updates or manual_sources):
             from app.jobs.source_monitor_runtime import execute_source_schedule
 
@@ -216,9 +218,18 @@ def main():
                 "failed",
                 "partial",
             )
+            maintenance_ready = maintenance_ready and checked["status"] in ("checked", "not_due")
         if args.scheduled and config.enabled:
+            from app.modules.aftersales.statistics import maintain_statistics
             from app.modules.archive_compaction import compact_archives
 
+            try:
+                statistics = maintain_statistics(engine, ROOT, sync_complete=maintenance_ready)
+                if statistics["status"] not in ("disabled", "unchanged", "not_due", "no_rpa"):
+                    print(json.dumps(dict(stage="aftersales_statistics", **statistics)), flush=True)
+            except Exception:  # noqa: BLE001 - 维护失败不覆盖已经完成的来源结果
+                print(json.dumps(dict(stage="aftersales_statistics", status="failed",
+                                      code="STATISTICS_FAILED")), flush=True)
             try:
                 maintenance = compact_archives(engine, ROOT / "var/ingestion", scheduled=True)
                 if (maintenance.get("converted") or maintenance.get("collected_blocks")

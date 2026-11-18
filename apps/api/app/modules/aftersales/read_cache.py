@@ -35,13 +35,25 @@ class ReportRowsCache:
         self._bytes = 0
         self._lock = Lock()
 
-    def get(self, key):
+    def _entry(self, key):
         with self._lock:
             data = self._entries.get(key)
             if data is None:
                 return None
             self._entries.move_to_end(key)
-        columns, values, summary = json.loads(zlib.decompress(data))
+        return data
+
+    def get_summary(self, key):
+        """只解码同一条目中的固定汇总，不装载行体、不缓存实时状态。"""
+        data = self._entry(key)
+        return decode_summary(data[: data.index(b"\n")]) if data is not None else None
+
+    def get(self, key):
+        data = self._entry(key)
+        if data is None:
+            return None
+        header, _, body = data.partition(b"\n")
+        columns, values = json.loads(zlib.decompress(body))
         converters = [
             Decimal if c in DECIMAL_FIELDS else date.fromisoformat if c in DATE_FIELDS else None
             for c in columns
@@ -53,20 +65,7 @@ class ReportRowsCache:
             }
             for row in values
         ]
-        if summary is not None:
-            summary = {
-                k: (
-                    Decimal(v)
-                    if k in DECIMAL_FIELDS
-                    else date.fromisoformat(v)
-                    if k in DATE_FIELDS
-                    else v
-                )
-                if v is not None
-                else None
-                for k, v in summary.items()
-            }
-        return rows, summary
+        return rows, decode_summary(header)
 
     def put(self, key, rows, summary=None):
         # 大报告保持原查询路径，避免为缓存再编码巨大对象。
@@ -74,14 +73,18 @@ class ReportRowsCache:
             return
         columns = list(rows[0]) if rows else []
         raw = json.dumps(
-            [columns, [[row.get(c) for c in columns] for row in rows], summary],
+            [columns, [[row.get(c) for c in columns] for row in rows]],
             default=str,
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
-        if len(raw) > self.MAX_RAW_BYTES:
+        header = json.dumps(
+            summary, default=str, ensure_ascii=False, separators=(",", ":")
+        ).encode()
+        if len(raw) + len(header) > self.MAX_RAW_BYTES:
             return
-        data = zlib.compress(raw, level=1)
+        # 汇总仅移到小头部，不复制一份；头部和行体共同计入原有LRU字节预算。
+        data = header + b"\n" + zlib.compress(raw, level=1)
         if len(data) > self.max_bytes:
             return
         with self._lock:
@@ -92,6 +95,18 @@ class ReportRowsCache:
             while self._bytes > self.max_bytes or len(self._entries) > self.max_entries:
                 _, removed = self._entries.popitem(last=False)
                 self._bytes -= len(removed)
+
+
+def decode_summary(data):
+    summary = json.loads(data)
+    if summary is None:
+        return None
+    return {
+        k: (Decimal(v) if k in DECIMAL_FIELDS else date.fromisoformat(v) if k in DATE_FIELDS else v)
+        if v is not None
+        else None
+        for k, v in summary.items()
+    }
 
 
 class AftersalesCache(DefaultOverviewCache):

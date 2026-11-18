@@ -1,5 +1,6 @@
 """新版六表接收/发布；长读取不持发布事务，封版与指针短事务切换。"""
 
+import hashlib
 import os
 import time
 from contextlib import nullcontext
@@ -12,8 +13,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 
 from app.modules import fact_content
-from app.modules.archive_payload import read_payload_text
-from app.modules.archive_store import require_archive, write_archive
+from app.modules.archive_payload import open_payload
+from app.modules.archive_store import require_archive, write_archive, write_archive_stream
 from app.modules.database_residency import deferred_reason, ensure_online
 
 from .contracts import PublishResult, SalesError
@@ -227,11 +228,29 @@ class ShopDailyStore:
         folder = self.archive_root / version_id
         folder.mkdir(parents=True, mode=0o700, exist_ok=False)
         os.chmod(folder, 0o700)
-        lines = []
-        for row in candidate.raw_rows:
-            heartbeat()
-            lines.append(canonical(row))
-        data = ("\n".join(lines) + "\n").encode()
+        digest = hashlib.sha256()
+
+        def chunks():
+            """字节与原NDJSON一致；有界批量避免明文归档每行都检查目录容量。"""
+            if not candidate.raw_rows:
+                digest.update(b"\n")
+                yield b"\n"
+                return
+            pending, size = [], 0
+            for row in candidate.raw_rows:
+                heartbeat()
+                line = (canonical(row) + "\n").encode()
+                digest.update(line)
+                pending.append(line)
+                size += len(line)
+                if size >= 256 * 1024:
+                    yield b"".join(pending)
+                    pending, size = [], 0
+            if pending:
+                yield b"".join(pending)
+
+        input_path = folder / "input.ndjson"
+        write_archive_stream(input_path, chunks())
         heartbeat()
         policy = canonical(
             dict(
@@ -246,11 +265,10 @@ class ShopDailyStore:
                 reconciliation_policy="stable-full-scope"
                 if self.reconcile_full_scope
                 else "protected",
-                input_sha256=__import__("hashlib").sha256(data).hexdigest(),
+                input_sha256=digest.hexdigest(),
             )
         )
         for name, content in (
-            ("input.ndjson", data),
             ("interpretation.json", policy.encode()),
             ("producer-source.json", canonical(LOADED_PRODUCER_SOURCES).encode()),
         ):
@@ -258,7 +276,14 @@ class ShopDailyStore:
             write_archive(folder / name, content)
             if (folder / name).stat().st_mode & 0o077:
                 raise SalesError("ARCHIVE_PERMISSIONS")
-        if read_payload_text(folder / "input.ndjson").encode() != data:
+        if input_path.stat().st_mode & 0o077:
+            raise SalesError("ARCHIVE_PERMISSIONS")
+        verified = hashlib.sha256()
+        with open_payload(input_path) as stream:
+            while chunk := stream.read(1024 * 1024):
+                heartbeat()
+                verified.update(chunk)
+        if verified.digest() != digest.digest():
             raise SalesError("ARCHIVE_CHECKSUM_MISMATCH")
         heartbeat(force=True)
         return str(folder / "input.ndjson"), str(folder / "interpretation.json")
@@ -507,6 +532,7 @@ def producer_sources():
         "connectors/sales_feishu.py",
         "modules/sales/source_policy.py",
         "modules/sales/normalization.py",
+        "modules/sales/normalization_compat.py",
         "modules/sales/storage.py",
         "connectors/shop_daily.py",
         "jobs/sync_shop_daily.py",

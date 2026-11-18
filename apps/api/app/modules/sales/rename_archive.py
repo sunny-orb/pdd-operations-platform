@@ -7,6 +7,7 @@ from pathlib import Path
 from .contracts import SalesError
 from .datasets import EXTENDED_REVISION, READ_SPECS, REFUND_SHOPS
 from .normalization import canonical, fingerprint
+from .normalization_compat import normalizer_revision
 from .source_policy import METRICS, POLICY_REVISION, SHOPS
 
 # 同时锁定旧、新实现，未来公式变化必须重新审查，不能借本次改名绕过解释校验。
@@ -59,10 +60,13 @@ def validate_legacy_interpretation(manifest, sources):
         archived = sources.get("modules/sales/" + name, "").encode()
         if original_history:
             old = ORIGINAL_HISTORY_CONFIG.get(name, old)
-        if (
-            hashlib.sha256(archived).hexdigest() != old
-            or hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest() != current
-        ):
+        current_path = Path(__file__).with_name(name)
+        actual_current = (
+            normalizer_revision(current_path)
+            if name == "normalization.py"
+            else hashlib.sha256(current_path.read_bytes()).hexdigest()
+        )
+        if hashlib.sha256(archived).hexdigest() != old or actual_current != current:
             raise SalesError("ARCHIVE_INTERPRETER_MISMATCH")
     expected = asdict(READ_SPECS[code]) if code in READ_SPECS else None
     if (

@@ -91,6 +91,7 @@ def _value(value, kind):
 
 
 def _blocks(table, version, rows, heartbeat=None):
+    """逐桶校验并生成指纹；值按固定列序保存元组，写入批次再生成映射。"""
     columns = [
         x for x in _BASE.tables["public." + table].c if x.name not in ("id", "dataset_version_id")
     ]
@@ -102,10 +103,7 @@ def _blocks(table, version, rows, heartbeat=None):
             heartbeat()
         if raw.keys() - names:
             raise ValueError("CONTENT_UNKNOWN_COLUMN")
-        values, tokens = {}, {}
-        for col in columns:
-            values[col.name], tokens[col.name] = _value(raw.get(col.name), col.type)
-        key = values["source_row_key"]
+        key = raw.get("source_row_key")
         if not isinstance(key, str) or not key.strip():
             raise ValueError("CONTENT_ROW_KEY")
         if key in keys:
@@ -113,31 +111,42 @@ def _blocks(table, version, rows, heartbeat=None):
         keys.add(key)
         suffix = int(hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:8], 16) % 64
         period = (
-            str(values.get("business_date") or "?")
+            str(raw.get("business_date") or "?")
             if table == "product_daily_facts"
-            else "/".join(str(values.get(k) or "?") for k in ("period_start", "period_end"))
+            else "/".join(str(raw.get(k) or "?") for k in ("period_start", "period_end"))
         )
         bucket = f"{period}:{suffix}"
-        grouped[bucket].append((values, tokens))
+        grouped[bucket].append(raw)
+    del keys
     result = []
     for bucket, items in grouped.items():
         if heartbeat:
             heartbeat()
-        items.sort(key=lambda x: x[0]["source_row_key"])
+        items.sort(key=lambda x: x["source_row_key"])
+        values, tokens = [], []
+        for raw in items:
+            if heartbeat:
+                heartbeat()
+            row_values, row_tokens = [], {}
+            for col in columns:
+                value, row_tokens[col.name] = _value(raw.get(col.name), col.type)
+                row_values.append(value)
+            values.append(tuple(row_values))
+            tokens.append(row_tokens)
         identity = [
             1,
             table,
             version["dataset_code"],
             version["row_schema_revision"],
             bucket,
-            [x[1] for x in items],
+            tokens,
         ]
         key = hashlib.sha256(
             json.dumps(
                 identity, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
             ).encode()
         ).hexdigest()
-        result.append((key, bucket, [x[0] for x in items]))
+        result.append((key, bucket, values))
     return sorted(result)
 
 
@@ -201,13 +210,14 @@ def write_version(c, table_name, version_id, rows, *, heartbeat=None):
         {"v": version_id, "t": table_name, "n": count},
     )
     original = _BASE.tables["public." + table_name]
+    columns = [x for x in original.c if x.name not in ("id", "dataset_version_id")]
+    names = [x.name for x in columns]
     shared = sa.table(
         "shared_" + table_name,
         sa.column("block_id", sa.Text()),
         *[
             sa.column(x.name, JSONB(none_as_null=True) if isinstance(x.type, JSONB) else x.type)
-            for x in original.c
-            if x.name not in ("id", "dataset_version_id")
+            for x in columns
         ],
         schema="public",
     )
@@ -249,7 +259,10 @@ def write_version(c, table_name, version_id, rows, *, heartbeat=None):
                     heartbeat()
                 c.execute(
                     insert(shared),
-                    [dict(row, block_id=key) for row in values[offset : offset + 1000]],
+                    [
+                        dict(zip(names, row, strict=True), block_id=key)
+                        for row in values[offset : offset + 1000]
+                    ],
                 )
             c.execute(
                 sa.text("UPDATE public.fact_content_blocks SET state='sealed' WHERE id=:k"),

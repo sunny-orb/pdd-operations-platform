@@ -1,0 +1,11 @@
+# 只在正常同步/检查结束后维护两张售后事实表的四列统计；一轮最多一表。
+enabled = true
+retry_seconds = 300
+max_load_average = 4.0
+lock_timeout_ms = 100
+statement_timeout_ms = 20000
+transaction_timeout_ms = 25000
+maintenance_work_mem_mb = 16
+vacuum_buffer_usage_limit_mb = 1
+vacuum_cost_delay_ms = 5
+vacuum_cost_limit = 50

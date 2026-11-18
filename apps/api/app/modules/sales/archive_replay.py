@@ -12,6 +12,7 @@ from app.modules.archive_payload import open_payload
 from . import normalization
 from .contracts import PromotionReadWindow, ReadWindow, SalesError
 from .normalization import fingerprint, normalize_shop_daily
+from .normalization_compat import compatible_normalizer
 from .source_policy import PROMOTION_CODES, SHOPS
 
 
@@ -24,7 +25,11 @@ def restore_candidate(folder: Path, *, heartbeat=lambda: None, expected_producer
         raise SalesError("ARCHIVE_PRODUCER_MISMATCH")
     if expected_producer is not None and manifest["producer_revision"] != expected_producer:
         raise SalesError("ARCHIVE_PRODUCER_MISMATCH")
-    legacy = sources["modules/sales/normalization.py"] != Path(normalization.__file__).read_text()
+    archived_normalizer = sources["modules/sales/normalization.py"]
+    current_normalizer = Path(normalization.__file__).read_bytes()
+    legacy = archived_normalizer.encode() != current_normalizer and not compatible_normalizer(
+        archived_normalizer, current_normalizer
+    )
     if legacy:
         from .rename_archive import validate_legacy_interpretation
 

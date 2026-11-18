@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import asdict, replace
 from datetime import date
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -33,6 +34,10 @@ CODES = (
 def legacy_sources():
     """只逆转本次名称差异生成旧源码证据；文本只做摘要，绝不执行。"""
     sources = storage.producer_sources()
+    sources["modules/sales/normalization.py"] = (
+        Path(__file__).parent / "fixtures/sales_normalization_20261116.py.txt"
+    ).read_text()
+    sources.pop("modules/sales/normalization_compat.py", None)
     for name in ("normalization.py", "source_normalization.py"):
         key = "modules/sales/" + name
         sources[key] = sources[key].replace("SHOP_NAME_ALIASES, ", "")

@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .contracts import ReadWindow, SalesError, ShopDailyCandidate
+from .normalization_compat import normalizer_revision
 from .source_policy import CORE, METRICS, MISSING_MARKERS, POLICY_REVISION, SHOP_NAME_ALIASES, SHOPS
 
 
@@ -25,7 +26,14 @@ def canonical(value) -> str:
 
 
 def fingerprint(value) -> str:
-    return hashlib.sha256(canonical(value).encode()).hexdigest()
+    """与canonical逐字节相同，逐片摘要避免完整JSON字符串及UTF-8副本并存。"""
+    digest = hashlib.sha256()
+    encoder = json.JSONEncoder(
+        ensure_ascii=False, sort_keys=True, default=serializable, separators=(",", ":")
+    )
+    for piece in encoder.iterencode(value):
+        digest.update(piece.encode())
+    return digest.hexdigest()
 
 
 def normalize_shop_daily(rows: list[dict], window: ReadWindow) -> ShopDailyCandidate:
@@ -110,7 +118,7 @@ def normalize_shop_daily(rows: list[dict], window: ReadWindow) -> ShopDailyCandi
         policy=POLICY_REVISION,
         mapping=SHOPS,
         metrics=METRICS,
-        normalizer_revision=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        normalizer_revision=normalizer_revision(Path(__file__)),
         start=str(window.start),
         end=str(window.end),
         rows=raw_rows,

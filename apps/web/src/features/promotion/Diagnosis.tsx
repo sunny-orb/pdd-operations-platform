@@ -134,6 +134,7 @@ function ObjectTable({ items, remote }: { items: DiagnosisObject[]; remote?: Rem
             [
               item.label,
               item.product_id,
+              ...(item.search_names ?? []),
               item.shop_name,
               item.operator,
               item.category,

@@ -37,10 +37,13 @@ export function ProductSelectionSummary({ scope, state, name, ready, count }: Pr
       <span>商品范围</span>
       <b>{title}</b>
       {selected.length > 0 && directoryReady && (
-        <small className="m1-selected-names" title={chosen.map((item) => item.label).join("；")}>
+        <small
+          className="m1-selected-names"
+          title={chosen.map((item) => item.product_name ?? item.label).join("；")}
+        >
           {chosen
             .slice(0, 2)
-            .map((item) => item.label)
+            .map((item) => item.product_name ?? item.label)
             .join("；")}
           {chosen.length > 2 ? "…" : ""}
         </small>

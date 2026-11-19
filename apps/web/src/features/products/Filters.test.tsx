@@ -200,7 +200,7 @@ it("新品目录为空时不清除固定新品条件，不反复重置URL", asyn
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
-it("多等级选项合并显示，商品候选仍列出实际成员", async () => {
+it("多等级仍可筛选，候选只显示名称", async () => {
   const items = ["A级/B级混合", "B级/清仓混合"].map((level, i) => ({
     value: `l${i}`,
     label: `商品${i}`,
@@ -245,57 +245,56 @@ it("多等级选项合并显示，商品候选仍列出实际成员", async () =
     expect(screen.getByRole("combobox", { name: "总览商品" }).hasAttribute("disabled")).toBe(false),
   );
   fireEvent.mouseDown(screen.getByRole("combobox", { name: "总览商品" }));
-  expect(await screen.findByText("多等级（含A级、B级）")).toBeTruthy();
-  expect(screen.getByText("多等级（含B级、清仓）")).toBeTruthy();
+  expect(await screen.findByText("商品0")).toBeTruthy();
+  expect(screen.getByText("商品1")).toBeTruthy();
+  expect(screen.queryByText("多等级（含A级、B级）")).toBeNull();
   expect(state.change).not.toHaveBeenCalled();
 });
 
-it.each(["main", "detail"] as const)(
-  "%s关键词在候选框回显但不自动选中，清空后恢复全部单款",
-  (name) => {
-    const client = new QueryClient();
-    clients.push(client);
-    const scope = {
-      ...readScope(new URLSearchParams(), "main", "2026-10-01", "2026-10-31"),
-      keyword: "小糖豆",
-    };
-    client.setQueryData(["m1", "catalog", "main", "v1", scope.from, scope.to], {
-      shops: [{ value: "s1", label: "甲店" }],
-      total: 1,
-      items: [
-        {
-          value: "p1",
-          label: "小糖豆帽 · 甲店 · 1001",
-          search_text: "小糖豆帽 1001",
-          shop: "s1",
-          operator: null,
-          category: null,
-          level: null,
-        },
-      ],
-    });
-    const state = {
-      dateSelectionKey: () => "fixed-dates",
-      version: "v1",
-      metadata: { data: { date_from: scope.from, date_to: scope.to } },
-      change: vi.fn(),
-      reset: vi.fn(),
-      stale: vi.fn(),
-    } as unknown as ProductsState;
-    const element = (keyword: string, products: string[] = []) => (
-      <QueryClientProvider client={client}>
-        <Filters name={name} scope={{ ...scope, keyword, products }} state={state} />
-      </QueryClientProvider>
-    );
-    const view = render(element("小糖豆"));
-    expect(screen.getByText("小糖豆 · 1个候选")).toBeTruthy();
-    expect(state.change).not.toHaveBeenCalled();
-    view.rerender(element("小糖豆", ["p1"]));
-    // jsdom没有宽度，多选响应式标签会折叠；仍不得用候选占位冒充已选。
-    expect(state.change).not.toHaveBeenCalled();
-    expect(screen.queryByText("小糖豆 · 1个候选")).toBeNull();
-    view.rerender(element(""));
-    expect(screen.getByText("全部单款")).toBeTruthy();
-    expect(state.change).not.toHaveBeenCalled();
-  },
-);
+it.each(["main", "detail"] as const)("%s关键词独立筛选且不自动选中，已选商品只显示名称", (name) => {
+  const client = new QueryClient();
+  clients.push(client);
+  const scope = {
+    ...readScope(new URLSearchParams(), "main", "2026-10-01", "2026-10-31"),
+    keyword: "小糖豆",
+  };
+  client.setQueryData(["m1", "catalog", "main", "v1", scope.from, scope.to], {
+    shops: [{ value: "s1", label: "甲店" }],
+    total: 1,
+    items: [
+      {
+        value: "p1",
+        label: "小糖豆帽 · 甲店 · 1001",
+        product_name: "小糖豆帽",
+        search_text: "小糖豆帽 1001",
+        shop: "s1",
+        operator: null,
+        category: null,
+        level: null,
+      },
+    ],
+  });
+  const state = {
+    dateSelectionKey: () => "fixed-dates",
+    version: "v1",
+    metadata: { data: { date_from: scope.from, date_to: scope.to } },
+    change: vi.fn(),
+    reset: vi.fn(),
+    stale: vi.fn(),
+  } as unknown as ProductsState;
+  const element = (keyword: string, products: string[] = []) => (
+    <QueryClientProvider client={client}>
+      <Filters name={name} scope={{ ...scope, keyword, products }} state={state} />
+    </QueryClientProvider>
+  );
+  const view = render(element("小糖豆"));
+  expect(screen.getByText("小糖豆帽")).toBeTruthy();
+  expect(state.change).not.toHaveBeenCalled();
+  view.rerender(element("小糖豆", ["p1"]));
+  expect(screen.getByText("小糖豆帽")).toBeTruthy();
+  expect(state.change).not.toHaveBeenCalled();
+  expect(screen.queryByText("小糖豆 · 1个候选")).toBeNull();
+  view.rerender(element(""));
+  expect(screen.getByText("全部单款")).toBeTruthy();
+  expect(state.change).not.toHaveBeenCalled();
+});

@@ -161,3 +161,4 @@ def test_p3_search_only_matches_triggered_observation_without_changing_rating():
     assert not object_matches(clear, "P3")
     assert not object_matches(warning, "P3")
     assert object_matches(warning, "P1 预警")
+    assert object_matches(dict(warning, search_names=["另一个运营名称"]), "另一个运营名称")

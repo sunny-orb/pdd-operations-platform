@@ -1,5 +1,13 @@
 """商品与商品推广共用的等级筛选投影；不覆盖资料原值或计算资格。"""
 
+from .profile_rules import matches_keyword as matches_profile_keyword
+
+
+def matches_keyword(item: dict, keyword: str) -> bool:
+    return matches_profile_keyword(item, keyword) or (
+        keyword.casefold() in (item.get("platform_title") or "").casefold()
+    )
+
 
 def level_group(info: dict) -> str:
     """输入已解析的链接资料，输出互斥筛选组；不同等级成员已在资料层去重。"""

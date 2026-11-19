@@ -189,6 +189,7 @@ const result = z.object({
   previous_record_count: z.string(),
 });
 const object = result.extend({
+  search_names: z.array(z.string()).optional(),
   object_key: z.string(),
   object_type: z.string(),
   label: z.string(),

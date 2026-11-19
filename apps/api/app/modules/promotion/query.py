@@ -7,9 +7,8 @@ from decimal import Decimal
 from math import ceil
 from uuid import UUID
 
-from app.modules.product_board.filter_projection import level_group, matches_level
+from app.modules.product_board.filter_projection import level_group, matches_keyword, matches_level
 from app.modules.product_board.metrics import compare
-from app.modules.product_board.profile_rules import matches_keyword
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.source_policy import SHOPS, display_shop_name
 
@@ -98,19 +97,21 @@ def labels(repo, rows):
             for r in values
             if r["date"] == latest and r["source_product_name"]
         }
+        source_name = next(iter(names)) if len(names) == 1 else None
         result[lid] = dict(
             listing_id=lid,
             shop_id=values[0]["source_shop_id"],
             product_id=values[0]["source_product_id"],
             shop_name=display_shop_name(values[0]["source_shop_id"], values[0]["source_shop_name"]),
-            product_name=profile.get("product_name")
-            or (next(iter(names)) if len(names) == 1 else None),
+            product_name=profile.get("product_name") or source_name,
             category=profile.get("category"),
             level=profile.get("level"),
             operator=profile.get("operator"),
             field_status=profile.get("field_status", {}),
             candidates=profile.get("candidates", {}),
         )
+        if profile.get("field_status", {}).get("product_name") == "multiple":
+            result[lid]["platform_title"] = source_name
     return result
 
 
@@ -217,6 +218,13 @@ def all_metrics(repo, q, rows):
     return result
 
 
+def product_search_names(row):
+    names = list(row.get("candidates", {}).get("product_name", []))
+    if row.get("platform_title") and row["platform_title"] not in names:
+        names.append(row["platform_title"])
+    return names
+
+
 def product_option(row, *, catalog=False):
     """共享商品选项投影：目录与已选回显保持同一等级、名称及字段规则。"""
     result = dict(
@@ -248,7 +256,7 @@ def product_option(row, *, catalog=False):
                 "operator",
             )
         },
-        "search_names": row.get("candidates", {}).get("product_name", []),
+        "search_names": product_search_names(row),
     }
 
 

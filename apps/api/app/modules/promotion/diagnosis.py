@@ -9,7 +9,14 @@ from math import ceil
 from zoneinfo import ZoneInfo
 
 from .metrics import product_metrics
-from .query import dates_between, labels, matches, period_change, roi_excluded_rows
+from .query import (
+    dates_between,
+    labels,
+    matches,
+    period_change,
+    product_search_names,
+    roi_excluded_rows,
+)
 
 RULE_VERSION = "sop-v1.4-m2-20261103-online-rating"
 RULE_STATES = dict(
@@ -285,7 +292,7 @@ def diagnosis(repo, q, *, detail="full"):
         for key, values in buckets.items():
             item = identities[key]
             label = (
-                f"{item['product_id']} · {item['product_name'] or '名称缺失'}"
+                (item["product_name"] or item["product_id"])
                 if kind == "product"
                 else item["shop_name"] or item["shop_id"]
                 if kind == "shop"
@@ -299,6 +306,7 @@ def diagnosis(repo, q, *, detail="full"):
                     object_key=str(key),
                     object_type=kind,
                     label=label,
+                    search_names=product_search_names(item) if kind == "product" else [],
                     listing_id=item["listing_id"] if kind == "product" else None,
                     product_id=item["product_id"] if kind == "product" else None,
                     product_name=item["product_name"] if kind == "product" else None,
@@ -413,6 +421,7 @@ def object_matches(item, search):
         str(item.get(k) or "")
         for k in ("label", "product_id", "shop_name", "operator", "category", "level", "priority")
     ]
+    values.extend(item.get("search_names", []))
     values.append(PRIORITY_LABELS.get(item.get("priority"), item.get("priority", "")))
     level = item.get("level") or "未匹配"
     if "/" in level and level.endswith("混合"):
@@ -429,9 +438,7 @@ def object_matches(item, search):
             )
     for group in ("findings", "clues"):
         values.extend(str(value) for entry in item[group] for value in entry.values())
-    values.extend(
-        PRIORITY_LABELS.get(f["level"], f["level"]) for f in item["findings"]
-    )
+    values.extend(PRIORITY_LABELS.get(f["level"], f["level"]) for f in item["findings"])
     values.extend(clue_text(clue) for clue in item["clues"])
     values.extend(item["notes"])
     return needle in " ".join(values).casefold()

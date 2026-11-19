@@ -18,7 +18,7 @@ from .comparison import (
     summarize_window,
 )
 from .diagnosis import operating_diagnosis
-from .filter_projection import level_group, matches_level
+from .filter_projection import level_group, matches_keyword, matches_level
 from .health import growth_health
 from .metrics import (
     METRICS,
@@ -33,7 +33,6 @@ from .metrics import (
     risk_window_ready,
     total,
 )
-from .profile_rules import matches_keyword
 from .repository import BoardError
 from .source import previous_year
 
@@ -76,12 +75,13 @@ def labels(rows, profiles):
             for r in values
             if r["business_date"] == last and r["source_product_name"]
         }
+        source_name = next(iter(names)) if len(names) == 1 else None
         info[lid] = dict(
             listing_id=lid,
             shop_id=values[0]["source_shop_id"],
             product_id=values[0]["source_product_id"],
             shop_name=display_shop_name(values[0]["source_shop_id"], values[0]["source_shop_name"]),
-            product_name=p.get("product_name") or (next(iter(names)) if len(names) == 1 else None),
+            product_name=p.get("product_name") or source_name,
             category=p.get("category"),
             level=p.get("level"),
             operator=p.get("operator"),
@@ -93,6 +93,8 @@ def labels(rows, profiles):
             listed_date=None,
             listed_date_status="unknown",
         )
+        if p.get("field_status", {}).get("product_name") == "multiple":
+            info[lid]["platform_title"] = source_name
     return info, groups
 
 
@@ -389,9 +391,12 @@ def keyword_candidate_ids(repo, q):
     for lid, ids in product_ids.items():
         profile = profiles.get(lid, {})
         # 最近日名称冲突时展示名可能为空，仍可能命中ID或资料别名。
-        possible_names = (
-            {profile["product_name"]} if profile.get("product_name") else names[lid] | {None}
-        )
+        possible_names = {profile.get("product_name")}
+        if (
+            not profile.get("product_name")
+            or profile.get("field_status", {}).get("product_name") == "multiple"
+        ):
+            possible_names.update(names[lid])
         if any(
             matches_keyword(dict(profile, product_id=product_id, product_name=name), q.keyword)
             for product_id in ids
@@ -917,6 +922,7 @@ def catalog(repo, q, new_only=False):
                 value=r["listing_id"],
                 label=f"{r['product_name'] or '未命名商品'} · "
                 f"{r['shop_name'] or r['shop_id']} · {r['product_id']}",
+                product_name=r["product_name"] or r["product_id"],
                 shop=r["shop_id"],
                 operator=r.get("operator"),
                 category=r.get("category"),
@@ -927,6 +933,7 @@ def catalog(repo, q, new_only=False):
                     (
                         r["product_id"],
                         r["product_name"] or "",
+                        *([r["platform_title"]] if r.get("platform_title") else []),
                         *r.get("candidates", {}).get("product_name", []),
                     )
                 ),

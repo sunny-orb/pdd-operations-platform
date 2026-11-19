@@ -327,6 +327,7 @@ export const dayPage = z.object({
   }),
 });
 const productOption = z.object({
+  product_name: z.string().optional(),
   value: z.string(),
   label: z.string(),
   level: z.string().nullable().optional(),
@@ -360,6 +361,7 @@ export const catalog = z.object({
       level_group: z.string().optional(),
       level_details: z.array(z.string()).optional(),
       search_text: z.string(),
+      product_name: z.string().optional(),
     }),
   ),
   total: z.number().int().nonnegative(),

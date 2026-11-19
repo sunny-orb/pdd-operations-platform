@@ -260,7 +260,7 @@ it("完整推广页：反复切换保留全量选项与已选商品，空组合�
       expect(screen.getByText(text, { selector: ".ant-select-item-option-content" })).toBeTruthy();
     await userEvent.click(screen.getByRole("heading", { name: "拼多多推广数据看板" }));
   }
-  await choose("输入商品 ID 或商品名称 筛选", products[0].label);
+  await choose("输入商品 ID 或商品名称 筛选", products[0].product_name);
   await settle(() => expect(latest("diagnosis").getAll("listing_ids")).toEqual(["listing-0"]));
   await choose("店铺筛选", "测试店铺5");
   await settle(() => expect(screen.getByText("所选期间暂无推广数据")).toBeTruthy());
@@ -323,13 +323,13 @@ it("商品搜索草稿收起即清空，已选商品保留且全部结果使用�
   expect((search as HTMLInputElement).value).toBe("");
   await userEvent.click(search);
   await userEvent.click(
-    screen.getByText(products[0].label, { selector: ".ant-select-item-option-content" }),
+    screen.getByText(products[0].product_name, { selector: ".ant-select-item-option-content" }),
   );
   await waitFor(() => expect(spend()).toContain("¥10"));
   for (const path of ["overview", "days", "diagnosis"])
     expect(latest(path).getAll("listing_ids")).toEqual(["listing-0"]);
   expect(
-    screen.getByText(products[0].label, {
+    screen.getByText(products[0].product_name, {
       selector: ".ant-select-item-option-selected .ant-select-item-option-content",
     }),
   ).toBeTruthy();

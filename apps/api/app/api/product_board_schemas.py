@@ -239,6 +239,7 @@ class PageData(Record):
 
 
 class CatalogItem(BaseModel):
+    product_name: str
     value: str
     label: str
     shop: str

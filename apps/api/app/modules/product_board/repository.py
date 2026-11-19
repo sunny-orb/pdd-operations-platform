@@ -277,6 +277,12 @@ class Repository:
                     )
                 }
             )
+            # 候选已去重并排序。同长取排序在前的原名，事实和筛选仍使用完整链接身份。
+            operation_names = item["candidates"]["product_name"]
+            if len(operation_names) > 1:
+                item["product_name"] = max(operation_names, key=len)
+                item["field_status"]["product_name"] = "multiple"
+                item["resolution_method"]["product_name"] = "longest_operation_name"
             item.update(listed_date=None, listed_date_status="unknown")
             item["styles"] = r["styles"] or []
             result[r["listing_id"]] = item

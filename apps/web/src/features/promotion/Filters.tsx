@@ -5,7 +5,6 @@ import "dayjs/locale/zh-cn";
 import type { PromotionState } from "./data";
 import type { Scope } from "./state";
 import { FilterField } from "./FilterField";
-import { formatProductLevel } from "./format";
 
 export const Filters = memo(function Filters({ state }: { state: PromotionState }) {
   const { scope, mode, change } = state;
@@ -103,7 +102,7 @@ export const Filters = memo(function Filters({ state }: { state: PromotionState 
               aria-label="输入商品 ID 或商品名称 筛选"
               mode="multiple"
               maxCount={20}
-              maxTagCount="responsive"
+              maxTagCount={scope.products.length === 1 ? 1 : "responsive"}
               allowClear
               showSearch
               filterOption={false}
@@ -118,30 +117,13 @@ export const Filters = memo(function Filters({ state }: { state: PromotionState 
                 change({ products: value });
                 state.setNeedle("");
               }}
-              options={products}
-              optionRender={(option) =>
-                option.data.level === "多等级" ? (
-                  <div>
-                    {option.label}
-                    <small className="m2-option-level">
-                      {formatProductLevel(option.data.level, option.data.level_details)}
-                    </small>
-                  </div>
-                ) : (
-                  option.label
-                )
-              }
+              options={products.map((item) => ({
+                value: item.value,
+                label: item.product_name ?? item.product_id ?? item.label,
+              }))}
               loading={state.options.isFetching || state.selectedOptions?.isFetching}
               disabled={unavailable}
               notFoundContent={emptyText}
-              popupRender={(menu) => (
-                <>
-                  {menu}
-                  {data && data.total > 0 && (
-                    <small className="m2-options-hint">可选 {data.total} 个商品</small>
-                  )}
-                </>
-              )}
             />
           </label>
           {select(

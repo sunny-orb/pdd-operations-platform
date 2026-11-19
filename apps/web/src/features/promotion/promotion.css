@@ -237,18 +237,7 @@
   display: inline;
   font-size: 12px;
 }
-.m2-options-hint {
-  display: block;
-  padding: 8px 12px;
-  color: #617189;
-}
 
-.m2-option-level {
-  display: block;
-  color: #62758e;
-  font-size: 12px;
-  line-height: 20px;
-}
 @media (max-width: 980px) {
   .m2-promotion-scope .hero .snapshot {
     max-width: 100%;

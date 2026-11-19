@@ -108,7 +108,7 @@ def test_real_pg_profile_consensus_and_no_multiplication(sales_pg, tmp_path):
         assert repo.profiles()[next(iter(repo.profiles()))]["category"] == "冲锋衣"
 
 
-def test_real_pg_variant_names_merge_without_multiplying_facts(sales_pg, tmp_path):
+def test_real_pg_variant_names_display_without_multiplying_facts(sales_pg, tmp_path):
     end, rows = candidate()
     for profile, suffix in zip(rows["profile_records"], ("拉链款", "按扣款"), strict=True):
         profile["source_product_name_raw"] = f"商品甲（{suffix}）"
@@ -116,13 +116,14 @@ def test_real_pg_variant_names_merge_without_multiplying_facts(sales_pg, tmp_pat
     ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (end, rows))
     with snapshot(sales_pg) as repo:
         profile = next(iter(repo.profiles().values()))
-        assert profile["product_name"] == "商品甲"
-        assert profile["field_status"]["product_name"] == "matched"
-        assert profile["resolution_method"]["product_name"] == "common_variant_base"
+        expected = "商品甲（拉链款）"
+        assert profile["product_name"] == expected
+        assert profile["field_status"]["product_name"] == "multiple"
+        assert profile["resolution_method"]["product_name"] == "longest_operation_name"
         assert len(profile["candidates"]["product_name"]) == 2
         data = overview(repo, BoardQuery(end, end))
         assert data["metrics"]["revenue"]["value"] == Decimal("23.17")
-        assert data["brief"]["products"][0]["product_name"] == "商品甲"
+        assert data["brief"]["products"][0]["product_name"] == expected
 
 
 def test_cross_shop_identity_conflicts_and_period_name_fallback(sales_pg, tmp_path):
@@ -176,7 +177,7 @@ def test_cross_shop_identity_conflicts_and_period_name_fallback(sales_pg, tmp_pa
         assert result["metrics"]["revenue"]["value"] == Decimal("40")
         assert len(result["brief"]["products"]) == 2
         official = next(r for r in result["brief"]["products"] if r["shop_id"] == "663599807")
-        assert official["product_name"] == "期间原名"
+        assert official["product_name"] == "资料A"
         assert official["field_status"]["product_name"] == "multiple"
         scoped = options(repo, BoardQuery(q.start, q.end, shop="663599807", category="衣"))
         assert len(scoped["shops"]) == 2

@@ -89,10 +89,11 @@ function Harness({
   );
 }
 
-it("商品候选直接说明多等级包含的原始等级", async () => {
+it("商品候选只显示名称", async () => {
   render(<Harness />);
   await userEvent.click(screen.getByLabelText("输入商品 ID 或商品名称 筛选"));
-  expect(screen.getByText("多等级（含A级、B级）")).toBeTruthy();
+  expect(screen.getByText("测试商品")).toBeTruthy();
+  expect(screen.queryByText("多等级（含A级、B级）")).toBeNull();
 });
 
 it("旧链接的精确混合等级在选框中可读，选择其他字段不扩大原等级", async () => {

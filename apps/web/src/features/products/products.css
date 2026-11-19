@@ -539,7 +539,3 @@ body:has(.m1-products-scope) {
     max-width: none;
   }
 }
-
-.m1-products-scope .m1-candidate-echo {
-  color: var(--ink);
-}

@@ -222,31 +222,20 @@ export function Filters({
           allowClear
           showSearch={{ filterOption: false, searchValue: needle, onSearch: setNeedle }}
           value={scope.products}
-          maxTagCount="responsive"
+          maxTagCount={scope.products.length === 1 ? 1 : "responsive"}
           placeholder={
-            scope.keyword ? (
-              <span className="m1-candidate-echo" title={`关键词：${scope.keyword}`}>
-                {scope.keyword} · {first && !preparing && !result.error ? first.total : "—"}个候选
-              </span>
-            ) : (
-              "全部单款"
-            )
+            scope.keyword && products.length === 1
+              ? (products[0].product_name ?? products[0].label)
+              : "全部单款"
           }
-          options={products}
-          optionRender={(option) => (
-            <div>
-              <div>{option.data.label}</div>
-              {(option.data.level_details?.length ?? 0) > 1 && (
-                <small>{formatProductLevel(option.data.level, option.data.level_details)}</small>
-              )}
-            </div>
-          )}
-          labelRender={(v) =>
-            products.find((p) => p.value === v.value)?.label ??
-            first?.selected_products.find((p) => p.value === v.value)?.label ??
-            v.label ??
-            String(v.value)
-          }
+          options={products.map((item) => ({
+            value: item.value,
+            label: item.product_name ?? item.label,
+          }))}
+          labelRender={(v) => {
+            const item = first?.selected_products.find((p) => p.value === v.value);
+            return item?.product_name ?? item?.label ?? v.label ?? String(v.value);
+          }}
           virtual
           loading={preparing}
           disabled={preparing}
@@ -259,14 +248,6 @@ export function Filters({
             setNeedle("");
             change({ products: products.slice(0, 20) });
           }}
-          popupRender={(menu) => (
-            <>
-              {menu}
-              <div className="m1-option-footer">
-                <small>共 {first?.total ?? 0} 款，最多选择20款</small>
-              </div>
-            </>
-          )}
         />
       </div>
       {name !== "score" && (

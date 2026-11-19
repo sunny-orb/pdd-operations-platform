@@ -71,14 +71,16 @@ def test_multispec_is_preserved_and_totals_filters_and_risk_use_one_listing(sale
         assert data["observed_rows"] == "15"
         assert data["metrics"]["revenue"]["value"] == Decimal("1324.38")
         card = data["brief"]["products"][0]
-        assert card["product_name"] == "平台组合标题"
+        assert card["product_name"] == "手套【大号】+赠品"
+        platform_search = overview(repo, BoardQuery(q.start, END, keyword="平台组合标题"))
+        assert platform_search["observed_rows"] == "15"
         assert card["revenue"] == Decimal("162.19")
         assert card["previous_revenue"] == Decimal("162.19")
         assert len(data["risks"]) == 1 and data["risks"][0]["alert"]["priority"] == "P1"
         assert overview(repo, BoardQuery(q.start, END, keyword="手套"))["observed_rows"] == "15"
         choices = options(repo, BoardQuery(q.start, END, keyword="手套"))
         assert choices["total"] == 1
-        assert choices["products"][0]["label"].startswith("平台组合标题")
+        assert choices["products"][0]["label"].startswith("手套【大号】+赠品")
         assert overview(repo, BoardQuery(q.start, END, category="帽子"))["observed_rows"] == "0"
         assert (
             overview(repo, BoardQuery(q.start, END, category="多品类组合"))["observed_rows"] == "15"
@@ -120,5 +122,7 @@ def test_shared_promotion_alias_and_combo_filter_do_not_multiply_spend(sales_pg,
     with promotion_snapshot(sales_pg, "product") as repo:
         q = PromotionQuery(END, END, mode="product", keyword="手套", category="多品类组合")
         data = promotion_overview(repo, q)
+        profile = next(iter(repo.profiles.values()))
+        assert profile["product_name"] == "手套【大号】+赠品"
         assert data["metrics"]["spend"]["value"] == Decimal("5.01")
         assert data["metrics"]["revenue"]["value"] == Decimal("25.03")

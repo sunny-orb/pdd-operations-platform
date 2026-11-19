@@ -37,17 +37,22 @@ it.each(dashboardPages)("$title可独立使用共享壳且不依赖商品页", (
   expect(within(header).getByRole("link", { name: "返回运营看板中心" }).getAttribute("href")).toBe(
     "/",
   );
+  const inventoryUrl =
+    "https://stock-monitor.skills.kktree.cn/v2/#view=inventory&sort=sales7_market&order=desc";
   const destinations = within(header)
     .getAllByRole("link")
     .map((link) => link.getAttribute("href"));
-  expect(destinations).toEqual(["/", ...dashboardPages.map((page) => page.path)]);
+  expect(destinations).toEqual(["/", ...dashboardPages.map((page) => page.path), inventoryUrl]);
   const switcher = within(header).getByRole("navigation", { name: "看板切换" });
   expect(switcher.previousElementSibling?.classList.contains("dashboard-topbar-context")).toBe(
     true,
   );
   expect(switcher.firstElementChild?.textContent).toContain("运营看板中心");
-  expect(switcher.lastElementChild?.textContent).toContain("售后分析");
-  expect(within(switcher).getAllByRole("link")).toHaveLength(dashboardPages.length);
+  const inventory = within(switcher).getByRole("link", { name: "库存监控" });
+  expect(switcher.lastElementChild).toBe(inventory);
+  expect(inventory.previousElementSibling?.textContent).toBe("售后分析");
+  expect(inventory.getAttribute("target")).toBe("_blank");
+  expect(within(switcher).getAllByRole("link")).toHaveLength(dashboardPages.length + 1);
   const current = within(switcher).getByRole("link", { name: title });
   expect(current.getAttribute("aria-current")).toBe("page");
   expect(

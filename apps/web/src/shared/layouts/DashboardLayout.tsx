@@ -41,6 +41,13 @@ export function DashboardLayout({
             {page.title}
           </Link>
         ))}
+        <a
+          href="https://stock-monitor.skills.kktree.cn/v2/#view=inventory&sort=sales7_market&order=desc"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          库存监控
+        </a>
       </nav>
     </header>
   );

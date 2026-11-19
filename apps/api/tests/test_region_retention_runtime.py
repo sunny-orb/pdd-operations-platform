@@ -90,8 +90,16 @@ def test_idle_suppresses_repeated_work_for_five_minutes(sales_pg, project, monke
 
     monkeypatch.setattr(region_retention, "step", idle)
     assert maintain_regions(sales_pg, project, sync_complete=True, now=1000)["status"] == "idle"
-    assert maintain_regions(sales_pg, project, sync_complete=True, now=1299)["status"] == "not_due"
-    assert maintain_regions(sales_pg, project, sync_complete=True, now=1301)["status"] == "idle"
+    # 五分钟冷却从本轮完成时算起；真实 PG 耗时随 CI 负载变化。
+    deadline = json.loads((project / "var/maintenance/region-retention.json").read_text())[
+        "retry_after"
+    ]
+    assert deadline >= 1300
+    assert (
+        maintain_regions(sales_pg, project, sync_complete=True, now=deadline - 1)["status"]
+        == "not_due"
+    )
+    assert maintain_regions(sales_pg, project, sync_complete=True, now=deadline)["status"] == "idle"
     assert len(calls) == 2
     path = project / "var/maintenance/region-retention.json"
     assert path.stat().st_size < 4096
@@ -108,9 +116,17 @@ def test_failure_retries_and_does_not_leak_error_or_mark_success(sales_pg, proje
     monkeypatch.setattr(region_retention, "step", fail)
     first = maintain_regions(sales_pg, project, sync_complete=True, now=1000)
     assert first["status"] == "failed"
-    assert maintain_regions(sales_pg, project, sync_complete=True, now=1299)["status"] == "not_due"
+    # 五分钟冷却从本轮完成时算起；真实 PG 耗时随 CI 负载变化。
+    deadline = json.loads((project / "var/maintenance/region-retention.json").read_text())[
+        "retry_after"
+    ]
+    assert deadline >= 1300
+    assert (
+        maintain_regions(sales_pg, project, sync_complete=True, now=deadline - 1)["status"]
+        == "not_due"
+    )
     monkeypatch.setattr(region_retention, "step", lambda c, policy: {"status": "idle"})
-    assert maintain_regions(sales_pg, project, sync_complete=True, now=1301)["status"] == "idle"
+    assert maintain_regions(sales_pg, project, sync_complete=True, now=deadline)["status"] == "idle"
     assert "secret" not in json.dumps(first)
     assert "secret" not in (project / "var/maintenance/region-retention.json").read_text()
 

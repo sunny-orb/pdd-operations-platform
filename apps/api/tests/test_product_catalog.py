@@ -58,6 +58,7 @@ def test_catalog_returns_every_listing_without_operating_values(sales_pg, tmp_pa
             == {
                 "value",
                 "label",
+                "product_name",
                 "shop",
                 "operator",
                 "category",
@@ -68,6 +69,7 @@ def test_catalog_returns_every_listing_without_operating_values(sales_pg, tmp_pa
             }
             for item in data["items"]
         )
+        assert {item["product_name"] for item in data["items"]} == {f"款{i}" for i in range(151)}
         earlier = client.get(
             "/api/v1/products/catalog", params={**params, "date_from": str(end - timedelta(days=1))}
         ).json()["data"]

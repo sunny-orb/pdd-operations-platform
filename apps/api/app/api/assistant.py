@@ -48,6 +48,8 @@ class ChatAnswer(BaseModel):
     subject: Product | None
     candidates: list[Product]
     reports: list[dict]
+    query_context: dict = Field(default_factory=dict)
+    usage: dict = Field(default_factory=dict)
 
 
 def unavailable(status: int, message: str, code: str | None = None) -> JSONResponse:

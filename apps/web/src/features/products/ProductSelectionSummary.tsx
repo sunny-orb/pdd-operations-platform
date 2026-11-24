@@ -60,7 +60,19 @@ export function ProductSelectionSummary({ scope, state, name, ready, count }: Pr
                   date_from: scope.from,
                   date_to: scope.to,
                   shop_id: selectedShops.length === 1 ? selectedShops[0] : undefined,
+                  shop_ids: selectedShops,
                   product_version: state.version,
+                  domain: "products",
+                  listing_ids: selected,
+                  category_values: dimensionValues(scope.category),
+                  operator_values: dimensionValues(scope.operator),
+                  level_values: dimensionValues(scope.level),
+                  keyword: scope.keyword || undefined,
+                  category:
+                    typeof scope.category === "string" ? scope.category || undefined : undefined,
+                  operator:
+                    typeof scope.operator === "string" ? scope.operator || undefined : undefined,
+                  level: typeof scope.level === "string" ? scope.level || undefined : undefined,
                 }
               : {}
           }

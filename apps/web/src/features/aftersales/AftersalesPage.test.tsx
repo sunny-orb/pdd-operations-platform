@@ -12,6 +12,7 @@ vi.mock("../../shared/api/usePublishedDomainRefresh", () => ({
   usePublishedDomainRefresh: () => {},
 }));
 import { AftersalesPage } from "./AftersalesPage";
+import { RegisterScope } from "../../shared/assistant/scopeContext";
 vi.mock("./Charts", () => ({
   Charts: () => <section id="aftersales-charts">历史趋势与原因结构</section>,
 }));
@@ -158,6 +159,7 @@ function mount(
   withRows = false,
   customReport = false,
   initialEntries = ["/aftersales?focus=quality"],
+  register = vi.fn(),
 ) {
   const fetch = vi.fn(async (url: string) => {
     const p = new URL(url, "http://localhost").searchParams;
@@ -208,12 +210,40 @@ function mount(
     <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={client}>
         <HistoryControls />
-        <AftersalesPage />
+        <RegisterScope.Provider value={register}>
+          <AftersalesPage />
+        </RegisterScope.Provider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
   return fetch;
 }
+it("售后助手绑定当前报告、品质焦点和明细筛选，报告期间来自实际响应", async () => {
+  const register = vi.fn();
+  mount(
+    false,
+    true,
+    ["/aftersales?report_id=custom-r1&category=衣&keyword=糖豆&focus=quality&view=style"],
+    register,
+  );
+  await waitFor(() =>
+    expect(register).toHaveBeenLastCalledWith({
+      page: "售后分析",
+      subject: null,
+      context: {
+        domain: "aftersales",
+        versions: { aftersales: "v1" },
+        report_id: "custom-r1",
+        category: "衣",
+        keyword: "糖豆",
+        focus: "quality",
+        view: "style",
+        date_from: "2026-09-28",
+        date_to: "2026-10-27",
+      },
+    }),
+  );
+});
 it("同关键词的历史前进后退也取消未提交草稿，不覆盖恢复的标签", async () => {
   const fetch = mount(false, false, ["/aftersales?view=category", "/aftersales?view=style"]);
   await screen.findByText("style范围说明");

@@ -5,6 +5,7 @@ import { AssistantPageContext, AnalyzeProduct } from "./AssistantContext";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { startPanelSession } from "../layouts/panelLayout";
 import { AssistantEntry, AssistantWorkspace } from "./AssistantWorkspace";
+import type { PageContext } from "./contracts";
 
 // jsdom 尚未实现原生 dialog 的显示方法；响应式与焦点另用浏览器核验。
 let endSession: () => void;
@@ -293,4 +294,213 @@ it("最终结果到达前显示流式正文，停止后保留已显示文字", a
   channel.close();
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(screen.queryByText(answer.answer)).toBeNull();
+});
+
+it.each(["t", ""])(
+  "追问优先沿用服务端确认店铺 %j，全部店铺的空字符串不回退旧范围",
+  async (shop) => {
+    const query = { domain: "sales", shop_id: shop, versions: { sales: "sv2" }, month: "2026-11" };
+    const request = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ...answer, subject: null, query_context: query }),
+    });
+    vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+      url.endsWith("/models")
+        ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+        : request(url, options),
+    );
+    render(
+      <MemoryRouter initialEntries={["/sales"]}>
+        <AssistantWorkspace>
+          <AssistantPageContext
+            page="店铺销售"
+            subject={null}
+            context={{
+              domain: "sales",
+              shop_id: "s",
+              month: "2026-10",
+              versions: { sales: "sv1" },
+            }}
+          />
+          <AssistantEntry />
+        </AssistantWorkspace>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
+    fireEvent.click(screen.getByRole("button", { name: "本月GMV目标达成怎么样？" }));
+    await screen.findByText(answer.answer);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "再看评级" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+    expect(JSON.parse(request.mock.calls[1][1].body).context).toMatchObject({
+      ...query,
+      filter_shop_id: shop,
+    });
+    await screen.findAllByText(answer.answer);
+  },
+);
+
+it("同页报告与品类范围变化也提供显式切换，跨域追问保留四维多选", async () => {
+  const initial: PageContext = {
+    domain: "products",
+    shop_ids: ["s", "t"],
+    category_values: ["衣", "帽"],
+    operator_values: ["甲", "乙"],
+    level_values: ["A", "B"],
+  };
+  const query = {
+    ...initial,
+    domain: "aftersales",
+    report_id: "report-2",
+    category: "衣",
+    versions: { aftersales: "av2" },
+  };
+  const request = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ ...answer, subject: null, query_context: query }),
+  });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  render(
+    <MemoryRouter initialEntries={["/products"]}>
+      <AssistantWorkspace>
+        <AssistantPageContext page="商品数据" subject={null} context={initial} />
+        <AssistantEntry />
+      </AssistantWorkspace>
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
+  fireEvent.click(screen.getByRole("button", { name: "当前期间商品整体表现怎么样？" }));
+  await screen.findByText(answer.answer);
+  expect(screen.getByRole("button", { name: "使用当前页范围 · 商品数据" })).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "还有哪些问题" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  expect(JSON.parse(request.mock.calls[1][1].body).context).toMatchObject(query);
+  await screen.findAllByText(answer.answer);
+  fireEvent.click(screen.getByRole("button", { name: "使用当前页范围 · 商品数据" }));
+  expect(screen.queryByText(answer.answer)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "当前期间商品整体表现怎么样？" }));
+  expect(JSON.parse(request.mock.calls[2][1].body).context).toMatchObject(initial);
+  expect(JSON.parse(request.mock.calls[2][1].body).context.report_id).toBeUndefined();
+  await screen.findByText(answer.answer);
+});
+
+it("单款追问通用看板后保留已选款与完整对话，明确无证据时清空对象", async () => {
+  const dashboard = {
+    kind: "dashboard",
+    domain: "sales",
+    capability: "summary",
+    title: "店铺销售",
+    source: "已发布销售",
+    period: null,
+    scope: {},
+    data_version: "sv1",
+    versions: { sales: "sv1" },
+    facts: [],
+    tables: [],
+    notes: [],
+    series: [],
+  };
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        subject: null,
+        reports: [dashboard],
+        query_context: { domain: "sales", shop_id: "", versions: { sales: "sv1" } },
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: "查不到这款的更多证据",
+        status: "no_evidence",
+        subject: null,
+      }),
+    });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "看看全部店铺销售" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  await screen.findByText(answer.answer);
+  expect(screen.getByText("测试商品甲")).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "这款呢" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  expect(JSON.parse(request.mock.calls[1][1].body)).toMatchObject({
+    context: { listing_id: "s/A", shop_id: "s", filter_shop_id: "" },
+    history: [{ question: "看看全部店铺销售", answer: answer.answer }],
+  });
+  await screen.findByText("查不到这款的更多证据");
+  expect(screen.queryByText("测试商品甲")).toBeNull();
+});
+
+it("单款七天切到销售三十天后，继续追问采用最近确认期间", async () => {
+  const performance = {
+    kind: "product_performance",
+    product,
+    period: {
+      date_from: "2026-11-14",
+      date_to: "2026-11-20",
+      previous_from: "2026-11-07",
+      previous_to: "2026-11-13",
+    },
+    metrics: [],
+    series: [],
+    data_version: "pv1",
+    evidence: { source: "商品经营" },
+    coverage: {
+      current: { observed_days: 7, expected_days: 7, missing_dates: [] },
+      previous: { observed_days: 7, expected_days: 7, missing_dates: [] },
+      complete_through: "2026-11-20",
+    },
+  };
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ...answer, answer: "七天商品经营", reports: [performance] }),
+    })
+    .mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: "三十天店铺销售",
+        query_context: {
+          domain: "sales",
+          versions: { sales: "sv1" },
+          date_from: "2026-10-22",
+          date_to: "2026-11-20",
+        },
+      }),
+    });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  const ask = (value: string) => {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  ask("看看这款近7天");
+  await screen.findByText("七天商品经营");
+  ask("店铺近30天销售呢");
+  await screen.findByText("三十天店铺销售");
+  ask("退款呢");
+  expect(JSON.parse(request.mock.calls[2][1].body).context).toMatchObject({
+    domain: "sales",
+    date_from: "2026-10-22",
+    date_to: "2026-11-20",
+  });
+  await screen.findAllByText("三十天店铺销售");
 });

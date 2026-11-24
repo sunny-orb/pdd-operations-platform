@@ -476,3 +476,20 @@
     animation: none;
   }
 }
+
+.assistant-data-table {
+  overflow-x: auto;
+  margin-block: 10px;
+}
+.assistant-data-table table {
+  min-width: 100%;
+}
+.assistant-data-table td {
+  max-width: 28ch;
+  overflow-wrap: anywhere;
+}
+.assistant-data-table caption {
+  text-align: left;
+  font-weight: 600;
+  padding-block: 6px;
+}

@@ -236,6 +236,8 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, ve
             "find_product",
             "get_product_performance",
             "get_product_promotion",
+            "discover_dashboard",
+            "get_dashboard_data",
         }
         assert "DEMO-01" not in str(messages)
         if mode == "no_tool":
@@ -430,7 +432,10 @@ def test_unavailable_causal_domains_have_explicit_answer(monkeypatch):
 
     class NoTool:
         async def run(self, *args, **kwargs):
-            return SimpleNamespace(output="是的，这款确定缺货")
+            return SimpleNamespace(
+                output="是的，这款确定缺货",
+                usage=SimpleNamespace(input_tokens=0, output_tokens=0, requests=1, tool_calls=0),
+            )
 
     for word in ("库存", "退货"):
         question = f"{word}导致销量下滑？"

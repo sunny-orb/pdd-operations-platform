@@ -4,6 +4,12 @@
 
 ## 验证记录索引
 
+[五页24类问答工具、真实模型与范围回归（2026-11-24）](validation/2026-11-24.md#assistant-all-pages)。
+
+[百炼 Qwen3.8 Flash 本机接入与流式工具验收（2026-11-24）](validation/2026-11-24.md#assistant-bailian)。
+
+[本机真实单款问答、趋势与同版看板对账（2026-11-24）](validation/2026-11-24.md#assistant-real-query)，[早期原型与个人 Codex 接入](validation/2026-11-24.md)。
+
 [地区副本自动回收与原版本恢复（2026-11-19）](validation/2026-11-19.md#region-retention)。
 
 [历史存量可行性、RPA输入复用与冷查询生产验收（2026-11-18）](validation/2026-11-18.md#history-cold-followup)。

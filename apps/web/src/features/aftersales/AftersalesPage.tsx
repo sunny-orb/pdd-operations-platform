@@ -7,6 +7,7 @@ import {
   LineChartOutlined,
   TableOutlined,
 } from "@ant-design/icons";
+import { AssistantPageContext } from "../../shared/assistant/AssistantContext";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { useAftersales } from "./data";
 import { Filters } from "./Filters";
@@ -59,6 +60,25 @@ export function AftersalesPage() {
     (Date.parse(report.period_end) - Date.parse(report.period_start)) / 86400000 === 29;
   return (
     <DashboardLayout currentPage="aftersales" sections={sections} context="售后分析">
+      <AssistantPageContext
+        page="售后分析"
+        subject={null}
+        context={
+          state.version
+            ? {
+                domain: "aftersales",
+                versions: { aftersales: state.version },
+                report_id: state.scope.report,
+                category: state.scope.category,
+                keyword: state.scope.keyword,
+                focus: state.scope.focus,
+                view: state.scope.view,
+                date_from: report?.period_start,
+                date_to: report?.period_end,
+              }
+            : {}
+        }
+      />
       <main className="m5-aftersales-scope">
         <section className="m5-hero">
           <div>

@@ -45,6 +45,10 @@ const AssistantReportView = lazy(async () => ({
   default: memo((await import("./AssistantReport")).AssistantReportView),
 }));
 
+const BusinessReportView = lazy(async () => ({
+  default: (await import("./BusinessReport")).BusinessReportView,
+}));
+
 const Entry = createContext<{ open: boolean; toggle: () => void } | null>(null);
 const questionIcons = [
   <LineChartOutlined aria-hidden />,
@@ -77,7 +81,34 @@ function modelLabel(id: string) {
   );
 }
 
-const questions = ["这款近 7 天表现怎样？", "这款的异常主要在哪？", "再看看这款的推广"];
+const productQuestions = ["这款近 7 天表现怎样？", "这款的异常主要在哪？", "再看看这款的推广"];
+const pageQuestions: Record<string, string[]> = {
+  运营看板中心: [
+    "最近 7 天整体经营怎么样？",
+    "哪些商品和推广问题要优先关注？",
+    "当前数据更新到哪一天？",
+  ],
+  商品数据: [
+    "当前期间商品整体表现怎么样？",
+    "当前期间哪些商品有经营风险？",
+    "看看当前期间的新品评分",
+  ],
+  店铺销售: [
+    "当前期间店铺销售表现怎么样？",
+    "本月GMV目标达成怎么样？",
+    "当前期间哪个店铺贡献最多？",
+  ],
+  推广分析: [
+    "当前期间推广投产和花费怎么样？",
+    "看看当前范围的推广诊断",
+    "当前期间推广趋势怎么样？",
+  ],
+  售后分析: [
+    "当前报告退款情况怎么样？",
+    "当前报告哪些款的质量问题集中？",
+    "当前报告和上期相比有哪些变化？",
+  ],
+};
 
 type Turn = {
   scope: AssistantScope;
@@ -94,6 +125,16 @@ type Turn = {
   progress?: string;
 };
 
+/** 通用看板不重新定位商品；仅成功的通用查询保留用户已选款，选择/缺证结果可清空。 */
+function conversationSubject(result: ChatAnswer, scope: AssistantScope) {
+  return (
+    result.subject ??
+    (result.status === "answered" && result.reports.some((report) => report.kind === "dashboard")
+      ? scope.subject
+      : null)
+  );
+}
+
 /** 位于路由上层，切页仅更新可选的页面范围，收起不会丢失草稿和对话。 */
 export function AssistantWorkspace({ children }: { children: ReactNode }) {
   const { pathname } = useLocation();
@@ -107,6 +148,9 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     pageScope?.page === currentPage ? pageScope : { page: currentPage, subject: null, context: {} };
   const scope = conversation ?? currentScope;
   const product = scope.subject;
+  const questions = product
+    ? productQuestions
+    : (pageQuestions[scope.page] ?? pageQuestions["运营看板中心"]);
   const [businessEnabled, setBusinessEnabled] = useState<boolean | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [choice, setChoice] = useState("");
@@ -136,6 +180,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     currentScope.context.product_version !== scope.context.product_version ||
     currentScope.context.promotion_version !== scope.context.promotion_version;
   const canUsePage =
+    JSON.stringify(currentScope.context) !== JSON.stringify(scope.context) ||
     differentPage ||
     differentSelection ||
     differentPeriod ||
@@ -258,7 +303,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
             .filter(
               (t) =>
                 t.result?.status === "answered" &&
-                sameProduct(t.result.subject, turn.scope.subject),
+                sameProduct(conversationSubject(t.result, t.scope), turn.scope.subject),
             )
             .slice(-6)
             .map((t) => ({
@@ -275,8 +320,13 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
         publish();
       });
       if (controller.signal.aborted) return;
-      const changed = result.subject && !sameProduct(turn.scope.subject, result.subject);
-      setConversation({ ...turn.scope, subject: result.subject });
+      const subject = conversationSubject(result, turn.scope);
+      const changed = subject && !sameProduct(turn.scope.subject, subject);
+      setConversation({
+        ...turn.scope,
+        subject,
+        context: { ...turn.scope.context, ...result.query_context },
+      });
       setTurns([...(changed ? [] : previous), { ...turn, state: "done", result }]);
     } catch (error) {
       if (!controller.signal.aborted)
@@ -305,17 +355,23 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     const { date_from, date_to, ...base } = target.context;
     const lastReport = previous
       .flatMap((t) => t.result?.reports ?? [])
-      .filter((report) => sameProduct(report.product, target.subject))
+      .filter((report) => "product" in report && sameProduct(report.product, target.subject))
       .at(-1);
+    const lastContext = previous.filter((turn) => turn.result?.status === "answered").at(-1)
+      ?.result?.query_context;
     const period = /当前期间|当前时段|当前范围|本页|所选|页面|筛选/.test(value)
       ? { date_from, date_to }
-      : lastReport
-        ? { date_from: lastReport.period.date_from, date_to: lastReport.period.date_to }
-        : {};
+      : lastContext?.date_from && lastContext?.date_to
+        ? { date_from: lastContext.date_from, date_to: lastContext.date_to }
+        : lastReport?.period
+          ? { date_from: lastReport.period.date_from, date_to: lastReport.period.date_to }
+          : {};
     const context = {
       ...base,
-      filter_shop_id: base.shop_id,
-      ...lastReport?.versions,
+      ...lastContext,
+      versions: { ...base.versions, ...lastContext?.versions },
+      filter_shop_id: lastContext?.shop_id ?? base.shop_id,
+      ...(lastReport?.kind !== "dashboard" ? lastReport?.versions : {}),
       ...period,
       ...(target.subject
         ? { listing_id: target.subject.listing_id, shop_id: target.subject.shop_id }
@@ -351,7 +407,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     const next = { ...target, page: currentPage };
     reset(next);
     updatePanel("assistant", { open: true });
-    send(questions[0], next, []);
+    send(productQuestions[0], next, []);
   }
   function stop() {
     cancelActive();
@@ -449,11 +505,11 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                     <div className="assistant-welcome-icon">
                       <LineChartOutlined aria-hidden />
                     </div>
-                    <h3>{product ? "想了解这款商品的什么情况？" : "想分析哪款商品？"}</h3>
+                    <h3>{product ? "想了解这款商品的什么情况？" : "想了解哪些经营情况？"}</h3>
                     <p>
                       {product
                         ? "可以查看近期表现、异常和推广。"
-                        : "输入商品名称或 ID，再说说你想了解的指标或期间。"}
+                        : "直接提问，也可以从下面的问题开始。"}
                     </p>
                   </section>
                 )}
@@ -492,14 +548,22 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                           </div>
                         )}
                         <Suspense fallback={<small>正在显示指标…</small>}>
-                          {turn.result.reports.map((r, idx) => (
-                            <AssistantReportView
-                              key={idx}
-                              report={r}
-                              question={turn.question}
-                              showChart={/走势|趋势|图表|曲线|哪天|每天|逐日/.test(turn.question)}
-                            />
-                          ))}
+                          {turn.result.reports.map((r, idx) =>
+                            r.kind === "dashboard" ? (
+                              <BusinessReportView
+                                key={idx}
+                                report={r}
+                                showChart={/走势|趋势|图表|曲线|哪天|每天|逐日/.test(turn.question)}
+                              />
+                            ) : (
+                              <AssistantReportView
+                                key={idx}
+                                report={r}
+                                question={turn.question}
+                                showChart={/走势|趋势|图表|曲线|哪天|每天|逐日/.test(turn.question)}
+                              />
+                            ),
+                          )}
                         </Suspense>
                         {!turn.result.reports.length && turn.result.evidence && (
                           <details>
@@ -534,7 +598,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                     )}
                   </article>
                 ))}
-                {!pending && product && businessEnabled !== false && (
+                {!pending && businessEnabled !== false && (
                   <div
                     className={turns.length ? "assistant-followups" : "assistant-suggestions"}
                     aria-label="建议问题"
@@ -542,7 +606,9 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                     {questions.map((q, i) => (
                       <button key={q} onClick={() => send(q)}>
                         {!turns.length && questionIcons[i]}
-                        <span>{turns.length ? ["近期表现", "异常在哪", "再看推广"][i] : q}</span>
+                        <span>
+                          {turns.length && product ? ["近期表现", "异常在哪", "再看推广"][i] : q}
+                        </span>
                         {!turns.length && <ArrowRightOutlined aria-hidden />}
                       </button>
                     ))}
@@ -570,9 +636,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                   <textarea
                     ref={input}
                     aria-label="输入运营问题"
-                    placeholder={
-                      product ? "输入问题，或继续追问…" : "输入商品名称或 ID，以及你的问题…"
-                    }
+                    placeholder={"输入问题，或继续追问…"}
                     maxLength={2000}
                     rows={2}
                     value={draft}

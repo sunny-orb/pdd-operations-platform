@@ -9,6 +9,7 @@ import { useOverview } from "./useOverview";
 import { actionFromObservation, productLink, type Observation } from "./model";
 import type { DomainState } from "./data";
 import { useWeather } from "./weather";
+import { RegisterScope } from "../../shared/assistant/scopeContext";
 vi.mock("./useOverview", () => ({ useOverview: vi.fn() }));
 vi.mock("./weather", () => ({
   useWeather: vi.fn(() => ({
@@ -123,6 +124,25 @@ const states = (): DomainState[] =>
     error: null,
     refresh: vi.fn(),
   }));
+it("运营中心向助手绑定四域实际版本，推广版本归到店铺推广域", () => {
+  vi.mocked(useOverview).mockReturnValue(states());
+  const register = vi.fn();
+  render(
+    <MemoryRouter>
+      <RegisterScope.Provider value={register}>
+        <OverviewPage />
+      </RegisterScope.Provider>
+    </MemoryRouter>,
+  );
+  expect(register).toHaveBeenLastCalledWith({
+    page: "运营看板中心",
+    subject: null,
+    context: {
+      domain: "all",
+      versions: { sales: "v0", products: "v1", promotion_store: "v2", aftersales: "v3" },
+    },
+  });
+});
 it("顶部统计全部预警及真实建议，默认完整清单分页，筛选与翻页不改总数", () => {
   const data = states();
   const items = Array.from({ length: 110 }, (_, i) => ({

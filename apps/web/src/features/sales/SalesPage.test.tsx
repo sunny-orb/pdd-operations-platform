@@ -23,6 +23,7 @@ import { testMeta, testMetrics } from "./testFixtures";
 import { SalesPage } from "./SalesPage";
 import { syntheticResponse, testShops, syntheticAllShops } from "./testFixtures";
 import { _resetCacheForTesting } from "./api/queries";
+import { RegisterScope } from "../../shared/assistant/scopeContext";
 
 function render(ui: Parameters<typeof renderView>[0]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
@@ -58,6 +59,37 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   _resetCacheForTesting();
+});
+
+it("销售助手采用已应用的店铺、目标月份、期间和已发布版本", async () => {
+  vi.stubGlobal("fetch", async (path: string) => ({
+    ok: true,
+    json: async () => syntheticResponse(path),
+  }));
+  const register = vi.fn();
+  render(
+    <MemoryRouter
+      initialEntries={["/sales?month=2026-09&from=2026-09-15&to=2026-09-16&shop=spihw"]}
+    >
+      <RegisterScope.Provider value={register}>
+        <SalesPage />
+      </RegisterScope.Provider>
+    </MemoryRouter>,
+  );
+  await waitFor(() =>
+    expect(register).toHaveBeenLastCalledWith({
+      page: "店铺销售",
+      subject: null,
+      context: {
+        domain: "sales",
+        shop_id: "spihw",
+        month: "2026-09",
+        date_from: "2026-09-15",
+        date_to: "2026-09-16",
+        versions: { sales: "synthetic-v1" },
+      },
+    }),
+  );
 });
 
 it("八卡按同一首日比较涨跌，保留零基准、缺基准及趋势重试的原值", async () => {

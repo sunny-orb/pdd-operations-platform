@@ -103,6 +103,16 @@ export function PromotionPage() {
                 date_to: state.scope.to,
                 shop_id: state.scope.shop || undefined,
                 promotion_version: product ? state.version : undefined,
+                domain: product ? "promotion_product" : "promotion_store",
+                mode: product ? "product" : "store",
+                versions: state.version
+                  ? { [product ? "promotion_product" : "promotion_store"]: state.version }
+                  : {},
+                listing_ids: state.scope.products,
+                category: state.scope.category || undefined,
+                level: state.scope.level || undefined,
+                operator: state.scope.operator || undefined,
+                keyword: state.scope.keyword || undefined,
               }
             : {}
         }

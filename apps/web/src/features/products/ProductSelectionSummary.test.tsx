@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ProductSelectionSummary } from "./ProductSelectionSummary";
 import { readScope } from "./scope";
 import type { ProductsState } from "./data";
+import { RegisterScope } from "../../shared/assistant/scopeContext";
+import type { AssistantScope } from "../../shared/assistant/contracts";
 
 const clients: QueryClient[] = [];
 beforeEach(() => {
@@ -97,4 +99,48 @@ it("目录名单与经营结果数量不一致时不展示错误名单", () => {
   expect((screen.getByRole("button", { name: "查看商品" }) as HTMLButtonElement).disabled).toBe(
     true,
   );
+});
+
+it("助手完整采用四维多选，不把跨店、品类、运营和等级条件扩大为全部", () => {
+  const client = new QueryClient();
+  clients.push(client);
+  client.setQueryData(["m1", "catalog", "main", "v1", scope.from, scope.to], catalog);
+  let published: AssistantScope | null = null;
+  render(
+    <QueryClientProvider client={client}>
+      <RegisterScope.Provider
+        value={(value) => {
+          published = value;
+        }}
+      >
+        <ProductSelectionSummary
+          scope={{
+            ...scope,
+            shop: ["s", "t"],
+            category: ["衣", "帽"],
+            operator: ["甲", "乙"],
+            level: ["A", "B"],
+            products: ["s/A", "t/B"],
+          }}
+          state={state}
+          name="main"
+          ready
+          count="2"
+        />
+      </RegisterScope.Provider>
+    </QueryClientProvider>,
+  );
+  expect(published).toMatchObject({
+    page: "商品数据",
+    subject: null,
+    context: {
+      domain: "products",
+      product_version: "v1",
+      listing_ids: ["s/A", "t/B"],
+      shop_ids: ["s", "t"],
+      category_values: ["衣", "帽"],
+      operator_values: ["甲", "乙"],
+      level_values: ["A", "B"],
+    },
+  });
 });

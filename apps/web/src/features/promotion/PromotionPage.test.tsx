@@ -464,6 +464,10 @@ it.each([
       expect(register).toHaveBeenLastCalledWith({
         page: "推广分析",
         context: expect.objectContaining({
+          domain: "promotion_product",
+          mode: "product",
+          versions: { promotion_product: "v1" },
+          listing_ids: ["listing-a"],
           shop_id: selectedShop,
           promotion_version: "v1",
           date_from: "2026-09-28",

@@ -6,6 +6,7 @@ import {
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import { Link } from "react-router-dom";
+import { AssistantPageContext } from "../../shared/assistant/AssistantContext";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { useOverview } from "./useOverview";
 import { buildCenterView, domains, formatMetric, observationCoverage } from "./model";
@@ -55,6 +56,21 @@ export function OverviewPage() {
       sections={sections}
       context="运营中心 · 各域按实际期间展示"
     >
+      <AssistantPageContext
+        page="运营看板中心"
+        subject={null}
+        context={{
+          domain: "all",
+          versions: Object.fromEntries(
+            states
+              .filter((state) => state.meta?.version)
+              .map((state) => [
+                state.id === "promotion" ? "promotion_store" : state.id,
+                state.meta!.version,
+              ]),
+          ),
+        }}
+      />
       <main className="m6-overview-scope">
         <section className="m6-scopebar" aria-label="数据更新时间和口径入口">
           <span className="m6-scope-note">

@@ -7,6 +7,7 @@ import {
   GlobalOutlined,
   TableOutlined,
 } from "@ant-design/icons";
+import { AssistantPageContext } from "../../shared/assistant/AssistantContext";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { useSalesData } from "./api/queries";
 import { TARGET_SOURCE } from "./sourceLinks";
@@ -66,6 +67,22 @@ export function SalesPage() {
       currentPage="sales"
       context="店铺销售 · 本页独立分析"
     >
+      <AssistantPageContext
+        page="店铺销售"
+        subject={null}
+        context={
+          filters && !scopeError
+            ? {
+                domain: "sales",
+                shop_id: scope.shop || undefined,
+                month: scope.month,
+                date_from: scope.from,
+                date_to: scope.to,
+                versions: { sales: filters.meta.data_version },
+              }
+            : {}
+        }
+      />
       <div className="m3-sales-scope">
         <main className="sales-dashboard">
           <section className="sales-intro">

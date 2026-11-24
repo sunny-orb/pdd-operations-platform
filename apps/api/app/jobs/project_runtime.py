@@ -42,6 +42,8 @@ def build_steps(
     product_sources=None,
     reconcile_product_regions=False,
     reconcile_sources=(),
+    repair_dates=None,
+    repair_only=(),
 ):
     """装配既有接收、校验、发布及报告；仓库口令只在对应步骤真正执行时获取。"""
     from app.connectors.product_board import ProductBoardReader
@@ -61,8 +63,24 @@ def build_steps(
     if not full_sources <= set(RECONCILIATION_SOURCES):
         raise ValueError("INVALID_RECONCILIATION_SOURCES")
 
+    repair_dates = repair_dates or {}
+    repair_only = set(repair_only)
+    if repair_dates:
+        from app.modules.data_status.schedule_policy import DAILY_GAP_SOURCES
+
+        if not repair_dates.keys() <= DAILY_GAP_SOURCES or full_sources & repair_dates.keys():
+            raise ValueError("INVALID_GAP_SOURCE")
+    if not repair_only <= repair_dates.keys() or not all(repair_dates.values()):
+        raise ValueError("INVALID_GAP_DATES")
+
     def products(selected=None):
         selection = selected if selected is not None else product_sources
+        chosen = (
+            set(selection)
+            if selection is not None
+            else {"product_daily", "product_promotion", "profile_records"}
+        )
+        days = {code: dates for code, dates in repair_dates.items() if code in chosen}
         reader = None
         try:
 
@@ -75,6 +93,7 @@ def build_steps(
                     store,
                     reader,
                     selected=selection,
+                    **({"repair_days": days, "repair_only": chosen <= repair_only} if days else {}),
                     full_sources=full_sources
                     & {"product_daily", "product_promotion", "profile_records"},
                     heartbeat=hb,
@@ -95,6 +114,11 @@ def build_steps(
     def sales(code):
         reader = None
         window = approved_window(code)
+        gap_options = (
+            {"repair_dates": repair_dates[code], "repair_only": code in repair_only}
+            if code in repair_dates
+            else {}
+        )
         try:
 
             def receive(hb):
@@ -116,6 +140,7 @@ def build_steps(
                         lambda w: reader.read_stable(code, w, allow_empty=True),
                         heartbeat=hb,
                         full=code in full_sources,
+                        **gap_options,
                     )
                 from app.modules.sales.window_incremental import (
                     SALES_INCREMENTAL_SOURCES,
@@ -130,6 +155,7 @@ def build_steps(
                         else (lambda w: reader.read_stable(code, w, allow_empty=True)),
                         heartbeat=hb,
                         full=code in full_sources,
+                        **gap_options,
                     )
                 return (
                     reader.read_stable(window)
@@ -237,6 +263,8 @@ def execute_project(
     product_sources=None,
     reconcile_product_regions=False,
     reconcile_sources=(),
+    repair_dates=None,
+    repair_only=(),
     reconciliation_sources=(),
     reconciliation_time=RECONCILIATION_TIME,
     jst_aftersales_enabled=True,
@@ -254,6 +282,11 @@ def execute_project(
         engine,
         paths,
         warehouse_password,
+        **(
+            {"repair_dates": repair_dates, "repair_only": repair_only}
+            if repair_dates or repair_only
+            else {}
+        ),
         **({"reconcile_product_regions": True} if reconcile_product_regions else {}),
         **({"reconcile_sources": tuple(reconcile_sources)} if reconcile_sources else {}),
         **({"product_sources": product_sources} if product_sources is not None else {}),

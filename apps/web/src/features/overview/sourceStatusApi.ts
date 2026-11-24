@@ -52,6 +52,14 @@ const source = z.object({
         "unknown",
         "not_applicable",
       ]),
+      basis: z.literal("upstream_business_day").optional(),
+      required_date: z.string().optional(),
+      baseline_first_seen_at: z.string().optional(),
+      first_seen_at: z.string().optional(),
+      last_absent_at: z.string().optional(),
+      arrival_timing: z
+        .enum(["within_deadline", "confirmed_late", "first_seen_after_deadline", "unknown"])
+        .optional(),
       baseline_updated_at: z.string().optional(),
       confirmed_updated_at: z.string().optional(),
       expected_by: z.string().optional(),

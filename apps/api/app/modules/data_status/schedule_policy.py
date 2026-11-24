@@ -19,6 +19,7 @@ WAREHOUSE_SOURCES = (
     "shop_regions",
 )
 RECONCILIATION_SOURCES = (*WAREHOUSE_SOURCES, "product_regions")
+DAILY_GAP_SOURCES = frozenset(RECONCILIATION_SOURCES) - {"profile_records"}
 FEISHU_SOURCES = ("shop_refunds", "sales_targets")
 MONITOR_ONLY_SOURCES = ("aftersales_rpa",)
 JST_AFTERSALES_SOURCES = ("jst_returns", "jst_sales", "jst_master")

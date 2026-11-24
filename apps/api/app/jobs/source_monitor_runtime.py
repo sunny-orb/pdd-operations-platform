@@ -1,6 +1,8 @@
 """监测与既有项目执行装配；只重跑变化来源所属一致性组及其派生步骤。"""
 
+from datetime import datetime, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import sqlalchemy as sa
 
@@ -241,17 +243,34 @@ def execute_source_schedule(
         if warehouse_headers is not None or warehouse_session is not None
         else configured_warehouse_reader(paths.feishu_root)
     )
-    feishu = SourceProbes(warehouse_password, paths.feishu_root)
-    probes = {code: lambda code=code: metadata.read(code) for code in WAREHOUSE_SOURCES}
-    probes["product_regions"] = lambda: feishu.read("product_regions")
-    probes.update({code: lambda code=code: feishu.read(code) for code in FEISHU_SOURCES})
+    source_probes = SourceProbes(warehouse_password, paths.feishu_root)
+
+    def read_metadata(code):
+        value = metadata.read(code)
+        if value.get("basis") == "warehouse_web_metadata" and code != "profile_records":
+            day = (now or datetime.now(ZoneInfo("Asia/Shanghai"))).astimezone(
+                ZoneInfo("Asia/Shanghai")
+            ).date() - timedelta(days=1)
+            evidence = source_probes.check_upstream_day(code, day)
+            if evidence is not None:
+                return {**value, "upstream_day": evidence}
+        return value
+
+    probes = {code: lambda code=code: read_metadata(code) for code in WAREHOUSE_SOURCES}
+    probes["product_regions"] = lambda: source_probes.read("product_regions")
+    probes.update({code: lambda code=code: source_probes.read(code) for code in FEISHU_SOURCES})
 
     if source_ids is not None:
         if not set(source_ids) <= probes.keys():
             raise ValueError("INVALID_SOURCE_SELECTION")
         probes = {code: probe for code, probe in probes.items() if code in source_ids}
 
-    def synchronize(sources, connection):
+    def gap_candidates(connection, code, day):
+        from app.modules.data_status.gap_candidates import find_repair_dates
+
+        return find_repair_dates(connection, code, day, source_probes)
+
+    def synchronize(sources, connection, *, repair_dates=None, repair_only=()):
         products = tuple(code for code in sources if code in TABLES)
         with connection.begin():
             pending = (
@@ -297,6 +316,7 @@ def execute_source_schedule(
             only=steps,
             lock_connection=connection,
             product_sources=products or None,
+            **({"repair_dates": repair_dates, "repair_only": repair_only} if repair_dates else {}),
             **({"reconcile_sources": reconcile_sources} if reconcile_sources else {}),
         )
         outputs = result.get("datasets", {})
@@ -340,10 +360,11 @@ def execute_source_schedule(
             synchronize,
             now=now,
             force=force,
+            gap_candidates=gap_candidates,
             warehouse_times=warehouse_times or WAREHOUSE_TIMES,
             feishu_times=feishu_times or FEISHU_TIMES,
             reconciliation_time=reconciliation_time,
             reconciliation_retry_seconds=reconciliation_retry_seconds,
         )
     finally:
-        feishu.close()
+        source_probes.close()

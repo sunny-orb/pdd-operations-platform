@@ -156,6 +156,7 @@ def test_default_runtime_http_auth_failure_retries_in_five_minutes_without_brows
 
     monkeypatch.setattr(builtins, "__import__", no_browser)
     monkeypatch.setattr(warehouse_metadata, "build_opener", lambda *h: build_opener(*h, Protocol()))
+    monkeypatch.setattr(runtime.SourceProbes, "check_upstream_day", lambda self, code, day: None)
     monkeypatch.setattr(runtime, "execute_project", receive)
 
     def run(t):

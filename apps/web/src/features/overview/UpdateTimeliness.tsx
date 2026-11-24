@@ -12,7 +12,13 @@ const labels = {
   not_applicable: "不适用",
 };
 
-/** 上游时效只消费后端时间证据，不复算日期、不推导接收或经营完整性。 */
+function statusLabel(status: NonNullable<SourceStatus["timeliness"]>) {
+  if (status.basis === "upstream_business_day") {
+    if (status.state === "updated") return "已见昨日数据";
+    if (status.state === "unknown") return "缺少昨日见数时间";
+  }
+  return labels[status.state];
+}
 export function UpdateTimelinessLabel({ row }: { row: SourceStatus }) {
   const status = row.timeliness;
   if (!status || status.state === "not_applicable") return null;
@@ -27,7 +33,7 @@ export function UpdateTimelinessLabel({ row }: { row: SourceStatus }) {
           title="更新延迟，展开明细查看时间依据"
         />
       )}
-      <Tag color={delayed ? "warning" : "default"}>{labels[status.state]}</Tag>
+      <Tag color={delayed ? "warning" : "default"}>{statusLabel(status)}</Tag>
     </span>
   );
 }
@@ -35,9 +41,41 @@ export function UpdateTimelinessLabel({ row }: { row: SourceStatus }) {
 export function UpdateTimeliness({ row }: { row: SourceStatus }) {
   const status = row.timeliness;
   if (!status || status.state === "not_applicable") return null;
+  if (status.basis === "upstream_business_day") {
+    return (
+      <section className="m6-update-timeliness" aria-label="上游日报时效依据">
+        <strong>上游数据时效：{statusLabel(status)}</strong>
+        {status.required_date && <p>应到业务日：{status.required_date}（北京时间昨天）。</p>}
+        {status.baseline_first_seen_at && (
+          <p>昨日首次见数：{localTime(status.baseline_first_seen_at)}。</p>
+        )}
+        {status.expected_by && (
+          <p>今日判断期限：{localTime(status.expected_by)}（昨日首次见数的钟点加一小时）。</p>
+        )}
+        {status.first_seen_at && <p>今日首次见数：{localTime(status.first_seen_at)}。</p>}
+        {status.observed_at && <p>实际核对：{localTime(status.observed_at)}。</p>}
+        {status.state === "delayed" && <p>超过判断期限后核对，上游尚无该业务日的记录。</p>}
+        {status.state === "awaiting_check" && <p>已过判断期限，等待期限后的上游核对结果。</p>}
+        {(status.state === "unknown" ||
+          (status.state === "updated" && !status.baseline_first_seen_at)) && (
+          <p>尚无昨日首次见到前一业务日记录的时间，暂无法比较到数早晚。</p>
+        )}
+        {status.arrival_timing === "confirmed_late" && (
+          <p>
+            已确认延迟，现已到数。
+            {status.last_absent_at && `截至 ${localTime(status.last_absent_at)} 仍未见数。`}
+          </p>
+        )}
+        {status.arrival_timing === "first_seen_after_deadline" && (
+          <p>首次见数晚于期限。后台按时点核对，实际到数可能更早。</p>
+        )}
+        {status.arrival_timing === "within_deadline" && <p>判断期限内已见昨日数据。</p>}
+      </section>
+    );
+  }
   return (
     <section className="m6-update-timeliness" aria-label="上游更新时效依据">
-      <strong>上游更新时效：{labels[status.state]}</strong>
+      <strong>上游更新时效：{statusLabel(status)}</strong>
       {status.confirmed_updated_at && <p>已核实的今日更新：{status.confirmed_updated_at}。</p>}
       {status.baseline_updated_at && (
         <p>

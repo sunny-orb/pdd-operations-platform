@@ -7,12 +7,15 @@ from pathlib import Path
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
+from pymysql import MySQLError
+
 from app.connectors.product_board import ProductBoardReader
 from app.connectors.retry import execute_read
 from app.connectors.sales_feishu import cli_command
 from app.connectors.weather import receive_weather
 from app.modules.archive_store import close_temporary, run_source_cli, store_for
 from app.modules.data_status.catalog import BY_ID, SOURCES
+from app.modules.data_status.schedule_policy import RECONCILIATION_SOURCES
 from app.modules.sales.datasets import REFUND_BASE, REFUND_FIELDS, REFUND_SHOPS, SPECS
 from app.modules.sales.source_policy import SHOPS, approved_window
 from app.modules.sales.targets import TARGET_FIELDS
@@ -123,6 +126,87 @@ class SourceProbes:
         if self.reader:
             self.reader.close()
 
+    def check_upstream_day(self, code, day):
+        """仅对已登记的日粒度数仓表核对昨日是否有记录，最多返回一行。"""
+        source = BY_ID[code]
+        if code not in RECONCILIATION_SOURCES or source.kind != "daily":
+            return None
+        window = approved_window(code)
+        if not window.start <= day <= window.end:
+            return None
+        shops = SPECS[code].shop_ids if code in SPECS else tuple(SHOPS)
+        table = source.locator.removeprefix("cubeappdata.")
+        try:
+            if self.reader is None:
+                self.reader = ProductBoardReader(password=self.password())
+            else:
+                self.reader.connection.ping(reconnect=True)
+            with self.reader.connection.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT 1 FROM `{table}` WHERE time_granularity=%s "
+                    f"AND shop_id IN ({','.join(['%s'] * len(shops))}) "
+                    "AND dt>=%s AND dt<%s LIMIT 1",
+                    ("day", *shops, day, day + timedelta(days=1)),
+                )
+                return {"date": day.isoformat(), "present": cursor.fetchone() is not None}
+        except (MySQLError, OSError, ValueError):
+            # 时效证据不可用时照常按元数据接收，不用查询失败证明上游缺数。
+            return None
+
+    def available_gap_days(self, code, gaps):
+        """只读固定表和已批准的店铺日；同日其他店有数据不能证明该缺口已补。"""
+        from app.modules.data_status.history_coverage import WINDOW_DAYS
+        from app.modules.data_status.schedule_policy import DAILY_GAP_SOURCES
+
+        if code not in DAILY_GAP_SOURCES:
+            raise ValueError("INVALID_GAP_SOURCE")
+        if not gaps:
+            return ()
+        shops = sorted({shop for values in gaps.values() for shop in values})
+        allowed = SPECS[code].shop_ids if code in SPECS else SHOPS
+        window = approved_window(code)
+        first, last = min(gaps), max(gaps)
+        if (
+            not shops
+            or not set(shops) <= set(allowed)
+            or not window.start <= first <= last <= window.end
+            or (last - first).days >= WINDOW_DAYS
+        ):
+            raise ValueError("GAP_WINDOW_NOT_APPROVED")
+        table = BY_ID[code].locator.removeprefix("cubeappdata.")
+        category_filter = (
+            "AND REGEXP_REPLACE(COALESCE(product_category,''),'[[:space:]_－—-]','') "
+            "NOT IN ('包材','儿童赠品','分类未设置') "
+            if code == "product_regions"
+            else ""
+        )
+        sql = (
+            f"SELECT DATE(dt) AS d,shop_id FROM `{table}` WHERE time_granularity=%s "
+            f"AND shop_id IN ({','.join(['%s'] * len(shops))}) "
+            "AND dt>=%s AND dt<%s " + category_filter + "GROUP BY DATE(dt),shop_id"
+        )
+        if self.reader is None:
+            self.reader = ProductBoardReader(password=self.password())
+        else:
+            self.reader.connection.ping(reconnect=True)
+        with self.reader.connection.cursor() as cursor:
+            execute_read(
+                cursor,
+                sql,
+                ("day", *shops, first, last + timedelta(days=1)),
+                self.reader.retry_budget,
+                self.reader.heartbeat,
+            )
+            return tuple(
+                sorted(
+                    {
+                        row["d"]
+                        for row in cursor.fetchall()
+                        if str(row["shop_id"]) in gaps.get(row["d"], ())
+                    }
+                )
+            )
+
     def read(self, code):
         source = BY_ID[code]
         if source.system == "rpa":
@@ -168,6 +252,13 @@ class SourceProbes:
             for key, value in row.items()
         }
         result["basis"] = "snapshot_date" if code == "jst_master" else "recent_7_days_signal"
+        if code in RECONCILIATION_SOURCES and source.kind == "daily":
+            window = approved_window(code)
+            if window.start <= end <= window.end:
+                result["upstream_day"] = {
+                    "date": end.isoformat(),
+                    "present": str(row["date"])[:10] == end.isoformat(),
+                }
         return result
 
     def functions(self):

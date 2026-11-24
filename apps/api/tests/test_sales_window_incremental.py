@@ -23,6 +23,7 @@ FIELDS = dict(
         CODES, ("shop_revenue", "source_score", "spend", "spend", "transaction_amount"), strict=True
     )
 )
+FIELDS["product_regions"] = "actual_shipped_amount"
 
 
 def scope(code, end="2026-11-12"):
@@ -48,6 +49,8 @@ def row(code, key, day, amount="1.00", **changes):
     elif code == "shop_channel_star_shop":
         result.pop("updated_at", None)  # 实际明星源投影无 updated_at。
         result["cost"] = amount
+    elif code == "product_regions":
+        result["actual_shipped_amount"] = amount
     else:
         result["transaction_amount"] = amount
     return {**result, **changes}
@@ -364,3 +367,113 @@ def test_project_runtime_ordinary_and_explicit_full_keep_approved_scope(
     assert windows[-1] == scope(code)
     assert values(sales_pg, code, full["version_id"])["old"] == Decimal("8")
     assert values(sales_pg, code, initial.version_id)["old"] == Decimal("1")
+
+
+def repair(store, raw, days, windows, *, repair_only=True):
+    from app.modules.sales.product_regions_incremental import receive_product_regions
+    from app.modules.sales.window_incremental import normalize_sales_window, receive_sales_window
+
+    def read(window):
+        windows.append((window.start, window.end))
+        rows = [r for r in raw if window.start <= date.fromisoformat(r["dt"]) <= window.end]
+        return normalize_sales_window(store.code, rows, window, allow_empty=True)
+
+    receive_window = (
+        receive_product_regions if store.code == "product_regions" else receive_sales_window
+    )
+    return store.run(
+        lambda hb: receive_window(
+            store,
+            read,
+            heartbeat=hb,
+            repair_dates=days,
+            repair_only=repair_only,
+        )
+    )
+
+
+@pytest.mark.parametrize("code", (*CODES, "product_regions"))
+def test_targeted_gap_repairs_nonadjacent_days_without_replacing_later_rows(
+    sales_pg, tmp_path, code
+):
+    store = store_for(sales_pg, tmp_path, code)
+    original = [
+        row(code, "before", "2026-11-01"),
+        row(code, "middle", "2026-11-06"),
+        row(code, "latest", "2026-11-12"),
+    ]
+    first = publish(sales_pg, tmp_path, code, original)
+    additions = [row(code, "gap2", "2026-11-03"), row(code, "gap1", "2026-11-09")]
+    days = (date(2026, 11, 9), date(2026, 11, 3), date(2026, 11, 9))
+    windows = []
+    result = repair(store, additions, days, windows)
+    assert windows == [
+        (date(2026, 11, 3), date(2026, 11, 3)),
+        (date(2026, 11, 9), date(2026, 11, 9)),
+    ]
+    expected = normalize(code, [*original, *additions], scope(code))
+    restored = restore_candidate(tmp_path / result.version_id)
+    assert restored.rows == expected.rows
+    assert restored.fingerprint == expected.fingerprint
+    assert restored.source_metadata["repair_dates"] == ["2026-11-03", "2026-11-09"]
+    assert (
+        restore_candidate(tmp_path / first.version_id).rows
+        == normalize(code, original, scope(code)).rows
+    )
+    assert set(values(sales_pg, code, first.version_id)) == {"before", "middle", "latest"}
+    assert set(values(sales_pg, code, result.version_id)) == {
+        "before",
+        "gap1",
+        "middle",
+        "gap2",
+        "latest",
+    }
+    before = archive_bytes(tmp_path)
+    assert repair(store, additions, days, []).version_id == result.version_id
+    assert archive_bytes(tmp_path) == before
+
+
+@pytest.mark.parametrize(
+    ("previous_end", "repair_only", "tail"),
+    [
+        ("2026-11-12", False, date(2026, 11, 12)),
+        ("2026-11-10", True, date(2026, 11, 11)),
+    ],
+)
+def test_targeted_repair_combines_required_current_updates_in_one_version(
+    sales_pg, tmp_path, previous_end, repair_only, tail
+):
+    code = "shop_daily"
+    store = store_for(sales_pg, tmp_path, code)
+    original = [row(code, "before", "2026-11-01"), row(code, "old", "2026-11-10")]
+    publish(sales_pg, tmp_path, code, original, previous_end)
+    additions = [row(code, "gap", "2026-11-03"), row(code, "latest", "2026-11-12")]
+    windows = []
+    result = repair(store, additions, (date(2026, 11, 3),), windows, repair_only=repair_only)
+    assert windows == [(date(2026, 11, 3), date(2026, 11, 3)), (tail, date(2026, 11, 12))]
+    assert set(values(sales_pg, code, result.version_id)) == {"before", "old", "gap", "latest"}
+    with sales_pg.connect() as c:
+        assert c.scalar(sa.text("SELECT count(*) FROM dataset_versions")) == 2
+
+
+def test_targeted_repair_refuses_unproven_day_or_missing_baseline(sales_pg, tmp_path):
+    code = "shop_daily"
+    store = store_for(sales_pg, tmp_path, code)
+    days = (date(2026, 11, 6), date(2026, 11, 7))
+    additions = [row(code, "gap", "2026-11-06")]
+    windows = []
+    with pytest.raises(SalesError, match="INCREMENTAL_BASELINE_REQUIRED"):
+        repair(store, additions, days, windows)
+    assert windows == []
+    original = [row(code, "later", "2026-11-12")]
+    first = publish(sales_pg, tmp_path, code, original)
+    with pytest.raises(SalesError, match="SOURCE_REPAIR_DATE_NO_RECORDS"):
+        repair(store, additions, days, windows)
+    with sales_pg.connect() as c:
+        assert (
+            c.scalar(
+                sa.text("SELECT version_id FROM current_datasets WHERE dataset_code='shop_daily'")
+            )
+            == first.version_id
+        )
+        assert c.scalar(sa.text("SELECT count(*) FROM dataset_versions")) == 1

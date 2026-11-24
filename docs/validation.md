@@ -4,6 +4,8 @@
 
 ## 验证记录索引
 
+[生效规则、连续追问、跨页能力与回答展示（2026-11-24）](validation/2026-11-24.md#assistant-explanations-ux)。
+
 [五页24类问答工具、真实模型与范围回归（2026-11-24）](validation/2026-11-24.md#assistant-all-pages)。
 
 [百炼 Qwen3.8 Flash 本机接入与流式工具验收（2026-11-24）](validation/2026-11-24.md#assistant-bailian)。

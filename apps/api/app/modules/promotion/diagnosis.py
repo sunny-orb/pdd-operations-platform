@@ -32,6 +32,7 @@ ROI_MIN_SPEND = Decimal("300")
 ROI_ATTENTION_DROP = Decimal("-.15")
 ROI_WARNING_DROP = Decimal("-.25")
 SPEND_GROWTH = Fraction(1, 5)
+REVENUE_GROWTH_FACTOR = 2
 # 展示/搜索名称；“观察”的底层规则与旧消费者枚举保持不变。
 PRIORITY_LABELS = {"P1": "P1 预警", "P2": "P2 关注", "观察": "P3 观察"}
 
@@ -141,7 +142,9 @@ def assess(current, previous, *, current_available=True, previous_available=True
         # 精确比较严格一半边界；不另设花费或成交笔数门槛。
         spend_ratio = Fraction(now["spend"]["value"]) / Fraction(before["spend"]["value"]) - 1
         revenue_ratio = Fraction(now["revenue"]["value"]) / Fraction(before["revenue"]["value"]) - 1
-        growth_matches = spend_ratio >= SPEND_GROWTH and revenue_ratio * 2 < spend_ratio
+        growth_matches = (
+            spend_ratio >= SPEND_GROWTH and revenue_ratio * REVENUE_GROWTH_FACTOR < spend_ratio
+        )
     record("spend_growth", "花费增长与成交承接", reason, triggered=growth_matches)
     if growth_matches:
         findings.append(

@@ -33,7 +33,7 @@ it("中文跨字节分块时仍逐段更新，完成后校验最终回答", asyn
     new TextEncoder().encode("data: " + JSON.stringify({ type: "done", result }) + "\n\n"),
   );
   send.close();
-  expect(await reading).toEqual(result);
+  expect(await reading).toEqual({ ...result, subject_cleared: false });
 });
 
 it("流中错误及没有完成事件的断连不会被当作完整回答", async () => {
@@ -94,8 +94,11 @@ it("SSE最终校验接收通用报告、空usage与完整多选范围，旧JSON�
     "data: " + JSON.stringify({ type: "done", result: payload }) + "\n\n",
     { headers: { "content-type": "text/event-stream" } },
   );
-  expect(await readAnswer(response, () => {})).toEqual(payload);
-  expect(await readAnswer(new Response(JSON.stringify(result)), () => {})).toEqual(result);
+  expect(await readAnswer(response, () => {})).toEqual({ ...payload, subject_cleared: false });
+  expect(await readAnswer(new Response(JSON.stringify(result)), () => {})).toEqual({
+    ...result,
+    subject_cleared: false,
+  });
 });
 
 it("SSE拒绝单位或序列结构错误的通用报告，不把未校验报告用于下一轮", async () => {

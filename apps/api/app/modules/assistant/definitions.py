@@ -4,6 +4,7 @@ import hashlib
 import json
 
 from app.modules.product_board.metrics import RATIOS
+from app.modules.promotion.metrics import RATIO_SPECS
 
 from .business import report, table
 
@@ -25,12 +26,16 @@ _NAMES = {
     "score_conversion": "新品评分支付转化率",
     "uv_value": "商品UV价值",
 }
-_PROMOTION = (
-    ("roi", "推广投产比（倍）", "attributed_revenue", "spend"),
-    ("net_roi", "推广净投产比（倍）", "net_attributed_revenue", "spend"),
-    ("ctr", "推广点击率", "clicks", "impressions"),
-    ("cvr", "推广点击转化率", "attributed_deals", "clicks"),
-    ("cpc", "单次点击成本", "spend", "clicks"),
+_PROMOTION_NAMES = {
+    "roi": "推广投产比（倍）",
+    "net_roi": "推广净投产比（倍）",
+    "ctr": "推广点击率",
+    "cvr": "推广点击转化率",
+    "cpc": "单次点击成本",
+}
+_PROMOTION = tuple(
+    (key, _PROMOTION_NAMES[key], numerator, denominator)
+    for key, numerator, denominator in RATIO_SPECS
 )
 
 

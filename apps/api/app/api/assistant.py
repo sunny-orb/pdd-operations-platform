@@ -26,6 +26,7 @@ class PriorTurn(BaseModel):
     page: Page
     question: Question
     answer: str = Field(min_length=1, max_length=8000)
+    status: Literal["answered", "no_evidence", "need_selection"] = "answered"
 
 
 class Generation(BaseModel):
@@ -46,6 +47,7 @@ class ChatAnswer(BaseModel):
     evidence: str
     status: Literal["answered", "need_selection", "no_evidence"]
     subject: Product | None
+    subject_cleared: bool = False
     candidates: list[Product]
     reports: list[dict]
     query_context: dict = Field(default_factory=dict)
@@ -181,6 +183,7 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
                     body.question,
                     executor=state.assistant_query_executor,
                     emit=emit,
+                    request_id=str(body.generation),
                 ),
             )
         )

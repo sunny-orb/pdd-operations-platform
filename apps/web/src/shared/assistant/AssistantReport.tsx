@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatFixedDecimal } from "../format/decimal";
 import type { AssistantReport } from "./contracts";
+import { hasTrend, questionMetric, trendPoints, type ReportMode } from "./reportPresentation";
 
 type Unit = AssistantReport["metrics"][number]["unit"];
 function amount(value: string | null | undefined, unit: Unit) {
@@ -31,19 +32,6 @@ const metricStates: Record<string, string> = {
   zero_baseline: "前期为零",
   history_not_received: "前期超出已接收范围",
   missing: "缺少指标数据",
-};
-const metricTerms: Record<string, RegExp> = {
-  revenue: /成交额|成交金额|交易额|销售额/,
-  visitors: /访客/,
-  buyers: /买家/,
-  conversion: /转化率|转化/,
-  spend: /花费|消耗/,
-  roi: /投产/,
-  impressions: /曝光/,
-  clicks: /点击量/,
-  ctr: /点击率/,
-  cvr: /转化率|点击转化/,
-  cpc: /单次点击|点击成本/,
 };
 function RuleEvidence({ rules }: { rules: NonNullable<AssistantReport["evidence"]["rules"]> }) {
   const evaluated = rules.status === "rated" || rules.status === "evaluated";
@@ -89,32 +77,39 @@ export function AssistantReportView({
   report,
   question,
   showChart = true,
+  mode = "default",
 }: {
   report: AssistantReport;
   question: string;
   showChart?: boolean;
+  mode?: ReportMode;
 }) {
   const { period, coverage, metrics, series } = report;
-  const available = metrics.filter((m) => series.some((day) => day.values[m.key] != null));
+  const available = metrics.filter((m) =>
+    hasTrend(series.map((day) => ({ date: day.date, value: day.values[m.key] }))),
+  );
   const [choice, setChoice] = useState("");
-  const selected =
-    available.find((m) => m.key === choice) ??
-    available.find((m) => question.includes(m.label) || question.toLowerCase().includes(m.key)) ??
-    available.find((m) => metricTerms[m.key]?.test(question)) ??
-    available[0];
+  const selected = available.find((m) => m.key === choice) ?? questionMetric(available, question);
   const points = selected
-    ? series.map(({ date, values }) => ({
-        date,
-        raw: values[selected.key],
-        value:
-          values[selected.key] == null
-            ? null
-            : Number(values[selected.key]) * (selected.unit === "percent" ? 100 : 1),
-      }))
+    ? trendPoints(
+        series.map(({ date, values }) => ({ date, value: values[selected.key] })),
+        selected.unit === "percent",
+      )
     : [];
   const label = report.kind === "product_performance" ? "商品经营" : "商品推广";
+  const Details = mode === "evidence" ? "div" : "details";
+  if (mode === "chart" && (!selected || !showChart)) return null;
   return (
-    <section className="assistant-report" aria-label={label + "数据"}>
+    <section
+      className={
+        mode === "default"
+          ? "assistant-report"
+          : mode === "chart"
+            ? "assistant-trend"
+            : "assistant-evidence-report"
+      }
+      aria-label={label + "数据"}
+    >
       <header>
         <strong>{label}</strong>
         <small>
@@ -176,90 +171,101 @@ export function AssistantReportView({
           </div>
         </>
       )}
-      <details>
-        <summary>查看指标与数据依据</summary>
-        <p>
-          对比期间 {period.previous_from} 至 {period.previous_to}
-        </p>
-        <table>
-          <thead>
-            <tr>
-              <th>指标</th>
-              <th>本期</th>
-              <th>前期</th>
-              <th>变化率</th>
-            </tr>
-          </thead>
-          <tbody>
-            {metrics.map((m) => (
-              <tr key={m.key}>
-                <th>
-                  {m.label}
-                  {(m.reason || metricStates[m.status]) && (
-                    <small>{m.reason ?? metricStates[m.status]}</small>
-                  )}
-                </th>
-                <td>{amount(m.current, m.unit)}</td>
-                <td>{amount(m.previous, m.unit)}</td>
-                <td>{amount(m.change, "percent")}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p>
-          本期有记录 {coverage.current.observed_days}/{coverage.current.expected_days} 天，前期{" "}
-          {coverage.previous.observed_days}/{coverage.previous.expected_days} 天。
-        </p>
-        {coverage.current.missing_dates.length > 0 && (
-          <p>本期无记录日期 {coverage.current.missing_dates.join("、")}</p>
-        )}
-        {coverage.previous.missing_dates.length > 0 && (
-          <p>前期无记录日期 {coverage.previous.missing_dates.join("、")}</p>
-        )}
-        <p>
-          完整截至日 {coverage.complete_through ?? "尚未确认"}
-          <br />
-          来源 {report.evidence.source}
-          {!report.versions && (
-            <>
-              <br />
-              数据版本 {report.data_version}
-            </>
-          )}
-        </p>
-        <details>
-          <summary>来源与规则详情</summary>
-          {report.versions && (
-            <p>
-              商品版本 {report.versions.product_version}
-              <br />
-              推广版本 {report.versions.promotion_version}
-            </p>
-          )}
-          {report.evidence.rules && <RuleEvidence rules={report.evidence.rules} />}
-        </details>
-        {selected && (
-          <details>
-            <summary>逐日明细</summary>
+      {mode !== "chart" && (
+        <Details>
+          {mode === "default" && <summary>查看指标与数据依据</summary>}
+          <p>
+            对比期间 {period.previous_from} 至 {period.previous_to}
+          </p>
+          <div className="assistant-data-table">
             <table>
               <thead>
                 <tr>
-                  <th>日期</th>
-                  <th>{selected.label}</th>
+                  <th>指标</th>
+                  <th>本期</th>
+                  <th>前期</th>
+                  <th>变化率</th>
                 </tr>
               </thead>
               <tbody>
-                {points.map((day) => (
-                  <tr key={day.date}>
-                    <th>{day.date}</th>
-                    <td>{amount(day.raw, selected.unit)}</td>
+                {metrics.map((m) => (
+                  <tr key={m.key}>
+                    <th>
+                      {m.label}
+                      {(m.reason || metricStates[m.status]) && (
+                        <small>{m.reason ?? metricStates[m.status]}</small>
+                      )}
+                    </th>
+                    <td>{amount(m.current, m.unit)}</td>
+                    <td>{amount(m.previous, m.unit)}</td>
+                    <td>{amount(m.change, "percent")}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-          </details>
-        )}
-      </details>
+          </div>
+          <p>
+            本期有记录 {coverage.current.observed_days}/{coverage.current.expected_days} 天，前期{" "}
+            {coverage.previous.observed_days}/{coverage.previous.expected_days} 天。
+          </p>
+          {coverage.current.missing_dates.length > 0 && (
+            <p>本期无记录日期 {coverage.current.missing_dates.join("、")}</p>
+          )}
+          {coverage.previous.missing_dates.length > 0 && (
+            <p>前期无记录日期 {coverage.previous.missing_dates.join("、")}</p>
+          )}
+          <p>
+            完整截至日 {coverage.complete_through ?? "尚未确认"}
+            <br />
+            来源 {report.evidence.source}
+            {!report.versions && (
+              <>
+                <br />
+                数据版本 {report.data_version}
+              </>
+            )}
+          </p>
+          <Details>
+            {mode === "default" && <summary>来源与规则详情</summary>}
+            {report.versions && (
+              <p>
+                商品版本 {report.versions.product_version}
+                <br />
+                推广版本 {report.versions.promotion_version}
+              </p>
+            )}
+            {report.evidence.rules && <RuleEvidence rules={report.evidence.rules} />}
+          </Details>
+          {(mode === "evidence" ? series.length > 0 && metrics.length > 0 : !!selected) && (
+            <Details>
+              {mode === "default" && <summary>逐日明细</summary>}
+              <div className="assistant-data-table">
+                <table>
+                  {mode === "evidence" && <caption>逐日明细</caption>}
+                  <thead>
+                    <tr>
+                      <th>日期</th>
+                      {(mode === "evidence" ? metrics : [selected!]).map((metric) => (
+                        <th key={metric.key}>{metric.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {series.map((day) => (
+                      <tr key={day.date}>
+                        <th>{day.date}</th>
+                        {(mode === "evidence" ? metrics : [selected!]).map((metric) => (
+                          <td key={metric.key}>{amount(day.values[metric.key], metric.unit)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Details>
+          )}
+        </Details>
+      )}
     </section>
   );
 }

@@ -1,7 +1,6 @@
 import {
   createContext,
   useCallback,
-  memo,
   useContext,
   lazy,
   Suspense,
@@ -39,14 +38,13 @@ import { PanelResizer } from "../components/PanelResizer";
 import { useDashboardPanel, updatePanel } from "../layouts/panelLayout";
 import "./assistant.css";
 import { readAnswer } from "./stream";
-import { AssistantReply } from "./AssistantReply";
 
-const AssistantReportView = lazy(async () => ({
-  default: memo((await import("./AssistantReport")).AssistantReportView),
+const AssistantReply = lazy(async () => ({
+  default: (await import("./AssistantReply")).AssistantReply,
 }));
 
-const BusinessReportView = lazy(async () => ({
-  default: (await import("./BusinessReport")).BusinessReportView,
+const AssistantEvidence = lazy(async () => ({
+  default: (await import("./AssistantEvidence")).AssistantEvidence,
 }));
 
 const Entry = createContext<{ open: boolean; toggle: () => void } | null>(null);
@@ -109,6 +107,16 @@ const pageQuestions: Record<string, string[]> = {
     "当前报告和上期相比有哪些变化？",
   ],
 };
+const discussionPages: Record<string, string> = {
+  all: "运营看板中心",
+  products: "商品数据",
+  promotion_store: "推广分析",
+  promotion_product: "推广分析",
+  sales: "店铺销售",
+  aftersales: "售后分析",
+  weather: "运营看板中心",
+  data_status: "运营看板中心",
+};
 
 type Turn = {
   scope: AssistantScope;
@@ -125,14 +133,15 @@ type Turn = {
   progress?: string;
 };
 
-/** 通用看板不重新定位商品；仅成功的通用查询保留用户已选款，选择/缺证结果可清空。 */
+/** 取数或规则缺证沿用选款；服务端明确换款失败或给出新候选时清除旧对象。 */
 function conversationSubject(result: ChatAnswer, scope: AssistantScope) {
-  return (
-    result.subject ??
-    (result.status === "answered" && result.reports.some((report) => report.kind === "dashboard")
-      ? scope.subject
-      : null)
-  );
+  if (result.subject) return result.subject;
+  if (result.subject_cleared || (result.status === "need_selection" && result.candidates.length))
+    return null;
+  return result.status !== "answered" ||
+    result.reports.some((report) => report.kind === "dashboard")
+    ? scope.subject
+    : null;
 }
 
 /** 位于路由上层，切页仅更新可选的页面范围，收起不会丢失草稿和对话。 */
@@ -148,15 +157,25 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     pageScope?.page === currentPage ? pageScope : { page: currentPage, subject: null, context: {} };
   const scope = conversation ?? currentScope;
   const product = scope.subject;
-  const questions = product
-    ? productQuestions
-    : (pageQuestions[scope.page] ?? pageQuestions["运营看板中心"]);
   const [businessEnabled, setBusinessEnabled] = useState<boolean | null>(null);
   const [models, setModels] = useState<string[]>([]);
   const [choice, setChoice] = useState("");
   const model = models.includes(choice) ? choice : models[0];
   const [draft, setDraft] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
+  const discussion = turns.length
+    ? (scope.context.explanation?.view ?? scope.context.domain)
+    : undefined;
+  const questionPage = discussion ? (discussionPages[discussion] ?? scope.page) : scope.page;
+  const useProductQuestions =
+    !!product &&
+    (!turns.length ||
+      discussion === "products" ||
+      discussion === "promotion_product" ||
+      (!discussion && (questionPage === "商品数据" || questionPage === "推广分析")));
+  const questions = useProductQuestions
+    ? productQuestions
+    : (pageQuestions[questionPage] ?? pageQuestions["运营看板中心"]);
   const dialog = useRef<HTMLDialogElement>(null);
   const history = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -302,7 +321,8 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
           history: previous
             .filter(
               (t) =>
-                t.result?.status === "answered" &&
+                t.state === "done" &&
+                t.result &&
                 sameProduct(conversationSubject(t.result, t.scope), turn.scope.subject),
             )
             .slice(-6)
@@ -310,6 +330,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
               page: t.scope.page,
               question: t.question,
               answer: t.result!.answer.slice(0, 8000),
+              status: t.result!.status,
             })),
         }),
       });
@@ -322,10 +343,21 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
       if (controller.signal.aborted) return;
       const subject = conversationSubject(result, turn.scope);
       const changed = subject && !sameProduct(turn.scope.subject, subject);
+      const nextContext = { ...turn.scope.context };
+      if (result.subject_cleared) {
+        delete nextContext.listing_ids;
+        delete nextContext.product_key;
+        delete nextContext.shop_id;
+        delete nextContext.explanation;
+        delete nextContext.date_from;
+        delete nextContext.date_to;
+      }
+      const mergedContext = { ...nextContext, ...result.query_context };
+      if (mergedContext.explanation === null) delete mergedContext.explanation;
       setConversation({
         ...turn.scope,
         subject,
-        context: { ...turn.scope.context, ...result.query_context },
+        context: mergedContext,
       });
       setTurns([...(changed ? [] : previous), { ...turn, state: "done", result }]);
     } catch (error) {
@@ -353,12 +385,18 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     const value = question.trim();
     if (!value || active.current || businessEnabled === false) return;
     const { date_from, date_to, ...base } = target.context;
-    const lastReport = previous
+    const clearedAt = previous.reduce(
+      (last, turn, index) => (turn.state === "done" && turn.result?.subject_cleared ? index : last),
+      -1,
+    );
+    const scopedTurns = clearedAt < 0 ? previous : previous.slice(clearedAt);
+    const lastReport = scopedTurns
       .flatMap((t) => t.result?.reports ?? [])
       .filter((report) => "product" in report && sameProduct(report.product, target.subject))
       .at(-1);
-    const lastContext = previous.filter((turn) => turn.result?.status === "answered").at(-1)
-      ?.result?.query_context;
+    const lastContext = scopedTurns
+      .filter((turn) => turn.state === "done" && turn.result?.query_context)
+      .at(-1)?.result?.query_context;
     const period = /当前期间|当前时段|当前范围|本页|所选|页面|筛选/.test(value)
       ? { date_from, date_to }
       : lastContext?.date_from && lastContext?.date_to
@@ -377,6 +415,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
         ? { listing_id: target.subject.listing_id, shop_id: target.subject.shop_id }
         : {}),
     };
+    if (context.explanation === null) delete context.explanation;
     setDraft("");
     void requestTurn({ question: value, scope: target, context, state: "loading" }, previous);
   }
@@ -523,12 +562,14 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                         {turn.result?.model && ` · ${modelLabel(turn.result.model)}`}
                       </span>
                     </div>
-                    <AssistantReply
-                      text={turn.result?.answer ?? turn.partial ?? ""}
-                      streaming={turn.state === "loading"}
-                      paused={turn.state === "stopped" || turn.state === "error"}
-                      onReveal={followText}
-                    />
+                    <Suspense fallback={null}>
+                      <AssistantReply
+                        text={turn.result?.answer ?? turn.partial ?? ""}
+                        streaming={turn.state === "loading"}
+                        paused={turn.state === "stopped" || turn.state === "error"}
+                        onReveal={followText}
+                      />
+                    </Suspense>
                     {turn.state === "done" && turn.result ? (
                       <div className="assistant-answer">
                         {turn.result.candidates.length > 0 && i === turns.length - 1 && (
@@ -547,30 +588,9 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                             ))}
                           </div>
                         )}
-                        <Suspense fallback={<small>正在显示指标…</small>}>
-                          {turn.result.reports.map((r, idx) =>
-                            r.kind === "dashboard" ? (
-                              <BusinessReportView
-                                key={idx}
-                                report={r}
-                                showChart={/走势|趋势|图表|曲线|哪天|每天|逐日/.test(turn.question)}
-                              />
-                            ) : (
-                              <AssistantReportView
-                                key={idx}
-                                report={r}
-                                question={turn.question}
-                                showChart={/走势|趋势|图表|曲线|哪天|每天|逐日/.test(turn.question)}
-                              />
-                            ),
-                          )}
+                        <Suspense fallback={null}>
+                          <AssistantEvidence result={turn.result} question={turn.question} />
                         </Suspense>
-                        {!turn.result.reports.length && turn.result.evidence && (
-                          <details>
-                            <summary>查看回答依据</summary>
-                            <p className="assistant-reply">{turn.result.evidence}</p>
-                          </details>
-                        )}
                       </div>
                     ) : (
                       <div className="assistant-answer">
@@ -607,7 +627,9 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                       <button key={q} onClick={() => send(q)}>
                         {!turns.length && questionIcons[i]}
                         <span>
-                          {turns.length && product ? ["近期表现", "异常在哪", "再看推广"][i] : q}
+                          {turns.length && useProductQuestions
+                            ? ["近期表现", "异常在哪", "再看推广"][i]
+                            : q}
                         </span>
                         {!turns.length && <ArrowRightOutlined aria-hidden />}
                       </button>

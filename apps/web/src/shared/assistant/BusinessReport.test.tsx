@@ -74,6 +74,7 @@ const report: BusinessReport = {
       points: [
         { date: "2026-11-20", value: "95.5" },
         { date: "2026-11-21", value: null },
+        { date: "2026-11-22", value: "94" },
       ],
     },
   ],
@@ -148,6 +149,7 @@ it("按需展示分组趋势并能切换指标", () => {
             points: [
               { date: "2026-11-20", value: "0" },
               { date: "2026-11-21", value: null },
+              { date: "2026-11-22", value: "0.1" },
             ],
           },
         ],

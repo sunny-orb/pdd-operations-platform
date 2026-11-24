@@ -1,6 +1,26 @@
-import { memo, useLayoutEffect, useRef } from "react";
+import { memo, useLayoutEffect, useRef, useState } from "react";
+import Markdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const segmenter = new Intl.Segmenter("zh", { granularity: "grapheme" });
+const plugins = [remarkGfm];
+const components: Components = {
+  a: ({ href, children, title }) =>
+    href ? (
+      <a href={href} title={title} target="_blank" rel="noopener noreferrer">
+        {children}
+      </a>
+    ) : (
+      <span>{children}</span>
+    ),
+  // 回答只展示文字依据，不请求模型给出的远程图片。
+  img: ({ alt }) => <span>{alt}</span>,
+  table: ({ children }) => (
+    <div className="assistant-markdown-table" role="region" aria-label="回答表格" tabIndex={0}>
+      <table>{children}</table>
+    </div>
+  ),
+};
 
 /** 网络到字节时只更新目标文本；逐帧呈现由此组件独立负责，避免重绘整段会话。 */
 export const AssistantReply = memo(function AssistantReply({
@@ -14,7 +34,8 @@ export const AssistantReply = memo(function AssistantReply({
   paused: boolean;
   onReveal: () => void;
 }) {
-  const element = useRef<HTMLParagraphElement>(null);
+  const element = useRef<HTMLDivElement>(null);
+  const [visibleText, setVisibleText] = useState("");
   const display = useRef({ text: "", started: false, lastFrame: 0, credit: 0 });
 
   useLayoutEffect(() => {
@@ -24,8 +45,7 @@ export const AssistantReply = memo(function AssistantReply({
     let frame = 0;
     const render = (value: string, animating: boolean) => {
       state.text = value;
-      node.textContent = value;
-      node.hidden = !value;
+      setVisibleText(value);
       node.classList.toggle("is-streaming", animating);
       onReveal();
     };
@@ -70,5 +90,11 @@ export const AssistantReply = memo(function AssistantReply({
     return () => cancelAnimationFrame(frame);
   }, [text, streaming, paused, onReveal]);
 
-  return <p className="assistant-reply" ref={element} hidden />;
+  return (
+    <div className="assistant-reply" ref={element} hidden={!visibleText}>
+      <Markdown remarkPlugins={plugins} components={components} skipHtml>
+        {visibleText}
+      </Markdown>
+    </div>
+  );
 });

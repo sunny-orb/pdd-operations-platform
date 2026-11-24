@@ -9,6 +9,7 @@ from math import ceil
 
 from app.modules.sales.source_policy import display_shop_name
 
+from . import risk_rules
 from .actions import build_actions
 from .comparison import (
     METRIC_INPUTS,
@@ -194,7 +195,9 @@ def top_revenue_listings(amounts):
     amounts = {lid: value for lid, value in amounts.items() if value is not None}
     if not amounts:
         return set()
-    threshold = sorted(amounts.values(), reverse=True)[ceil(len(amounts) * 0.2) - 1]
+    threshold = sorted(amounts.values(), reverse=True)[
+        ceil(len(amounts) * risk_rules.TOP_SHARE) - 1
+    ]
     return {lid for lid, value in amounts.items() if value >= threshold}
 
 
@@ -232,9 +235,9 @@ def collect_risks(info, groups, top, q):
 def risk_feed(repo, q):
     """轻量只读风险出口，日期/筛选与商品页一致，不计算七卡、同比或评分。"""
     q.validate(repo)
-    # 风险只依赖所选期间的排名/金额和截至日8日观察；不能扩大到总览60日比较窗。
+    # 风险只依赖所选期间排名/金额、截至日及其基准观察；不读总览60日比较窗。
     # 保留原可选范围下界，历史选择也不读结束日以后的经营行。
-    start = max(repo.start, min(q.start, q.end - timedelta(days=7)))
+    start = max(repo.start, min(q.start, q.end - timedelta(days=risk_rules.BASELINE_DAYS)))
     rows = repo.rows(start, q.end, risk_only=True)
     period_info, _ = labels(
         [r for r in rows if q.start <= r["business_date"] <= q.end], repo.profiles()
@@ -264,10 +267,12 @@ def risk_feed(repo, q):
         period=dict(start=q.start, end=q.end),
         evaluation_date=q.end,
         latest_data_date=repo.end,
-        baseline_period=dict(start=q.end - timedelta(days=7), end=q.end - timedelta(days=1)),
-        trend_period=dict(start=q.end - timedelta(days=6), end=q.end),
+        baseline_period=dict(
+            start=q.end - timedelta(days=risk_rules.BASELINE_DAYS), end=q.end - timedelta(days=1)
+        ),
+        trend_period=dict(start=q.end - timedelta(days=risk_rules.BASELINE_DAYS - 1), end=q.end),
         generation_method="rules",
-        rule_version="product-risk-traffic-v2",
+        rule_version=risk_rules.RULE_VERSION,
         impact_kind="estimated",
     )
 

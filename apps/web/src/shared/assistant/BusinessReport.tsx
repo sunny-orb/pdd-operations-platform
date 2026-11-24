@@ -2,6 +2,13 @@ import { memo, useState } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { decimalParts, formatFixedDecimal } from "../format/decimal";
 import type { BusinessReport } from "./contracts";
+import {
+  domainNames,
+  hasTrend,
+  questionMetric,
+  trendPoints,
+  type ReportMode,
+} from "./reportPresentation";
 
 type Unit = BusinessReport["facts"][number]["unit"];
 function display(value: unknown, unit: Unit) {
@@ -24,16 +31,38 @@ function display(value: unknown, unit: Unit) {
 export const BusinessReportView = memo(function BusinessReportView({
   report,
   showChart,
+  mode = "default",
+  question = "",
 }: {
   report: BusinessReport;
   showChart: boolean;
+  mode?: ReportMode;
+  question?: string;
 }) {
   const [selected, setSelected] = useState("");
-  const series = report.series.find((item) => item.key === selected) ?? report.series[0];
+  const available = report.series.filter((item) => item.unit !== "text" && hasTrend(item.points));
+  const series =
+    available.find((item) => item.key === selected) ?? questionMetric(available, question);
+  const Details = mode === "evidence" ? "div" : "details";
+  if (mode === "chart" && (!series || !showChart)) return null;
   return (
-    <section className="assistant-report" aria-label={report.title + "数据"}>
+    <section
+      className={
+        mode === "default"
+          ? "assistant-report"
+          : mode === "chart"
+            ? "assistant-trend"
+            : "assistant-evidence-report"
+      }
+      aria-label={report.title + "数据"}
+    >
       <header>
         <strong>{report.title}</strong>
+        {mode === "evidence" &&
+          domainNames[report.domain] &&
+          domainNames[report.domain] !== report.title && (
+            <small>{domainNames[report.domain]}</small>
+          )}
         {report.period && (
           <small>
             {report.period.date_from} 至 {report.period.date_to}
@@ -49,7 +78,7 @@ export const BusinessReportView = memo(function BusinessReportView({
               value={series.key}
               onChange={(event) => setSelected(event.target.value)}
             >
-              {report.series.map((item) => (
+              {available.map((item) => (
                 <option key={item.key} value={item.key}>
                   {item.label}
                 </option>
@@ -62,16 +91,7 @@ export const BusinessReportView = memo(function BusinessReportView({
               height={130}
               initialDimension={{ width: 280, height: 130 }}
             >
-              <LineChart
-                data={series.points.map((point) => ({
-                  date: point.date,
-                  raw: point.value,
-                  value:
-                    point.value == null
-                      ? null
-                      : Number(point.value) * (series.unit === "percent" ? 100 : 1),
-                }))}
-              >
+              <LineChart data={trendPoints(series.points, series.unit === "percent")}>
                 <XAxis
                   dataKey="date"
                   tickFormatter={(value: string) => value.slice(5)}
@@ -90,7 +110,7 @@ export const BusinessReportView = memo(function BusinessReportView({
                   dataKey="value"
                   stroke="#2167b9"
                   strokeWidth={2}
-                  dot={false}
+                  dot={{ r: 2, fill: "#2167b9" }}
                   connectNulls={false}
                   isAnimationActive={false}
                 />
@@ -99,67 +119,97 @@ export const BusinessReportView = memo(function BusinessReportView({
           </div>
         </>
       )}
-      <details>
-        <summary>查看指标与数据依据</summary>
-        {report.facts.length > 0 && (
-          <table>
-            <tbody>
-              {report.facts.map((item, index) => (
-                <tr key={item.key + index}>
-                  <th>
-                    {item.label}
-                    {item.reason && <small>{item.reason}</small>}
-                  </th>
-                  <td>{display(item.value, item.unit)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-        {report.tables.map((table, index) => (
-          <div className="assistant-data-table" key={index}>
-            <table>
-              <caption>{table.title}</caption>
-              <thead>
-                <tr>
-                  {table.columns
-                    .filter((column) => column.key !== "listing_id")
-                    .map((column) => (
-                      <th key={column.key}>{column.label}</th>
-                    ))}
-                </tr>
-              </thead>
-              <tbody>
-                {table.rows.map((row, i) => (
-                  <tr key={i}>
+      {mode !== "chart" && (
+        <Details>
+          {mode === "default" && <summary>查看指标与数据依据</summary>}
+          {report.facts.length > 0 && (
+            <div className="assistant-data-table">
+              <table>
+                <tbody>
+                  {report.facts.map((item, index) => (
+                    <tr key={item.key + index}>
+                      <th>
+                        {item.label}
+                        {item.reason && <small>{item.reason}</small>}
+                      </th>
+                      <td>{display(item.value, item.unit)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {report.tables.map((table, index) => (
+            <div className="assistant-data-table" key={index}>
+              <table>
+                <caption>{table.title}</caption>
+                <thead>
+                  <tr>
                     {table.columns
                       .filter((column) => column.key !== "listing_id")
                       .map((column) => (
-                        <td key={column.key}>{display(row[column.key], column.unit)}</td>
+                        <th key={column.key}>{column.label}</th>
                       ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-            {table.total != null && (
-              <small>
-                {table.rows.length
-                  ? "显示第" + (table.offset + 1) + "—" + (table.offset + table.rows.length) + "条"
-                  : "当前没有匹配记录"}
-                ，共{table.total}条
-              </small>
-            )}
-          </div>
-        ))}
-        <details>
-          <summary>来源与口径</summary>
-          <p>{report.source}</p>
-          {report.notes.map((note, i) => (
-            <p key={i}>{note}</p>
+                </thead>
+                <tbody>
+                  {table.rows.map((row, i) => (
+                    <tr key={i}>
+                      {table.columns
+                        .filter((column) => column.key !== "listing_id")
+                        .map((column) => (
+                          <td key={column.key}>{display(row[column.key], column.unit)}</td>
+                        ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {table.total != null && (
+                <small>
+                  {table.rows.length
+                    ? "显示第" +
+                      (table.offset + 1) +
+                      "—" +
+                      (table.offset + table.rows.length) +
+                      "条"
+                    : "当前没有匹配记录"}
+                  ，共{table.total}条
+                </small>
+              )}
+            </div>
           ))}
-          <small>数据版本 {report.data_version ?? "当前状态"}</small>
-        </details>
-      </details>
+          {mode === "evidence" &&
+            report.series.map((item) => (
+              <div className="assistant-data-table" key={item.key}>
+                <table>
+                  <caption>{item.label}逐日明细</caption>
+                  <thead>
+                    <tr>
+                      <th>日期</th>
+                      <th>{item.label}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {item.points.map((point, index) => (
+                      <tr key={index}>
+                        <th>{point.date}</th>
+                        <td>{display(point.value, item.unit)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          <Details>
+            {mode === "default" && <summary>来源与口径</summary>}
+            <p>{report.source}</p>
+            {report.notes.map((note, i) => (
+              <p key={i}>{note}</p>
+            ))}
+            <small>数据版本 {report.data_version ?? "当前状态"}</small>
+          </Details>
+        </Details>
+      )}
     </section>
   );
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Link, MemoryRouter } from "react-router-dom";
 import { AssistantPageContext, AnalyzeProduct } from "./AssistantContext";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -71,6 +71,120 @@ it("收起、切页后保留草稿，显式选择才把对话范围切到推广"
   expect(screen.getByText("推广分析")).toBeTruthy();
 });
 
+it.each([true, false])(
+  "售后页讨论商品规则后按已确认主题给商品建议，新对话恢复售后建议：explanation=%s",
+  async (withExplanation) => {
+    vi.stubGlobal("fetch", (url: string) =>
+      Promise.resolve({
+        ok: true,
+        json: async () =>
+          url.endsWith("/models")
+            ? { models: ["m"] }
+            : {
+                ...answer,
+                subject: null,
+                answer: "商品严重流量下滑规则已说明",
+                query_context: {
+                  domain: withExplanation ? "aftersales" : "products",
+                  versions: {},
+                  ...(withExplanation ? { explanation: { view: "products" } } : {}),
+                },
+              },
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/aftersales"]}>
+        <AssistantWorkspace>
+          <AssistantPageContext
+            page="售后分析"
+            subject={null}
+            context={{ domain: "aftersales", report_id: "report-2" }}
+          />
+          <AssistantEntry />
+        </AssistantWorkspace>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
+    expect(
+      within(screen.getByLabelText("建议问题")).getByRole("button", {
+        name: "当前报告退款情况怎么样？",
+      }),
+    ).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "商品严重流量下滑阈值" } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+    await screen.findByText("商品严重流量下滑规则已说明");
+    const suggestions = within(screen.getByLabelText("建议问题"));
+    expect(suggestions.getByRole("button", { name: "当前期间哪些商品有经营风险？" })).toBeTruthy();
+    expect(suggestions.queryByRole("button", { name: "当前报告退款情况怎么样？" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+    expect(
+      within(screen.getByLabelText("建议问题")).getByRole("button", {
+        name: "当前报告退款情况怎么样？",
+      }),
+    ).toBeTruthy();
+  },
+);
+
+it.each([
+  { domain: "aftersales", suggestion: "当前报告退款情况怎么样？" },
+  { domain: "promotion_store", suggestion: "当前期间推广投产和花费怎么样？" },
+])("保留选款讨论$domain时显示该业务建议，回当前页恢复单款建议", async ({ domain, suggestion }) => {
+  vi.stubGlobal("fetch", (url: string) =>
+    Promise.resolve({
+      ok: true,
+      json: async () =>
+        url.endsWith("/models")
+          ? { models: ["m"] }
+          : {
+              ...answer,
+              answer: "跨域问题已回答",
+              query_context: { domain, versions: {} },
+            },
+    }),
+  );
+  renderAssistant();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "看看这个业务的情况" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  await screen.findByText("跨域问题已回答");
+  const suggestions = within(screen.getByLabelText("建议问题"));
+  expect(suggestions.getByRole("button", { name: suggestion })).toBeTruthy();
+  expect(suggestions.queryByRole("button", { name: "近期表现" })).toBeNull();
+  expect(screen.getByText("测试商品甲")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "使用当前页范围 · 商品数据" }));
+  expect(
+    within(screen.getByLabelText("建议问题")).getByRole("button", {
+      name: "这款近 7 天表现怎样？",
+    }),
+  ).toBeTruthy();
+});
+
+it("单款商品推广主题继续提供单款追问并发送原问题", async () => {
+  const request = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      ...answer,
+      query_context: {
+        domain: "products",
+        versions: {},
+        explanation: { view: "promotion_product" },
+      },
+    }),
+  });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  fireEvent.click(screen.getByRole("button", { name: "这款近 7 天表现怎样？" }));
+  await screen.findByText(answer.answer);
+  fireEvent.click(
+    within(screen.getByLabelText("建议问题")).getByRole("button", { name: "异常在哪" }),
+  );
+  expect(JSON.parse(request.mock.calls[1][1].body).question).toBe("这款的异常主要在哪？");
+  await screen.findAllByText(answer.answer);
+});
+
 it("停止后重新请求真实回答，追问带上已完成的对话", async () => {
   const request = vi
     .fn()
@@ -102,6 +216,423 @@ it("停止后重新请求真实回答，追问带上已完成的对话", async (
   expect(request.mock.calls[1][0]).toBe("/api/v1/assistant/stop");
   expect(JSON.parse(request.mock.calls[3][1].body).history[0].answer).toBe("成交额下降了两成。");
   await screen.findAllByText("成交额下降了两成。");
+});
+
+it.each(["no_evidence", "need_selection"])(
+  "未解决的 %s 问题随短追问传递，完成后继续保留已答历史",
+  async (status) => {
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ ...answer, answer: "请明确要解释的规则", status, subject: null }),
+      })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ ...answer, answer: "已读取生效规则", subject: null }),
+      });
+    vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+      url.endsWith("/models")
+        ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+        : request(url, options),
+    );
+    renderAssistant(false);
+    const ask = (value: string) => {
+      fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+    };
+    ask("推广低投产的阈值是多少？");
+    await screen.findByText("请明确要解释的规则");
+    ask("我问你呢");
+    expect(JSON.parse(request.mock.calls[1][1].body).history).toEqual([
+      {
+        page: "商品数据",
+        question: "推广低投产的阈值是多少？",
+        answer: "请明确要解释的规则",
+        status,
+      },
+    ]);
+    await screen.findByText("已读取生效规则");
+    ask("这个阈值适用于哪些样本？");
+    expect(JSON.parse(request.mock.calls[2][1].body).history).toEqual([
+      {
+        page: "商品数据",
+        question: "推广低投产的阈值是多少？",
+        answer: "请明确要解释的规则",
+        status,
+      },
+      {
+        page: "商品数据",
+        question: "我问你呢",
+        answer: "已读取生效规则",
+        status: "answered",
+      },
+    ]);
+    await screen.findAllByText("已读取生效规则");
+  },
+);
+
+it("未解决问题与已答历史一起只传最近六项", async () => {
+  let sequence = 0;
+  const request = vi.fn().mockImplementation(async () => {
+    sequence += 1;
+    return {
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: `第${sequence}次回答`,
+        status: sequence % 2 ? "no_evidence" : "answered",
+        subject: null,
+      }),
+    };
+  });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant(false);
+  for (let index = 1; index <= 8; index += 1) {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: `第${index}个问题` } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+    await screen.findByText(`第${index}次回答`);
+  }
+  expect(JSON.parse(request.mock.calls[7][1].body).history).toEqual([
+    { page: "商品数据", question: "第2个问题", answer: "第2次回答", status: "answered" },
+    { page: "商品数据", question: "第3个问题", answer: "第3次回答", status: "no_evidence" },
+    { page: "商品数据", question: "第4个问题", answer: "第4次回答", status: "answered" },
+    { page: "商品数据", question: "第5个问题", answer: "第5次回答", status: "no_evidence" },
+    { page: "商品数据", question: "第6个问题", answer: "第6次回答", status: "answered" },
+    { page: "商品数据", question: "第7个问题", answer: "第7次回答", status: "no_evidence" },
+  ]);
+});
+
+it("已选商品缺少规则时保留选款与未答问题，并携带服务端解释主题", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: "尚未取得该规则",
+        status: "no_evidence",
+        subject: null,
+        query_context: {
+          domain: "products",
+          versions: {},
+          explanation: { view: "promotion_product", report_id: null },
+        },
+      }),
+    })
+    .mockResolvedValue({ ok: true, json: async () => answer });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "这款异常阈值是多少？" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  await screen.findByText("尚未取得该规则");
+  expect(screen.getByText("测试商品甲")).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "我问你呢" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  expect(JSON.parse(request.mock.calls[1][1].body)).toMatchObject({
+    context: {
+      listing_id: "s/A",
+      shop_id: "s",
+      explanation: { view: "promotion_product", report_id: null },
+    },
+    history: [{ question: "这款异常阈值是多少？", status: "no_evidence" }],
+  });
+  await screen.findByText(answer.answer);
+});
+
+it("未答追问的新解释主题不被更早已答主题覆盖", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: "商品规则已说明",
+        query_context: { domain: "products", versions: {}, explanation: { view: "products" } },
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: "推广规则尚未取得",
+        status: "no_evidence",
+        subject: null,
+        query_context: {
+          domain: "products",
+          versions: {},
+          explanation: { view: "promotion_product" },
+        },
+      }),
+    })
+    .mockResolvedValue({ ok: true, json: async () => answer });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  const ask = (value: string) => {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  ask("商品异常怎么判？");
+  await screen.findByText("商品规则已说明");
+  ask("推广阈值呢？");
+  await screen.findByText("推广规则尚未取得");
+  ask("我问你呢");
+  expect(JSON.parse(request.mock.calls[2][1].body).context.explanation).toEqual({
+    view: "promotion_product",
+  });
+  await screen.findByText(answer.answer);
+});
+
+it("新报告经营结果显式清除旧解释主题，追问阈值不带旧报告引用", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        subject: null,
+        answer: "旧报告规则已解释",
+        query_context: {
+          domain: "aftersales",
+          report_id: "old-report",
+          versions: { aftersales: "av2" },
+          explanation: { view: "aftersales", report_id: "old-report" },
+        },
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        subject: null,
+        answer: "新报告经营已查询",
+        query_context: {
+          domain: "aftersales",
+          report_id: "new-report",
+          versions: { aftersales: "av2" },
+          explanation: null,
+        },
+      }),
+    })
+    .mockResolvedValue({ ok: true, json: async () => ({ ...answer, subject: null }) });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  render(
+    <MemoryRouter initialEntries={["/aftersales"]}>
+      <AssistantWorkspace>
+        <AssistantPageContext
+          page="售后分析"
+          subject={null}
+          context={{
+            domain: "aftersales",
+            report_id: "new-report",
+            versions: { aftersales: "av2" },
+          }}
+        />
+        <AssistantEntry />
+      </AssistantWorkspace>
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
+  const ask = (value: string) => {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  ask("解释旧报告规则");
+  await screen.findByText("旧报告规则已解释");
+  ask("查新报告经营");
+  await screen.findByText("新报告经营已查询");
+  expect(screen.queryByRole("button", { name: "使用当前页范围 · 售后分析" })).toBeNull();
+  ask("它的阈值呢");
+  const context = JSON.parse(request.mock.calls[2][1].body).context;
+  expect(context.report_id).toBe("new-report");
+  expect(context.explanation).toBeUndefined();
+  await screen.findByText(answer.answer);
+});
+
+it("明确换款无结果后不从旧经营报告恢复商品和七天期间", async () => {
+  const report = {
+    kind: "product_performance",
+    product,
+    period: {
+      date_from: "2026-11-14",
+      date_to: "2026-11-20",
+      previous_from: "2026-11-07",
+      previous_to: "2026-11-13",
+    },
+    metrics: [],
+    series: [],
+    data_version: "pv1",
+    evidence: { source: "商品经营" },
+    coverage: {
+      current: { observed_days: 7, expected_days: 7, missing_dates: [] },
+      previous: { observed_days: 7, expected_days: 7, missing_dates: [] },
+      complete_through: "2026-11-20",
+    },
+  };
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        reports: [report],
+        query_context: {
+          domain: "products",
+          versions: { products: "pv1" },
+          date_from: "2026-11-14",
+          date_to: "2026-11-20",
+          explanation: { view: "products" },
+        },
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: "没有找到新款",
+        status: "no_evidence",
+        subject: null,
+        subject_cleared: true,
+        query_context: { domain: "products", versions: { products: "pv1" } },
+      }),
+    })
+    .mockResolvedValue({ ok: true, json: async () => ({ ...answer, subject: null }) });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  const ask = (value: string) => {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  ask("这款近七天呢？");
+  await screen.findByText(answer.answer);
+  ask("换成不存在的新款");
+  await screen.findByText("没有找到新款");
+  ask("我问你呢");
+  const body = JSON.parse(request.mock.calls[2][1].body);
+  expect(body.context.listing_id).toBeUndefined();
+  expect(body.context.date_from).toBeUndefined();
+  expect(body.context.date_to).toBeUndefined();
+  expect(body.context.explanation).toBeUndefined();
+  expect(body.history).toEqual([
+    {
+      page: "商品数据",
+      question: "换成不存在的新款",
+      answer: "没有找到新款",
+      status: "no_evidence",
+    },
+  ]);
+  await screen.findAllByText(answer.answer);
+});
+
+it("切换商品和新对话都清除未解决问题", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ...answer, answer: "尚未取得甲款规则", status: "no_evidence" }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ...answer,
+        answer: "尚未取得乙款规则",
+        status: "no_evidence",
+        subject: other,
+      }),
+    })
+    .mockResolvedValue({ ok: true, json: async () => ({ ...answer, subject: null }) });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "这款阈值是多少？" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  await screen.findByText("尚未取得甲款规则");
+  fireEvent.click(screen.getByRole("button", { name: "分析这款" }));
+  expect(JSON.parse(request.mock.calls[1][1].body).history).toEqual([]);
+  await screen.findByText("尚未取得乙款规则");
+  fireEvent.click(screen.getByRole("button", { name: "新对话" }));
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "我问你呢" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  expect(JSON.parse(request.mock.calls[2][1].body).history).toEqual([]);
+  await screen.findByText(answer.answer);
+});
+
+it.each(["stopped", "error"])("%s 流式半段不进入后续追问历史", async (state) => {
+  let channel!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      channel = controller;
+    },
+  });
+  const request = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ ...answer, answer: "需要继续核对阈值", status: "no_evidence" }),
+    })
+    .mockResolvedValueOnce(
+      new Response(stream, { headers: { "content-type": "text/event-stream" } }),
+    )
+    .mockResolvedValue({ ok: true, json: async () => answer });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : url.endsWith("/stop")
+        ? Promise.resolve({ ok: true })
+        : request(url, options),
+  );
+  renderAssistant();
+  const ask = (value: string) => {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  ask("低投产阈值是多少？");
+  await screen.findByText("需要继续核对阈值");
+  ask("我问你呢");
+  channel.enqueue(new TextEncoder().encode('data: {"type":"delta","text":"未完成的阈值解释"}\n\n'));
+  await screen.findByText("未完成的阈值解释");
+  if (state === "stopped") {
+    fireEvent.click(screen.getByRole("button", { name: "停止" }));
+    channel.close();
+    await screen.findByText("已停止回答");
+  } else {
+    channel.error(new Error("连接中断"));
+    await screen.findByText("连接中断");
+  }
+  expect(document.querySelector(".assistant-turn:last-of-type .assistant-evidence")).toBeNull();
+  ask("继续解释");
+  expect(JSON.parse(request.mock.calls[2][1].body).history).toEqual([
+    {
+      page: "商品数据",
+      question: "低投产阈值是多少？",
+      answer: "需要继续核对阈值",
+      status: "no_evidence",
+    },
+  ]);
+  await screen.findByText(answer.answer);
 });
 
 it("助手宽度随边界方向变化，收起、切页、再展开仍保留", () => {
@@ -420,6 +951,7 @@ it("单款追问通用看板后保留已选款与完整对话，明确无证据�
         ...answer,
         answer: "查不到这款的更多证据",
         status: "no_evidence",
+        subject_cleared: true,
         subject: null,
       }),
     });

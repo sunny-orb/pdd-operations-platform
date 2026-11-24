@@ -99,7 +99,54 @@ def _shop(value, meta):
 
 
 async def read(run, request):
-    from .chat import Clarify
+    from .chat import Clarify, ExplanationContext
+
+    if request.capability == "rule_definitions":
+        # 规则依据有独立版本；不能拿指标定义hash或页面经营日期约束纯解释。
+        params = request.model_dump(
+            include={"view", "keyword", "report_id", "limit", "offset"}, exclude_none=True
+        )
+        modules = {"all", "products", "promotion_store", "promotion_product", "sales", "aftersales"}
+        context = run.scope.explanation
+        params.setdefault(
+            "view",
+            context.view if context else run.scope.domain if run.scope.domain in modules else "all",
+        )
+        if (
+            context
+            and context.report_id
+            and params["view"] in {"all", "aftersales"}
+            and "report_id" not in params
+        ):
+            params["report_id"] = context.report_id
+        if (
+            run.scope.report_id
+            and params["view"] in {"all", "aftersales"}
+            and "report_id" not in params
+        ):
+            params["report_id"] = run.scope.report_id
+        key = ("rules", json.dumps(params, sort_keys=True))
+        if key not in run.report_cache:
+            result = await run.query(catalog.read, request.capability, params)
+            check_versions(run, result)
+            # 缺定义仍保留已核验的解释主题，不把它误当作已取得的规则内容。
+            run.scope = run.scope.model_copy(
+                update={
+                    "explanation": ExplanationContext(
+                        view=result["scope"]["view"], report_id=result["scope"].get("report_id")
+                    )
+                }
+            )
+            rows = [row for part in result["tables"] for row in part["rows"]]
+            if rows and all(row.get("state") == "not_defined" for row in rows):
+                raise Clarify("；".join(str(row["condition"]) for row in rows[:3]))
+            if not rows:
+                raise Clarify(
+                    "当前没有找到这项适用的生效规则，不能确认阈值。"
+                    "请指出提醒名称；售后问题也可以选择一份已发布报告。"
+                )
+            run.report_cache[key] = result
+        return run.report_cache[key]
 
     mode = (
         request.mode
@@ -131,6 +178,14 @@ async def read(run, request):
     if expected and expected != params["data_version"]:
         raise BoardError("DATA_VERSION_CHANGED", 409)
     same_domain = run.scope.domain == domain
+    if (
+        domain == "aftersales"
+        and request.report_id is None
+        and run.scope.explanation
+        and run.scope.explanation.view in {"all", "aftersales"}
+        and run.scope.explanation.report_id
+    ):
+        params["report_id"] = run.scope.explanation.report_id
     explicitly_all = bool(
         re.search(
             r"全部店|所有店|全店铺|全平台|哪个店|哪些店|各店|店铺排名",
@@ -288,7 +343,7 @@ def model_view(report, question):
         columns = [
             column
             for column in table["columns"]
-            if column["key"] not in ("rule_set_id", "rule_version", "data_version")
+            if column["key"] not in ("rule_set_id", "data_version")
         ]
         compact.append(
             dict(
@@ -302,11 +357,7 @@ def model_view(report, question):
                 rows=[[row.get(column["key"]) for column in columns] for row in table["rows"]],
             )
         )
-    scope = {
-        key: value
-        for key, value in report["scope"].items()
-        if key not in ("rule_set_id", "rule_version")
-    }
+    scope = {key: value for key, value in report["scope"].items() if key != "rule_set_id"}
     return dict(
         title=report["title"],
         period=report["period"],
@@ -316,4 +367,9 @@ def model_view(report, question):
         notes=report["notes"],
         series=report["series"],
         table_format="rows每行的值与columns顺序一一对应；total是完整数量，offset为已跳过行数",
+        rule_reference={
+            "source": report["source"],
+            "data_version": report["data_version"],
+            "rule_version": report["scope"].get("rule_version"),
+        },
     )

@@ -17,6 +17,8 @@ from .query import days, meta, number, ratio, total
 from .repository import read_snapshot
 from .source_policy import APPROVED_START, SHOPS, calendar_through
 
+RATING_MIN, RATING_MAX, RATING_SCALE = 0, 1, 100
+
 
 def source_info(snapshot, code):
     cached = snapshot.setdefault("source_info", {})
@@ -378,16 +380,16 @@ class SalesDetails:
 
             def point(r):
                 value = r["source_score"]
-                valid = value is not None and 0 <= value <= 1
+                valid = value is not None and RATING_MIN <= value <= RATING_MAX
                 return dict(
                     shop_id=r["shop_id"],
                     date=str(r["rating_date"]),
                     raw_score=number(value),
-                    score=number(value * 100) if valid else None,
+                    score=number(value * RATING_SCALE) if valid else None,
                     state="observed"
                     if valid
                     else "invalid_score"
-                    if value is not None and value < 0
+                    if value is not None and value < RATING_MIN
                     else "legacy_basis"
                     if value is not None
                     else "field_null",

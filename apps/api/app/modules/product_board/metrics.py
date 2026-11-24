@@ -3,9 +3,11 @@
 from datetime import timedelta
 from decimal import Decimal, Inexact, localcontext
 
+from . import risk_rules
+
 D = Decimal
-# 香草流量门槛：流量下滑的当日/基准均至少100，其他预警仅要求当日高于100。
-RISK_TRAFFIC_THRESHOLD = 100
+# 保留既有导入名；计算读取共用定义，流量下滑含边界，其他预警为严格大于。
+RISK_TRAFFIC_THRESHOLD = risk_rules.TRAFFIC_MIN
 METRICS = (
     ("revenue", "交易金额", "currency"),
     ("visitors", "商品访客数", "number"),
@@ -227,38 +229,43 @@ def risk_window_ready(rows, end):
         and all(
             byday[day].get(f) is not None and byday[day][f] >= 0 for f in ("visitors", "orders")
         )
-        for day in (end - timedelta(days=i) for i in range(8))
+        for day in (end - timedelta(days=i) for i in range(risk_rules.BASELINE_DAYS + 1))
     )
 
 
 def _risk(rows, end, top):
     """命中首分支即返回；基准为T-7..T-1，趋势仅T-6..T，损失是规则估算。"""
     byday = {r["business_date"]: r for r in rows}
-    dates = [end - timedelta(days=i) for i in range(7, -1, -1)]
+    dates = [end - timedelta(days=i) for i in range(risk_rules.BASELINE_DAYS, -1, -1)]
     if not risk_window_ready(rows, end):
         return None
     past = [byday[d] for d in dates[:-1]]
     current = byday[end]
     v, o = D(current["visitors"]), D(current["orders"])
     pv, po = total(past, "visitors"), total(past, "orders")
-    avg = pv / 7
+    avg = pv / risk_rules.BASELINE_DAYS
     cb = divide(po, pv)
     cv = divide(o, v)
     drop = compare(v, avg)
     label = priority = score = kind = field = None
-    if v > RISK_TRAFFIC_THRESHOLD and o == 0:
+    if v > risk_rules.TRAFFIC_MIN and o == 0:
         label, priority, score, now, baseline, kind, field = (
             "有流量无成交",
             "P1",
             100,
             o,
-            po / 7,
+            po / risk_rules.BASELINE_DAYS,
             "number",
             "orders",
         )
         reasons = ["有流量无成交", "商品承接待核查"]
         action = "核查价格、优惠、评价、详情页和商品可售状态。"
-    elif v > RISK_TRAFFIC_THRESHOLD and cb and cv is not None and cv <= cb * D(".7"):
+    elif (
+        v > risk_rules.TRAFFIC_MIN
+        and cb
+        and cv is not None
+        and cv <= cb * risk_rules.CONVERSION_SEVERE_FACTOR
+    ):
         label, priority, score, now, baseline, kind, field = (
             "严重订单转化下滑",
             "P1",
@@ -271,13 +278,13 @@ def _risk(rows, end, top):
         reasons = ["订单转化率下滑", "价格/详情页待核查"]
         action = "优先复核价格、优惠、主图、评价与详情页承接。"
     elif (
-        v >= RISK_TRAFFIC_THRESHOLD
-        and avg >= RISK_TRAFFIC_THRESHOLD
+        v >= risk_rules.TRAFFIC_MIN
+        and avg >= risk_rules.TRAFFIC_MIN
         and drop is not None
-        and drop <= D("-.4")
-        and avg - v >= 30
+        and drop <= risk_rules.TRAFFIC_SEVERE_CHANGE
+        and avg - v >= risk_rules.TRAFFIC_SEVERE_LOSS
     ):
-        priority = "P0" if top and po >= 10 else "P1"
+        priority = "P0" if top and po >= risk_rules.TOP_PREVIOUS_ORDERS_MIN else "P1"
         label, score, now, baseline, kind, field = (
             "爆品严重流量下滑" if priority == "P0" else "严重流量下滑",
             95 if priority == "P0" else 85,
@@ -288,7 +295,12 @@ def _risk(rows, end, top):
         )
         reasons = ["访客显著下滑", "活动/素材/流量入口待核查"]
         action = "检查活动状态、素材、推广计划与自然流量入口变化。"
-    elif v > RISK_TRAFFIC_THRESHOLD and cb and cv is not None and cv <= cb * D(".85"):
+    elif (
+        v > risk_rules.TRAFFIC_MIN
+        and cb
+        and cv is not None
+        and cv <= cb * risk_rules.CONVERSION_MODERATE_FACTOR
+    ):
         label, priority, score, now, baseline, kind, field = (
             "中度订单转化下滑",
             "P2",
@@ -301,11 +313,11 @@ def _risk(rows, end, top):
         reasons = ["订单转化率下滑", "商品承接待优化"]
         action = "复核优惠、详情页承接和商品可售状态，隔日复盘。"
     elif (
-        v >= RISK_TRAFFIC_THRESHOLD
-        and avg >= RISK_TRAFFIC_THRESHOLD
+        v >= risk_rules.TRAFFIC_MIN
+        and avg >= risk_rules.TRAFFIC_MIN
         and drop is not None
-        and drop <= D("-.2")
-        and avg - v >= 20
+        and drop <= risk_rules.TRAFFIC_MODERATE_CHANGE
+        and avg - v >= risk_rules.TRAFFIC_MODERATE_LOSS
     ):
         label, priority, score, now, baseline, kind, field = (
             "中度流量下滑",

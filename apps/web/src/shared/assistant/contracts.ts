@@ -8,7 +8,12 @@ const product = z.object({
   shop_name: z.string().nullable(),
 });
 export type AssistantProduct = z.infer<typeof product>;
+const explanationContext = z.object({
+  view: z.enum(["all", "products", "promotion_store", "promotion_product", "sales", "aftersales"]),
+  report_id: z.string().nullable().optional(),
+});
 export type PageContext = {
+  explanation?: z.infer<typeof explanationContext> | null;
   domain?:
     | "all"
     | "products"
@@ -169,6 +174,7 @@ export const chatAnswer = z.object({
   model: z.string(),
   evidence: z.string(),
   subject: product.nullable(),
+  subject_cleared: z.boolean().default(false),
   candidates: z.array(product),
   reports: z.array(z.union([report, businessReport])),
   query_context: z
@@ -185,6 +191,7 @@ export const chatAnswer = z.object({
           "data_status",
         ])
         .optional(),
+      explanation: explanationContext.nullish(),
       versions: z.record(z.string(), z.string()),
       date_from: z.string().optional(),
       date_to: z.string().optional(),

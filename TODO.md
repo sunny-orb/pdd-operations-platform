@@ -4,6 +4,9 @@
 
 ## 当前任务与范围
 
+- [x] 11/24修复规则阈值、未答追问与全局解释主题，接入第25类生效定义；统一折叠依据及相关单主图，保留选款／跨页／流式行为。五页跨域真实模型、565项前端和后端专项已验证；全量与限制见[验收](docs/validation/2026-11-24.md#assistant-explanations-ux)，未部署。
+- [x] 11/24助手正文改为Markdown排版，保留逐帧显示；前端514项、检查／构建与桌面／窄屏浏览器通过。动态飞书SOP接入已补方案，尚未开发。[验收](docs/validation/2026-11-24.md#assistant-markdown)、[SOP方案](docs/implementation/ai-assistance.md#sop-dynamic-plan)。
+
 - [x] 11/24右侧助手首版已提交推送e8bc15e；本轮扩展五页24类只读能力、逐页真实模型及浏览器联调，保留SSE和平滑显示，修复多选与跨域追问范围。[测试题与后续建议](docs/implementation/ai-assistance.md#assistant-all-pages-20261124)、[验收](docs/validation/2026-11-24.md#assistant-all-pages)。仅本机，未部署。
 - [ ] 运营按同批问题试用；优先补动作型SOP场景读取。公司身份、数据授权、费用与维护负责人在共享上线前落实；知识库平台及MCP按第二个实际接入需求再议。
 

@@ -215,7 +215,7 @@ def test_catalog_lists_every_implemented_capability_and_curated_formula():
         | set(board_tools.PRODUCT_CAPABILITIES)
         | set(board_tools.PROMOTION_CAPABILITIES)
         | set(sales_tools.CAPABILITIES)
-        | {"metric_definitions"}
+        | {"metric_definitions", "rule_definitions"}
     )
     assert set(get_args(catalog.Capability)) == set(catalog.CAPABILITIES) == implemented
     result = definitions.read(None, "metric_definitions", {"keyword": "转化率"})

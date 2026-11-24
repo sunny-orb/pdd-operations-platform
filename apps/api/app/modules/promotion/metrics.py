@@ -28,6 +28,15 @@ SPECS = {
 }
 
 
+RATIO_SPECS = (
+    ("roi", "attributed_revenue", "spend"),
+    ("net_roi", "net_attributed_revenue", "spend"),
+    ("ctr", "clicks", "impressions"),
+    ("cvr", "attributed_deals", "clicks"),
+    ("cpc", "spend", "clicks"),
+)
+
+
 def metric(value, key, status="observed", reason=None, **extra):
     label, kind = SPECS[key]
     return dict(
@@ -70,13 +79,7 @@ def aggregate(rows, *, strict=False, cross=False, independent=False):
             valid_rows=str(len(valid)),
             observed_rows=str(len(rows)),
         )
-    for key, numerator, denominator in (
-        ("roi", "attributed_revenue", "spend"),
-        ("net_roi", "net_attributed_revenue", "spend"),
-        ("ctr", "clicks", "impressions"),
-        ("cvr", "attributed_deals", "clicks"),
-        ("cpc", "spend", "clicks"),
-    ):
+    for key, numerator, denominator in RATIO_SPECS:
         paired = [
             r for r in rows if r.get(numerator) is not None and r.get(denominator) is not None
         ]
@@ -151,4 +154,5 @@ def definition_revision():
     return hashlib.sha256(
         Path(__file__).read_bytes()
         + Path(__file__).parents[1].joinpath("product_board/metrics.py").read_bytes()
+        + Path(__file__).parents[1].joinpath("product_board/risk_rules.py").read_bytes()
     ).hexdigest()

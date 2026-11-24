@@ -38,13 +38,15 @@ Capability = Literal[
     "weather",
     "data_status",
     "metric_definitions",
+    "rule_definitions",
 ]
 CAPABILITIES = {
+    "rule_definitions": ("definitions", "生效规则的阈值、样本门槛、窗口、优先级、评分及例外"),
     "metric_definitions": ("definitions", "指标分子分母、经营/评分/推广口径差异"),
-    "products_overview": ("products", "商品经营汇总、排行与变化"),
+    "products_overview": ("products", "商品经营汇总、排行、变化与逐日趋势"),
     "products_risks": ("products", "经营风险和已有SOP核查建议"),
     "products_scores": ("products", "已发布新品评分及分项依据"),
-    "products_days": ("products", "商品逐日明细"),
+    "products_days": ("products", "商品逐日明细表；走势可用products_overview"),
     "products_catalog": ("products", "按条件查商品目录"),
     "promotion_overview": ("promotion", "店铺或商品推广汇总与排行"),
     "promotion_days": ("promotion", "推广逐日走势"),
@@ -79,16 +81,18 @@ def catalog(domain="all"):
             "promotion_spend/promotion_ctr/promotion_roi/refund_rate"
         ),
         "aftersales_analysis": (
-            "view选category/style/mom/yoy/quality/history；"
-            "focus选all/size/quality"
+            "view选category/style/mom/yoy/quality/history；focus选all/size/quality"
         ),
         "data_status": (
-            "view选datasets(截至日)/sources/timeliness/"
-            "history/reconciliation/processing"
+            "view选datasets(截至日)/sources/timeliness/history/reconciliation/processing"
         ),
         "promotion_objects": "view选category/product/shop/flagged/focused",
         "weather": "view可选已发现的publication_id，不传取最新",
         "metric_definitions": "keyword按指标名筛选，比较经营/评分转化率时可用转化率",
+        "rule_definitions": (
+            "view选products/promotion_store/promotion_product/sales/aftersales/all；"
+            "keyword可选具体规则名或ID；售后可带report_id，沿所选报告"
+        ),
     }
     return [
         dict(capability=key, description=label, parameters=hints.get(key, "沿用当前范围，可分页"))
@@ -120,6 +124,10 @@ def describe(engine, domain):
 
 
 def read(engine, capability, params):
+    if capability == "rule_definitions":
+        from .rule_definitions import read as read_rules
+
+        return read_rules(engine, params)
     domain = domain_for(capability, params.get("mode", "product"))
     if domain == "definitions":
         from .definitions import read as read_data

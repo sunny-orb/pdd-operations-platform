@@ -26,6 +26,7 @@ DEFINITION_REVISION = (
             for name in (
                 "query.py",
                 "metrics.py",
+                "risk_rules.py",
                 "repository.py",
                 "read_queries.py",
                 "profile_rules.py",

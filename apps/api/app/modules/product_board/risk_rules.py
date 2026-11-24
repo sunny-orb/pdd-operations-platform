@@ -1,0 +1,16 @@
+"""商品风险共用条件；计算与解释读取同一门槛，保持首个命中分支顺序。"""
+
+from decimal import Decimal
+
+RULE_VERSION = "product-risk-traffic-v2"
+TRAFFIC_MIN = 100
+BASELINE_DAYS = 7
+CONVERSION_SEVERE_FACTOR = Decimal(".7")
+CONVERSION_MODERATE_FACTOR = Decimal(".85")
+TRAFFIC_SEVERE_CHANGE = Decimal("-.4")
+TRAFFIC_MODERATE_CHANGE = Decimal("-.2")
+TRAFFIC_SEVERE_LOSS = 30
+TRAFFIC_MODERATE_LOSS = 20
+TOP_PREVIOUS_ORDERS_MIN = 10
+
+TOP_SHARE = 0.2

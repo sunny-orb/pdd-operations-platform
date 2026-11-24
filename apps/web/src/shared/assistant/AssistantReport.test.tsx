@@ -15,7 +15,7 @@ it("图表可切换指标，明细保留缺值、真实零和百分比单位", (
     product: { listing_id: "s/a", shop_id: "s", name: "测试款", shop_name: "店" },
     period: {
       date_from: "2026-11-02",
-      date_to: "2026-11-03",
+      date_to: "2026-11-04",
       previous_from: "2026-10-31",
       previous_to: "2026-11-01",
     },
@@ -53,13 +53,14 @@ it("图表可切换指标，明细保留缺值、真实零和百分比单位", (
       },
     },
     coverage: {
-      current: { observed_days: 1, expected_days: 2, missing_dates: ["2026-11-03"] },
+      current: { observed_days: 2, expected_days: 3, missing_dates: ["2026-11-03"] },
       previous: { observed_days: 2, expected_days: 2, missing_dates: [] },
       complete_through: null,
     },
     series: [
       { date: "2026-11-02", values: { revenue: "0", conversion: "0.125" } },
       { date: "2026-11-03", values: { revenue: null, conversion: null } },
+      { date: "2026-11-04", values: { revenue: "20", conversion: "0.1" } },
     ],
   };
   class Observer {

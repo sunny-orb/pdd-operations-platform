@@ -6,3 +6,5 @@ psycopg[binary]>=3.3.6,<4
 alembic>=1.14,<2
 PyMySQL>=1.1,<2
 cryptography>=50.0.2,<51
+pydantic-ai-slim[openai]>=2.71,<2.72
+httpx2[socks]>=2.15,<3

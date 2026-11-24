@@ -1,8 +1,10 @@
 """API 应用工厂与统一错误处理。"""
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import AsyncExitStack, asynccontextmanager
 from functools import partial
 from time import perf_counter
 from uuid import uuid4
@@ -18,6 +20,7 @@ from starlette.exceptions import HTTPException
 
 from app.api.aftersales import prewarm_aftersales_overview
 from app.api.aftersales import router as aftersales_router
+from app.api.assistant import router as assistant_router
 from app.api.data_status import router as data_status_router
 from app.api.product_board import prewarm_default_overview
 from app.api.product_board import router as products_router
@@ -75,6 +78,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        application.state.assistant_resources = AsyncExitStack()
+        # 停止生成后，旧的同步 SQL 仍可收尾；后一条查询在同一线程排队。
+        application.state.assistant_query_executor = (
+            application.state.assistant_resources.enter_context(
+                ThreadPoolExecutor(max_workers=1, thread_name_prefix="assistant-query")
+            )
+        )
+        application.state.assistant_agents = {}
+        application.state.assistant_active = None
         application.state.engine = build_engine(configured)
         logger.info("API 启动；数据库配置=%s", application.state.engine is not None)
         try:
@@ -120,11 +132,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 yield
         finally:
+            await application.state.assistant_resources.aclose()
             if application.state.engine is not None:
                 application.state.engine.dispose()
             logger.info("API 已停止")
 
     application = FastAPI(title="拼多多运营平台 API", version="0.1.0", lifespan=lifespan)
+    application.state.assistant_settings = configured
+    application.state.assistant_lock = asyncio.Lock()
     application.state.engine = None
     application.state.product_overview_cache = DefaultOverviewCache()
     application.state.product_daily_overview_cache = DefaultOverviewCache()
@@ -227,6 +242,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return error_response(request, failure.status, failure.code, "经营数据暂不可用，请稍后重试")
 
+    application.include_router(assistant_router)
     application.include_router(router)
     application.include_router(products_router)
     application.include_router(promotion_router)

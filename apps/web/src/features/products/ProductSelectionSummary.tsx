@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Button, Modal, Table } from "antd";
 import { useOptions, type ProductsState } from "./data";
-import type { Scope, ScopeName } from "./scope";
+import { dimensionValues, type Scope, type ScopeName } from "./scope";
+import { AssistantPageContext } from "../../shared/assistant/AssistantContext";
 
 type Props = {
   scope: Scope;
@@ -22,6 +23,11 @@ export function ProductSelectionSummary({ scope, state, name, ready, count }: Pr
   );
   const total = ready ? (count ?? (directoryReady ? String(rows.length) : undefined)) : undefined;
   const listReady = ready && directoryReady && total === String(rows.length);
+  const selectedItem =
+    selected.length === 1 && listReady && rows.length === 1
+      ? result.catalog?.items.find((item) => item.value === selected[0])
+      : undefined;
+  const selectedShops = dimensionValues(scope.shop);
   const chosen = result.data?.selected_products ?? [];
   const title = selected.length
     ? `已选 ${selected.length} 个商品`
@@ -34,6 +40,32 @@ export function ProductSelectionSummary({ scope, state, name, ready, count }: Pr
       className="m1-selection-summary"
       aria-label={`${name === "main" ? "总览" : "明细"}商品范围`}
     >
+      {name === "main" && (
+        <AssistantPageContext
+          page="商品数据"
+          subject={
+            selectedItem
+              ? {
+                  listing_id: selectedItem.value,
+                  shop_id: selectedItem.shop,
+                  name: selectedItem.product_name ?? null,
+                  shop_name:
+                    result.catalog?.shops.find((s) => s.value === selectedItem.shop)?.label ?? null,
+                }
+              : null
+          }
+          context={
+            ready
+              ? {
+                  date_from: scope.from,
+                  date_to: scope.to,
+                  shop_id: selectedShops.length === 1 ? selectedShops[0] : undefined,
+                  product_version: state.version,
+                }
+              : {}
+          }
+        />
+      )}
       <span>商品范围</span>
       <b>{title}</b>
       {selected.length > 0 && directoryReady && (

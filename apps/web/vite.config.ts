@@ -45,6 +45,8 @@ export default defineConfig((env) => ({
   },
   server: {
     proxy: {
+      // 开发看板代理生产查询时，个人模型仍只走本机 API。
+      "/api/v1/assistant/": localApiTarget,
       "/api": resolveApiProxy(env),
       "/health": localApiTarget,
     },

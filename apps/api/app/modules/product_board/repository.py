@@ -89,6 +89,13 @@ def source_sync_status(connection, versions):
     return attempt, success
 
 
+def query_version(ids):
+    """商品页查询版本包含经营、资料及当时已发布的可选评分头。"""
+    return hashlib.sha256(
+        json.dumps({**ids, "definition": DEFINITION_REVISION}, sort_keys=True).encode()
+    ).hexdigest()
+
+
 @contextmanager
 def snapshot(engine, token=None):
     if engine is None:
@@ -110,9 +117,7 @@ def snapshot(engine, token=None):
             if any(code not in versions for code in CODES):
                 raise BoardError("PRODUCTS_NOT_CONNECTED", 503)
             ids = {code: r["id"] for code, r in versions.items()}
-            vector = hashlib.sha256(
-                json.dumps({**ids, "definition": DEFINITION_REVISION}, sort_keys=True).encode()
-            ).hexdigest()
+            vector = query_version(ids)
             if token is not None and vector != token:
                 raise BoardError("DATA_VERSION_CHANGED", 409)
             inputs = dict(

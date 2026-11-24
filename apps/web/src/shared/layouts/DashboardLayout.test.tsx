@@ -77,7 +77,7 @@ it("没有页内区块时不生成空目录", () => {
   expect(screen.getByRole("main").textContent).toBe("经营中心");
 });
 
-it("目录支持键盘调宽、双击恢复且重新挂载使用默认宽度", () => {
+it("目录支持键盘调宽、双击恢复且跨看板重新挂载保持展开状态和宽度", () => {
   const breakpoint = vi.spyOn(Grid, "useBreakpoint").mockReturnValue({ lg: true });
   const page = () => (
     <MemoryRouter>
@@ -104,8 +104,10 @@ it("目录支持键盘调宽、双击恢复且重新挂载使用默认宽度", (
   expect(screen.queryByRole("separator")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "展开本页目录" }));
   expect(screen.getByRole("separator").getAttribute("aria-valuenow")).toBe("200");
+  fireEvent.click(screen.getByRole("button", { name: "收起本页目录" }));
   view.unmount();
   render(page());
-  expect(screen.getByRole("separator").getAttribute("aria-valuenow")).toBe("192");
+  fireEvent.click(screen.getByRole("button", { name: "展开本页目录" }));
+  expect(screen.getByRole("separator").getAttribute("aria-valuenow")).toBe("200");
   breakpoint.mockRestore();
 });

@@ -8,6 +8,7 @@ import { dashboardPages, type DashboardPageId } from "./dashboardNavigation";
 import zhCN from "antd/locale/zh_CN";
 import { dashboardTheme } from "./dashboardTheme";
 import "./dashboard-layout.css";
+import { AssistantEntry } from "../assistant/AssistantWorkspace";
 
 const headerHeight = 62;
 const layoutStyle = { "--dashboard-header-height": `${headerHeight}px` } as CSSProperties;
@@ -49,6 +50,7 @@ export function DashboardLayout({
           库存监控
         </a>
       </nav>
+      <AssistantEntry />
     </header>
   );
   return (

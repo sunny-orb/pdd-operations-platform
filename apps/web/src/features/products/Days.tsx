@@ -5,8 +5,9 @@ import { useResource, type ProductsState } from "./data";
 import { format, percent } from "./format";
 import { Filters } from "./Filters";
 import { ProductSelectionSummary } from "./ProductSelectionSummary";
-import { scopeError, type Scope } from "./scope";
+import { dimensionValues, scopeError, type Scope } from "./scope";
 import { formatProductLevel } from "../../shared/products/levels";
+import { AnalyzeProduct } from "../../shared/assistant/AssistantContext";
 import "./Days.css";
 
 const headings = [
@@ -23,6 +24,7 @@ const headings = [
 
 /** 独立商品日明细；仅同版本、同筛选的翻页/换容量保留旧页，失败可重试。 */
 export const Days = memo(function Days({ state, scope }: { state: ProductsState; scope: Scope }) {
+  const selectedShops = dimensionValues(scope.shop);
   const result = useResource("days", dayPage, scope, state);
   const key = JSON.stringify([
     state.version,
@@ -128,6 +130,21 @@ export const Days = memo(function Days({ state, scope }: { state: ProductsState;
                     <small>
                       {row.product_id} · {row.shop_name}
                     </small>
+                    <AnalyzeProduct
+                      subject={{
+                        listing_id: row.listing_id,
+                        product_id: row.product_id,
+                        shop_id: row.shop_id,
+                        name: row.product_name,
+                        shop_name: row.shop_name,
+                      }}
+                      context={{
+                        date_from: data.scope.start,
+                        date_to: data.scope.end,
+                        product_version: state.version,
+                        shop_id: selectedShops.length === 1 ? selectedShops[0] : undefined,
+                      }}
+                    />
                   </td>
                   <td>
                     {row.operator ??

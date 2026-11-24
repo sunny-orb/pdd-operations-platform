@@ -47,6 +47,15 @@ def definition_revision():
     )
 
 
+def query_version(mode, ids):
+    """按域、查询口径和实际输入生成页面及问答共用的版本标识。"""
+    return hashlib.sha256(
+        json.dumps(
+            {"mode": mode, "definition": definition_revision(), **ids}, sort_keys=True
+        ).encode()
+    ).hexdigest()
+
+
 @contextmanager
 def snapshot(engine, mode, token=None):
     """同快照读版本、事实与资料；token过期409，缺失来源503，无写入。"""
@@ -69,16 +78,7 @@ def snapshot(engine, mode, token=None):
             }
             if not versions or (mode == "product" and any(x not in versions for x in codes)):
                 raise BoardError("PROMOTION_NOT_CONNECTED", 503)
-            vector = hashlib.sha256(
-                json.dumps(
-                    {
-                        "mode": mode,
-                        "definition": definition_revision(),
-                        **{k: v["id"] for k, v in versions.items()},
-                    },
-                    sort_keys=True,
-                ).encode()
-            ).hexdigest()
+            vector = query_version(mode, {code: row["id"] for code, row in versions.items()})
             if token is not None and token != vector:
                 raise BoardError("DATA_VERSION_CHANGED", 409)
             if mode == "product":

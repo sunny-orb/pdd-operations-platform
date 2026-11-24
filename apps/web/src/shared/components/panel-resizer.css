@@ -1,0 +1,59 @@
+.panel-resizer {
+  position: absolute;
+  inset-block: 0;
+  z-index: 35;
+  width: 9px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+.panel-resizer--directory {
+  left: calc(var(--directory-width) - 4px);
+}
+.panel-resizer--assistant {
+  left: -6px;
+  width: 13px;
+}
+.panel-resizer::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 3px;
+  width: 2px;
+}
+.panel-resizer--assistant::after,
+.panel-resizer--assistant::before {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.panel-resizer--assistant::after {
+  width: 1px;
+  background: #d7e2ee;
+}
+.panel-resizer--assistant::before {
+  content: "";
+  position: absolute;
+  top: calc(50% - 17px);
+  z-index: 1;
+  width: 3px;
+  height: 34px;
+  border-radius: 3px;
+  background: #acc1dc;
+}
+.panel-resizer:is(:hover, :focus-visible, [data-dragging])::after {
+  background: #1768d9;
+}
+.panel-resizer--assistant:is(:hover, :focus-visible, [data-dragging])::before {
+  background: #1768d9;
+}
+.panel-resizer:focus-visible {
+  outline: none;
+}
+.panel-resizer[hidden] {
+  display: none;
+}
+@media (max-width: 570px) {
+  .panel-resizer--assistant {
+    display: none;
+  }
+}

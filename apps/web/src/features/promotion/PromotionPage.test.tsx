@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PromotionPage } from "./PromotionPage";
+import { RegisterScope } from "../../shared/assistant/scopeContext";
 vi.mock("./Trend", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./Trend")>()),
   Trend: () => <div>趋势图</div>,
@@ -50,6 +51,9 @@ function mount({
   missing = true,
   product = false,
   overviewData = {},
+  selectedShop = "",
+  selection = false,
+  register = vi.fn(),
 } = {}) {
   vi.stubGlobal(
     "fetch",
@@ -75,14 +79,28 @@ function mount({
           }
         : url.includes("/options?")
           ? {
-              shops: [],
+              shops: [
+                { value: "shop-a", label: "甲店" },
+                { value: "shop-b", label: "乙店" },
+              ],
               channels: [],
-              products: [],
+              products: selection
+                ? [
+                    {
+                      listing_id: "listing-a",
+                      value: "listing-a",
+                      product_id: "123",
+                      label: "商品甲",
+                      product_name: "商品甲",
+                      shop_id: "shop-a",
+                    },
+                  ]
+                : [],
               selected_products: [],
               categories: [],
               levels: [],
               operators: [],
-              total: 0,
+              total: selection ? 1 : 0,
             }
           : url.includes("/days?")
             ? { items: [], total: 0, page: 1, size: 25, total_pages: 1, row_grain: "day" }
@@ -149,11 +167,20 @@ function mount({
     }),
   );
   render(
-    <MemoryRouter initialEntries={[product ? "/promotion?mode=product" : "/promotion"]}>
+    <MemoryRouter
+      initialEntries={[
+        product
+          ? "/promotion?mode=product" +
+            (selection ? "&product_products=listing-a&product_shop=" + selectedShop : "")
+          : "/promotion",
+      ]}
+    >
       <QueryClientProvider
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
-        <PromotionPage />
+        <RegisterScope.Provider value={register}>
+          <PromotionPage />
+        </RegisterScope.Provider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -423,5 +450,34 @@ it.each([
   });
   await waitFor(() =>
     expect(screen.getByRole("region", { name: "推广八项指标" }).textContent).toContain(note),
+  );
+});
+
+it.each([
+  ["shop-a", false],
+  ["shop-b", true],
+] as const)("问答保留所选店铺 %s，仅绑定实际有记录的单款", async (selectedShop, empty) => {
+  const register = vi.fn();
+  mount({ product: true, selectedShop, selection: true, empty, register });
+  await waitFor(
+    () =>
+      expect(register).toHaveBeenLastCalledWith({
+        page: "推广分析",
+        context: expect.objectContaining({
+          shop_id: selectedShop,
+          promotion_version: "v1",
+          date_from: "2026-09-28",
+          date_to: "2026-10-27",
+        }),
+        subject: empty
+          ? null
+          : expect.objectContaining({
+              listing_id: "listing-a",
+              shop_id: "shop-a",
+              shop_name: "甲店",
+              product_id: "123",
+            }),
+      }),
+    { timeout: 5500 },
   );
 });

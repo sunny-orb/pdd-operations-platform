@@ -17,6 +17,7 @@ import { StoreNet } from "./StoreNet";
 import { Diagnosis } from "./Diagnosis";
 import { formatMetric, formatValue, roiExclusionNote } from "./format";
 import { toggleMetric, type MetricKey } from "./state";
+import { AssistantPageContext } from "../../shared/assistant/AssistantContext";
 import "./prototype.css";
 import "./promotion.css";
 
@@ -37,6 +38,15 @@ export function PromotionPage() {
   );
   const meta = state.meta.data?.data;
   const data = state.overview.data?.data;
+  // 当前筛选的已发布聚合包含记录时，唯一所选商品才是本页实际统计对象。
+  const singleProduct =
+    product && state.scope.products.length === 1 && data && data.current_record_count !== "0"
+      ? state.selectedProducts.find(
+          (row) =>
+            row.listing_id === state.scope.products[0] &&
+            (!state.scope.shop || row.shop_id === state.scope.shop),
+        )
+      : undefined;
   const roiNote = product ? roiExclusionNote(data) : "";
   const errors = [state.overview.error, state.days.error].filter(Boolean);
   const syncFailed = meta?.sources.some((source) => {
@@ -71,6 +81,32 @@ export function PromotionPage() {
       ];
   return (
     <DashboardLayout currentPage="promotion" sections={sections} context="推广分析 · 本页独立分析">
+      <AssistantPageContext
+        page="推广分析"
+        subject={
+          singleProduct
+            ? {
+                listing_id: singleProduct.listing_id,
+                product_id: singleProduct.product_id,
+                shop_id: singleProduct.shop_id,
+                name: singleProduct.product_name,
+                shop_name:
+                  state.shopOptions.find((shop) => shop.value === singleProduct.shop_id)?.label ??
+                  null,
+              }
+            : null
+        }
+        context={
+          data && !state.invalid
+            ? {
+                date_from: state.scope.from,
+                date_to: state.scope.to,
+                shop_id: state.scope.shop || undefined,
+                promotion_version: product ? state.version : undefined,
+              }
+            : {}
+        }
+      />
       <div className="m2-promotion-scope">
         <div className="promotion-modes" aria-label="推广分析模式">
           <Button aria-pressed={!product} onClick={() => state.setMode("store")}>

@@ -4,6 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app/App";
 import "./styles.css";
+import { AssistantWorkspace } from "./shared/assistant/AssistantWorkspace";
+
+import { startPanelSession } from "./shared/layouts/panelLayout";
+
+const endPanelSession = startPanelSession();
+if (import.meta.hot) import.meta.hot.dispose(endPanelSession);
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -15,7 +21,9 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <App />
+        <AssistantWorkspace>
+          <App />
+        </AssistantWorkspace>
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

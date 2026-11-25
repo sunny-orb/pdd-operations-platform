@@ -99,3 +99,46 @@ def test_failed_weekly_retries_only_failed_source_in_full_mode(sales_pg, tmp_pat
     assert calls[-1] == (("shop_daily",), ("shop_daily",))
     run(sunday + timedelta(seconds=600))
     assert len(calls) == count + 1
+
+
+def test_daily_evidence_changes_without_an_extra_sync(sales_pg, tmp_path, monkeypatch):
+    from app.jobs import source_monitor_runtime as runtime
+    from app.modules.data_status.catalog import BY_ID
+    from app.modules.data_status.timeliness import source_timeliness
+
+    present = False
+    calls = []
+
+    class Reader:
+        def read(self, code):
+            return {"basis": "warehouse_web_metadata", "updated_at": "2026-11-04 08:00:00"}
+
+    def execute(*args, **kwargs):
+        calls.append(kwargs["only"])
+        return {"datasets": {s: {"status": "succeeded"} for s in kwargs["only"]}}
+
+    monkeypatch.setattr(runtime, "execute_project", execute)
+    monkeypatch.setattr(runtime, "pending_processing", lambda c: [])
+    monkeypatch.setattr(
+        runtime.SourceProbes,
+        "check_upstream_day",
+        lambda self, code, day: {"date": day.isoformat(), "present": present},
+    )
+    for hour, expected in [("08:30", "unknown"), ("09:40", "updated")]:
+        now = at(hour)
+        runtime.execute_source_schedule(
+            sales_pg,
+            paths=paths_for(tmp_path),
+            warehouse_password=lambda: "unused",
+            warehouse_reader=Reader(),
+            source_ids=("shop_daily",),
+            now=now,
+        )
+        with sales_pg.connect() as c:
+            row = c.execute(sa.text("SELECT * FROM source_checkpoints")).mappings().one()
+            assert (
+                source_timeliness(BY_ID["shop_daily"], row, now + timedelta(seconds=1))["state"]
+                == expected
+            )
+        present = True
+    assert calls == [("shop_daily",)]

@@ -469,7 +469,7 @@ it("新变化等待接收与旧业务日期不算失败，实际检查失败单�
   expect(screen.queryByText(/并发限制/)).toBeNull();
 });
 
-it("更新延迟独立黄色提醒并定位依据，不改同步成功或把无记录当失败", async () => {
+it("单独更新延迟时入口亮黄点并定位依据，不改同步成功或把无记录当失败", async () => {
   const data = payload();
   data.data.sources = [
     {
@@ -485,7 +485,7 @@ it("更新延迟独立黄色提醒并定位依据，不改同步成功或把无�
   ];
   vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
   mount();
-  await screen.findByLabelText("上游更新延迟");
+  await screen.findByLabelText("数据更新延迟");
   expect(document.querySelector(".m6-update-badge-delayed .ant-badge-dot")).toBeTruthy();
   expect(screen.queryByLabelText("数据更新异常")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
@@ -498,7 +498,7 @@ it("更新延迟独立黄色提醒并定位依据，不改同步成功或把无�
   expect(screen.queryByLabelText(`来源异常：${row.name}`)).toBeNull();
   data.data.sources = [{ ...row, timeliness: { state: "updated" } } as typeof row];
   fireEvent.click(screen.getByRole("button", { name: "刷新状态" }));
-  await waitFor(() => expect(screen.queryByLabelText("上游更新延迟")).toBeNull());
+  await waitFor(() => expect(screen.queryByLabelText("数据更新延迟")).toBeNull());
   expect(screen.queryByLabelText(`更新延迟：${row.name}`)).toBeNull();
   expect(screen.queryByRole("button", { name: "更新延迟 1 项" })).toBeNull();
   await waitFor(() => expect(document.querySelector(".m6-update-badge .ant-badge-dot")).toBeNull());
@@ -519,7 +519,7 @@ it("无依据和超时未核对保持中性，不显示延迟报警", async () =
   fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
   expect(await screen.findByText("暂无可靠时间依据")).toBeTruthy();
   expect(screen.getByText("等待核对")).toBeTruthy();
-  expect(screen.queryByLabelText("上游更新延迟")).toBeNull();
+  expect(screen.queryByLabelText("数据更新延迟")).toBeNull();
   expect(screen.queryByRole("button", { name: /更新延迟 \d/ })).toBeNull();
   expect(screen.queryByRole("img", { name: /^更新延迟：/ })).toBeNull();
 });
@@ -537,7 +537,7 @@ it("更新说明默认收起，展开后仍能查看真实计划和时效规则"
   fireEvent.click(screen.getByText("更新说明"));
   expect(disclosure?.open).toBe(true);
   expect(within(disclosure!).getByText(/当前每 15 分钟检查一次/)).toBeTruthy();
-  expect(within(disclosure!).getByText(/昨天更新时间/)).toBeTruthy();
+  expect(within(disclosure!).getByText(/北京时间昨天的业务日期/)).toBeTruthy();
 });
 
 it("读取未完成和筛选展开后均可关闭，晚响应不能重新打开弹窗", async () => {
@@ -590,7 +590,7 @@ it("刷新进行中可关闭，重新打开后Escape也可关闭", async () => {
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
-it("故障、延迟与缺记录并存时入口红点优先，恢复后降为黄点，只有缺记录时熄灭", async () => {
+it("故障、延迟与缺记录并存时故障恢复后入口转为延迟黄点，只有缺记录时熄灭", async () => {
   const data = payload();
   const history = {
     state: "gaps",
@@ -779,4 +779,61 @@ it("更新说明保留普通16:10检查与独立的周日对账和重试计划",
   expect(await within(disclosure).findByText(/16:10 为普通检查/)).toBeTruthy();
   expect(within(disclosure).getByText(/每周日 17:00 对账/)).toBeTruthy();
   expect(within(disclosure).getByText(/失败结束后 5 分钟重试/)).toBeTruthy();
+});
+
+it("上游缺少昨日记录时显示延迟及核对依据", async () => {
+  const data = payload();
+  data.data.sources = [
+    {
+      ...row,
+      id: "shop_daily",
+      name: "店铺日经营",
+      timeliness: {
+        state: "delayed",
+        basis: "upstream_business_day",
+        required_date: "2026-11-22",
+        baseline_first_seen_at: "2026-11-22T09:00:00+08:00",
+        expected_by: "2026-11-23T10:00:00+08:00",
+        observed_at: "2026-11-23T10:05:00+08:00",
+      },
+    } as typeof row,
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  fireEvent.click(await screen.findByRole("button", { name: "更新延迟 1 项" }));
+  const detail = screen.getByLabelText("上游日报时效依据");
+  expect(within(detail).getByText(/上游尚无该业务日的记录/)).toBeTruthy();
+  expect(within(detail).getByText(/应到业务日：2026-11-22/)).toBeTruthy();
+  expect(within(detail).getByText(/昨日首次见数.*09:00:00/)).toBeTruthy();
+  expect(within(detail).getByText(/今日判断期限.*10:00:00/)).toBeTruthy();
+});
+
+it.each([
+  ["confirmed_late", "已确认延迟，现已到数"],
+  ["first_seen_after_deadline", "实际到数可能更早"],
+])("首次在期限后见数时保留解释且不亮延迟黄点（%s）", async (timing, explanation) => {
+  const data = payload();
+  data.data.sources = [
+    {
+      ...row,
+      timeliness: {
+        state: "updated",
+        basis: "upstream_business_day",
+        required_date: "2026-11-22",
+        first_seen_at: "2026-11-23T11:10:00+08:00",
+        baseline_first_seen_at: "2026-11-22T09:00:00+08:00",
+        expected_by: "2026-11-23T10:00:00+08:00",
+        arrival_timing: timing,
+      },
+    } as typeof row,
+  ];
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify(data)));
+  mount();
+  fireEvent.click(screen.getByRole("button", { name: "数据更新状态" }));
+  fireEvent.click(await screen.findByRole("button", { name: "展开来源详情" }));
+  const detail = screen.getByLabelText("上游日报时效依据");
+  expect(within(detail).getByText(/今日首次见数.*11:10:00/)).toBeTruthy();
+  expect(within(detail).getByText(new RegExp(explanation))).toBeTruthy();
+  expect(screen.queryByRole("img", { name: /更新延迟/ })).toBeNull();
 });

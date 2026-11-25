@@ -464,6 +464,11 @@ class ProductBoardStore:
         }
         if set(current) != {*TABLES, "profile_links"}:
             return None
+        # 独立补收只在实际事实变化时发布。按各旧版的生成摘要重验相同投影，
+        # 避免一次未取得新行的探测升级四个头；普通接收继续严格绑定当前生成代码。
+        repair_only = bool(self.incremental_receipts) and all(
+            receipt["mode"] == "gap_repair" for receipt in self.incremental_receipts.values()
+        )
         versions = {code: current[code]["id"] for code in TABLES}
         for code in TABLES:
             if code in reused:
@@ -474,7 +479,9 @@ class ProductBoardStore:
                 dict(
                     rows=rows[code],
                     revision=REVISION,
-                    producer=LOADED_PRODUCER_HASH,
+                    producer=current[code]["producer_revision"]
+                    if repair_only
+                    else LOADED_PRODUCER_HASH,
                     end=None if code == "profile_records" else end,
                     inputs=None,
                 )
@@ -485,13 +492,16 @@ class ProductBoardStore:
         derived = current["profile_links"]
         digest = fingerprint(
             dict(
-                rows=raw, revision=REVISION, producer=LOADED_PRODUCER_HASH, end=end, inputs=versions
+                rows=raw,
+                revision=REVISION,
+                producer=derived["producer_revision"] if repair_only else LOADED_PRODUCER_HASH,
+                end=derived["period_end"] if repair_only else end,
+                inputs=versions,
             )
         )
         if (
-            derived["producer_revision"] != LOADED_PRODUCER_HASH
-            or digest != derived["content_fingerprint"]
-        ):
+            not repair_only and derived["producer_revision"] != LOADED_PRODUCER_HASH
+        ) or digest != derived["content_fingerprint"]:
             return None
         inputs = dict(
             c.execute(

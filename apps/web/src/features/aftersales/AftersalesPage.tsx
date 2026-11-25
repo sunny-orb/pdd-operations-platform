@@ -7,6 +7,7 @@ import {
   LineChartOutlined,
   TableOutlined,
 } from "@ant-design/icons";
+import { views } from "./state";
 import { AssistantPageContext } from "../../shared/assistant/AssistantContext";
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import { useAftersales } from "./data";
@@ -62,6 +63,13 @@ export function AftersalesPage() {
     <DashboardLayout currentPage="aftersales" sections={sections} context="售后分析">
       <AssistantPageContext
         page="售后分析"
+        selectionLabel={
+          state.version
+            ? [report?.label, views.find((v) => v.key === state.scope.view)?.label]
+                .filter(Boolean)
+                .join(" · ")
+            : undefined
+        }
         subject={null}
         context={
           state.version

@@ -221,3 +221,9 @@ def test_risk_result_metadata_uses_shared_version_and_window(sales_pg, tmp_path,
         start=end - timedelta(days=9), end=end - timedelta(days=1)
     )
     assert result["trend_period"] == dict(start=end - timedelta(days=8), end=end)
+
+
+def test_risk_card_label_and_rule_id_resolve_the_same_published_condition():
+    exact = rows(read(view="products", keyword="products.risk.traffic_severe"))
+    assert rows(read(view="products", keyword="爆品严重流量下滑")) == exact
+    assert len(exact) == 1 and "访客变化≤-40" in exact[0]["condition"]

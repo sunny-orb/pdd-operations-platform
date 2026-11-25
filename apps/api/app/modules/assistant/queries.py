@@ -5,7 +5,10 @@ from datetime import date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.modules.assistant.business import change_points
+from app.modules.assistant.rule_definitions import matched_product_rule
 from app.modules.assistant.versions import report_versions
+from app.modules.product_board import risk_rules
 from app.modules.product_board.comparison import period_comparisons, summarize_period
 from app.modules.product_board.filter_projection import matches_keyword
 from app.modules.product_board.metrics import METRICS, aggregate, compare, risk, risk_window_ready
@@ -196,8 +199,18 @@ def _product_rules(repo, identity, groups, period, current):
         amounts = repo.period_revenue_by_listing(start, end)
         top = top_revenue_listings({lid: amounts[lid] for lid in members if lid in amounts})
         alert = risk(rows, end, identity["listing_id"] in top)
+    if alert:
+        # 工单状态和期限尚未启用；这里只交付真实命中及其规则条件。
+        alert = {k: value for k, value in alert.items() if k not in ("status", "deadline")}
+        definition = matched_product_rule(alert["label"])
+        if definition and definition["rule_version"] == risk_rules.RULE_VERSION:
+            alert.update(
+                rule_id=definition["id"],
+                condition=definition["condition"],
+                sample=definition["sample"],
+            )
     return dict(
-        version="product-risk-traffic-v2",
+        version=risk_rules.RULE_VERSION,
         ranking_basis="爆品按同店商品在所选期间的成交额排名，取前20%，边界同额均计入。",
         status=status,
         date_to=end,
@@ -253,6 +266,7 @@ def product_performance(
                     current=observed[key]["value"],
                     previous=value["previous"],
                     change=value["change"],
+                    change_pp=change_points(unit, observed[key]["value"], value["previous"]),
                     status=status,
                     reason=reason,
                 )
@@ -376,6 +390,7 @@ def product_promotion(
                     current=m["value"],
                     previous=p["value"] if history else None,
                     change=m["change"] if history else None,
+                    change_pp=change_points(m["type"], m["value"], p["value"]) if history else None,
                     status=status,
                     reason=reason,
                 )

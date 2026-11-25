@@ -66,15 +66,8 @@ def _rule(
     )
 
 
-def _products():
+def _product_risk_rules():
     r = risk_rules
-    version = _revision(
-        "product_board/risk_rules.py",
-        "product_board/query.py",
-        "product_board/metrics.py",
-        "product_scoring/rules.py",
-        "product_scoring/query.py",
-    )
     common = f"完整连续{r.BASELINE_DAYS + 1}个日历日访客及订单非空且非负；不补0"
     window = f"当日T对比T-{r.BASELINE_DAYS}至T-1；转化基准为订单合计÷访客合计"
     exception = "按下列顺序首个命中；不要求连续下滑；没有风险结果不代表缺数商品无风险"
@@ -143,6 +136,28 @@ def _products():
             "app/modules/product_board/query.py；product_board/metrics.py",
         )
     )
+    return rows
+
+
+def _risk_rule_key(label):
+    return "products.risk.traffic_severe" if label == risk_rules.TOP_TRAFFIC_ALERT else label
+
+
+def matched_product_rule(label):
+    """把看板关注项关联到本版生效规则。处理状态不参与是否命中的判断。"""
+    key = _risk_rule_key(label)
+    return next((r for r in _product_risk_rules() if key in (r["name"], r["id"])), None)
+
+
+def _products():
+    version = _revision(
+        "product_board/risk_rules.py",
+        "product_board/query.py",
+        "product_board/metrics.py",
+        "product_scoring/rules.py",
+        "product_scoring/query.py",
+    )
+    rows = _product_risk_rules()
     package = score_parameters()
     gates = package["policy"]["gates"]
     rows.append(
@@ -309,7 +324,8 @@ def _sales():
                 "销售",
                 "GMV目标达成与缺口",
                 "完成额÷相容目标；缺口=max(目标−完成额,0)",
-                f"目标固定{len(SHOPS)}店；经营单店筛选不改变目标分母",
+                f"看板只发布 {len(SHOPS)} 家店合计的 GMV 目标。"
+                "单店月目标未发布，暂时算不了单店达成率。",
                 "自然月/批准财年",
                 "仅原版GMV目标生效，不含多多进宝版尚未批准；无目标不算达成率；缺数仅供参考",
                 version,
@@ -519,7 +535,8 @@ def read(engine, params):
         versions[key] = revision
     keyword = (params.get("keyword") or "").casefold().strip()
     if keyword:
-        items = [r for r in items if keyword in (r["id"] + " " + r["name"]).casefold()]
+        search_term = _risk_rule_key(keyword)
+        items = [r for r in items if search_term in (r["id"] + " " + r["name"]).casefold()]
     return report(
         "definitions",
         "rule_definitions",

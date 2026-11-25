@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Link, MemoryRouter } from "react-router-dom";
 import { AssistantPageContext, AnalyzeProduct } from "./AssistantContext";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ import type { PageContext } from "./contracts";
 // jsdom 尚未实现原生 dialog 的显示方法；响应式与焦点另用浏览器核验。
 let endSession: () => void;
 beforeEach(() => {
+  sessionStorage.clear();
   endSession = startPanelSession();
   HTMLDialogElement.prototype.show = function () {
     this.open = true;
@@ -39,7 +40,7 @@ const answer = {
   reports: [],
   candidates: [],
   evidence: "已发布依据",
-  model: "openai-codex:gpt-6.2-astra",
+  model: "bailian:deepseek-v4.1-flash-1017",
 };
 function renderAssistant(selected = true) {
   render(
@@ -59,20 +60,19 @@ function renderAssistant(selected = true) {
   fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
 }
 
-it("收起、切页后保留草稿，显式选择才把对话范围切到推广", () => {
+it("首次提问前切页跟随推广页，重新打开仍保留草稿", () => {
   renderAssistant();
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "再看看推广" } });
   fireEvent.click(screen.getByRole("button", { name: "收起助手" }));
   fireEvent.click(screen.getByRole("link", { name: "推广页" }));
   fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
   expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("再看看推广");
-  expect(screen.getByText("商品数据")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "使用当前页范围 · 推广分析" }));
-  expect(screen.getByText("推广分析")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "改用当前页" })).toBeNull();
+  expect(screen.getByRole("button", { name: "当前期间推广投产和花费怎么样？" })).toBeTruthy();
 });
 
 it.each([true, false])(
-  "售后页讨论商品规则后按已确认主题给商品建议，新对话恢复售后建议：explanation=%s",
+  "售后页跨域讨论商品规则后快捷提问仍跟随页面，新对话恢复售后建议：explanation=%s",
   async (withExplanation) => {
     vi.stubGlobal("fetch", (url: string) =>
       Promise.resolve({
@@ -114,8 +114,8 @@ it.each([true, false])(
     fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
     await screen.findByText("商品严重流量下滑规则已说明");
     const suggestions = within(screen.getByLabelText("建议问题"));
-    expect(suggestions.getByRole("button", { name: "当前期间哪些商品有经营风险？" })).toBeTruthy();
-    expect(suggestions.queryByRole("button", { name: "当前报告退款情况怎么样？" })).toBeNull();
+    expect(suggestions.queryByRole("button", { name: "当前期间哪些商品有经营风险？" })).toBeNull();
+    expect(suggestions.getByRole("button", { name: "当前报告退款情况怎么样？" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "新对话" }));
     expect(
       within(screen.getByLabelText("建议问题")).getByRole("button", {
@@ -128,7 +128,7 @@ it.each([true, false])(
 it.each([
   { domain: "aftersales", suggestion: "当前报告退款情况怎么样？" },
   { domain: "promotion_store", suggestion: "当前期间推广投产和花费怎么样？" },
-])("保留选款讨论$domain时显示该业务建议，回当前页恢复单款建议", async ({ domain, suggestion }) => {
+])("选款讨论$domain后仍显示当前商品的快捷问题", async ({ domain, suggestion }) => {
   vi.stubGlobal("fetch", (url: string) =>
     Promise.resolve({
       ok: true,
@@ -147,15 +147,9 @@ it.each([
   fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   await screen.findByText("跨域问题已回答");
   const suggestions = within(screen.getByLabelText("建议问题"));
-  expect(suggestions.getByRole("button", { name: suggestion })).toBeTruthy();
-  expect(suggestions.queryByRole("button", { name: "近期表现" })).toBeNull();
-  expect(screen.getByText("测试商品甲")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "使用当前页范围 · 商品数据" }));
-  expect(
-    within(screen.getByLabelText("建议问题")).getByRole("button", {
-      name: "这款近 7 天表现怎样？",
-    }),
-  ).toBeTruthy();
+  expect(suggestions.queryByRole("button", { name: suggestion })).toBeNull();
+  expect(suggestions.getByRole("button", { name: "近期表现" })).toBeTruthy();
+  expect(screen.getByLabelText(/测试商品甲 · 甲店/)).toBeTruthy();
 });
 
 it("单款商品推广主题继续提供单款追问并发送原问题", async () => {
@@ -195,19 +189,16 @@ it("停止后重新请求真实回答，追问带上已完成的对话", async (
       ? Promise.resolve({
           ok: true,
           json: async () => ({
-            models: ["openai-codex:gpt-6.2-sol", "openai-codex:gpt-6.2-astra"],
+            models: ["bailian:deepseek-v4.1-flash-1017"],
           }),
         })
       : request(url, options),
   );
 
   renderAssistant();
-  await screen.findByRole("option", { name: "GPT-6.2 Astra" });
-  fireEvent.change(screen.getByRole("combobox", { name: "回答模型" }), {
-    target: { value: "openai-codex:gpt-6.2-astra" },
-  });
+  expect(screen.queryByRole("combobox", { name: "回答模型" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /这款近 7 天表现怎样/ }));
-  expect(JSON.parse(request.mock.calls[0][1].body).model).toBe("openai-codex:gpt-6.2-astra");
+  expect(JSON.parse(request.mock.calls[0][1].body)).not.toHaveProperty("model");
   fireEvent.click(screen.getByRole("button", { name: "停止" }));
   fireEvent.click(screen.getByRole("button", { name: "重新回答" }));
   expect(await screen.findByText("成交额下降了两成。")).toBeTruthy();
@@ -334,7 +325,7 @@ it("已选商品缺少规则时保留选款与未答问题，并携带服务端�
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "这款异常阈值是多少？" } });
   fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   await screen.findByText("尚未取得该规则");
-  expect(screen.getByText("测试商品甲")).toBeTruthy();
+  expect(screen.getByLabelText(/测试商品甲 · 甲店/)).toBeTruthy();
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "我问你呢" } });
   fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   expect(JSON.parse(request.mock.calls[1][1].body)).toMatchObject({
@@ -457,7 +448,7 @@ it("新报告经营结果显式清除旧解释主题，追问阈值不带旧报�
   await screen.findByText("旧报告规则已解释");
   ask("查新报告经营");
   await screen.findByText("新报告经营已查询");
-  expect(screen.queryByRole("button", { name: "使用当前页范围 · 售后分析" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "改用当前页" })).toBeNull();
   ask("它的阈值呢");
   const context = JSON.parse(request.mock.calls[2][1].body).context;
   expect(context.report_id).toBe("new-report");
@@ -740,7 +731,8 @@ it("跨页追问沿用实际报告的期间与两个领域的版本", async () =
   fireEvent.click(screen.getByRole("button", { name: "这款近 7 天表现怎样？" }));
   await screen.findByText(answer.answer);
   fireEvent.click(screen.getByRole("link", { name: "推广页" }));
-  fireEvent.click(screen.getByRole("button", { name: "再看推广" }));
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "刚才那款的推广呢" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   expect(JSON.parse(request.mock.calls[1][1].body)).toMatchObject({
     context: {
       ...report.versions,
@@ -870,7 +862,7 @@ it.each(["t", ""])(
   },
 );
 
-it("同页报告与品类范围变化也提供显式切换，跨域追问保留四维多选", async () => {
+it("跨域追问保留四维多选，页面快捷提问自动使用当前筛选", async () => {
   const initial: PageContext = {
     domain: "products",
     shop_ids: ["s", "t"],
@@ -905,17 +897,21 @@ it("同页报告与品类范围变化也提供显式切换，跨域追问保留�
   fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
   fireEvent.click(screen.getByRole("button", { name: "当前期间商品整体表现怎么样？" }));
   await screen.findByText(answer.answer);
-  expect(screen.getByRole("button", { name: "使用当前页范围 · 商品数据" })).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "跟随页面" }).getAttribute("aria-checked")).toBe(
+    "true",
+  );
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "还有哪些问题" } });
   fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   expect(JSON.parse(request.mock.calls[1][1].body).context).toMatchObject(query);
   await screen.findAllByText(answer.answer);
-  fireEvent.click(screen.getByRole("button", { name: "使用当前页范围 · 商品数据" }));
-  expect(screen.queryByText(answer.answer)).toBeNull();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "看看新品" } });
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("看看新品");
+  expect(screen.getAllByText(answer.answer)).toHaveLength(2);
   fireEvent.click(screen.getByRole("button", { name: "当前期间商品整体表现怎么样？" }));
   expect(JSON.parse(request.mock.calls[2][1].body).context).toMatchObject(initial);
   expect(JSON.parse(request.mock.calls[2][1].body).context.report_id).toBeUndefined();
-  await screen.findByText(answer.answer);
+  expect(JSON.parse(request.mock.calls[2][1].body).history).toEqual([]);
+  await waitFor(() => expect(screen.getAllByText(answer.answer)).toHaveLength(3));
 });
 
 it("单款追问通用看板后保留已选款与完整对话，明确无证据时清空对象", async () => {
@@ -964,7 +960,7 @@ it("单款追问通用看板后保留已选款与完整对话，明确无证据�
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "看看全部店铺销售" } });
   fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   await screen.findByText(answer.answer);
-  expect(screen.getByText("测试商品甲")).toBeTruthy();
+  expect(screen.getByLabelText(/测试商品甲 · 甲店/)).toBeTruthy();
   fireEvent.change(screen.getByRole("textbox"), { target: { value: "这款呢" } });
   fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   expect(JSON.parse(request.mock.calls[1][1].body)).toMatchObject({
@@ -972,7 +968,7 @@ it("单款追问通用看板后保留已选款与完整对话，明确无证据�
     history: [{ question: "看看全部店铺销售", answer: answer.answer }],
   });
   await screen.findByText("查不到这款的更多证据");
-  expect(screen.queryByText("测试商品甲")).toBeNull();
+  expect(screen.getByLabelText(/测试商品甲 · 甲店/)).toBeTruthy();
 });
 
 it("单款七天切到销售三十天后，继续追问采用最近确认期间", async () => {
@@ -1035,4 +1031,165 @@ it("单款七天切到销售三十天后，继续追问采用最近确认期间"
     date_to: "2026-11-20",
   });
   await screen.findAllByText("三十天店铺销售");
+});
+
+it("只解释缺记录后仍能追问同一款，并保留上一问", async () => {
+  const queries: { context: PageContext; history: { question: string }[] }[] = [];
+  vi.stubGlobal("fetch", async (url: string, options: RequestInit) => {
+    if (url.endsWith("/models")) return { ok: true, json: async () => ({ models: ["m"] }) };
+    queries.push(JSON.parse(String(options.body)));
+    return {
+      ok: true,
+      json: async () => ({ ...answer, subject: null, answer: "可作为线索", evidence: "" }),
+    };
+  });
+  renderAssistant();
+  const ask = (text: string) => {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  ask("缺记录代表什么？");
+  await screen.findByText("可作为线索");
+  ask("查查它上周的销量");
+  expect(queries[1].context).toMatchObject({ listing_id: "s/A", shop_id: "s" });
+  expect(queries[1].history[0].question).toBe("缺记录代表什么？");
+  await screen.findAllByText("可作为线索");
+});
+
+it("风险商品引用随追问传回，清除后继续使用原页面范围", async () => {
+  const ref = {
+    listing_id: "risk-id",
+    shop_id: "shop-r",
+    data_version: "pv-risk",
+    date_from: "2026-11-18",
+    date_to: "2026-11-24",
+  };
+  const replies = [
+    { answer: "优先看测试帽。", risk_reference: ref },
+    { answer: "全部商品共有两款。", risk_reference: null },
+    { answer: "请指出商品。", risk_reference: null },
+  ];
+  const request = vi.fn().mockImplementation(async () => {
+    const item = replies.shift()!;
+    return {
+      ok: true,
+      json: async () => ({
+        ...answer,
+        subject: null,
+        answer: item.answer,
+        query_context: { versions: {}, risk_reference: item.risk_reference },
+      }),
+    };
+  });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["model"] }) })
+      : request(url, options),
+  );
+  renderAssistant(false);
+  async function ask(question: string, expected: string) {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: question } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+    await screen.findByText(expected);
+  }
+  await ask("优先看哪款？", "优先看测试帽。");
+  await ask("那全部商品呢？", "全部商品共有两款。");
+  const next = JSON.parse(request.mock.calls[1][1].body).context;
+  expect(next.risk_reference).toEqual(ref);
+  expect(next).not.toHaveProperty("listing_id");
+  await ask("刚才那款呢？", "请指出商品。");
+  expect(JSON.parse(request.mock.calls[2][1].body).context.risk_reference).toBeUndefined();
+});
+
+it("关闭跟随发送全局问题，再打开自动取最新页面，保留草稿和聊天", async () => {
+  const request = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ ...answer, subject: null }) });
+  vi.stubGlobal("fetch", (url: string, options: RequestInit) =>
+    url.endsWith("/models")
+      ? Promise.resolve({ ok: true, json: async () => ({ models: ["m"] }) })
+      : request(url, options),
+  );
+  renderAssistant();
+  const follow = screen.getByRole("switch", { name: "跟随页面" });
+  expect(follow.getAttribute("aria-checked")).toBe("true");
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "整体怎么样" } });
+  fireEvent.click(follow);
+  expect(screen.getByText("全局问答")).toBeTruthy();
+  fireEvent.click(screen.getByRole("link", { name: "推广页" }));
+  fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  const global = JSON.parse(request.mock.calls[0][1].body);
+  expect(global.question).toBe("整体怎么样");
+  expect(global.page).toBe("运营看板中心");
+  expect(global.context.listing_id).toBeUndefined();
+  expect(global.context.date_from).toBeUndefined();
+  await screen.findByText(answer.answer);
+  fireEvent.click(follow);
+  fireEvent.click(screen.getByRole("button", { name: "当前期间推广投产和花费怎么样？" }));
+  expect(JSON.parse(request.mock.calls[1][1].body)).toMatchObject({
+    page: "推广分析",
+    history: [],
+  });
+  await waitFor(() => expect(screen.getAllByText(answer.answer)).toHaveLength(2));
+});
+
+it("生成中换款，首问固定甲款；这款取乙款，点名刚才的甲款恢复其证据", async () => {
+  let finish!: () => void;
+  const calls: {
+    context: PageContext & { listing_id?: string };
+    question: string;
+    history: { question: string }[];
+  }[] = [];
+  vi.stubGlobal("fetch", async (url: string, options: RequestInit) => {
+    if (url.endsWith("/models")) return { ok: true, json: async () => ({ models: ["m"] }) };
+    const body = JSON.parse(String(options.body));
+    calls.push(body);
+    const index = calls.length;
+    if (index === 1)
+      await new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    return {
+      ok: true,
+      json: async () => ({
+        ...answer,
+        subject: body.context.listing_id === product.listing_id ? product : other,
+        answer: "答复" + index,
+      }),
+    };
+  });
+  const tree = (selected: typeof product) => (
+    <MemoryRouter initialEntries={["/products"]}>
+      <AssistantWorkspace>
+        <AssistantPageContext
+          page="商品数据"
+          subject={selected}
+          context={{ ...period, shop_id: selected.shop_id }}
+        />
+        <AssistantEntry />
+      </AssistantWorkspace>
+    </MemoryRouter>
+  );
+  const ui = render(tree(product));
+  fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
+  const ask = (text: string) => {
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: text } });
+    fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
+  };
+  ask("这款近七天呢");
+  ui.rerender(tree(other));
+  expect(screen.getByLabelText(/测试商品乙 · 乙店/)).toBeTruthy();
+  finish();
+  await screen.findByText("答复1");
+  ask("这款转化怎么样");
+  await screen.findByText("答复2");
+  expect(calls.map((c) => c.context.listing_id)).toEqual(["s/A", "t/B"]);
+  expect(calls[1].history).toEqual([]);
+  ask("刚才测试商品甲的推广呢");
+  await screen.findByText("答复3");
+  expect(calls[2].context.listing_id).toBe("s/A");
+  expect(calls[2].history.map((t) => t.question)).toEqual(["这款近七天呢"]);
+  ask("这款呢");
+  await screen.findByText("答复4");
+  expect(calls[3].context.listing_id).toBe("t/B");
 });

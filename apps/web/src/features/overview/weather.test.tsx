@@ -58,7 +58,9 @@ it("天气默认跟最新发布，自选历史在新版本后保留，所有请�
             : {
                 id: u.searchParams.get("publication_id"),
                 issue_date:
-                  u.searchParams.get("publication_id") === "old" ? "2026-10-27" : "2026-10-28",
+                  u.searchParams.get("publication_id") === "old"
+                    ? "2026-10-27"
+                    : m.publications[0].issue_date,
                 revision_no: 1,
                 document,
               },
@@ -70,14 +72,34 @@ it("天气默认跟最新发布，自选历史在新版本后保留，所有请�
   const { client, Wrapper } = wrapper();
   const { result } = renderHook(() => useWeather(), { wrapper: Wrapper });
   await waitFor(() => expect(result.current.publication?.id).toBe("new"));
+  act(() => result.current.select("new"));
+  expect(result.current.selection).toBe("latest");
+  m = info("next-day", "tomorrow");
+  m.publications[0].issue_date = "2026-10-29";
+  m.publications[0].issue_time = "2026-10-29T08:00:00+08:00";
+  await act(async () => {
+    await client.invalidateQueries({ queryKey: ["overview", "weather", "meta"] });
+  });
+  await waitFor(() => expect(result.current.publication?.id).toBe("tomorrow"));
+  expect(result.current.publication?.issue_date).toBe("2026-10-29");
+  expect(result.current.selection).toBe("latest");
   act(() => result.current.select("old"));
   await waitFor(() => expect(result.current.publication?.id).toBe("old"));
   m = info("w2", "newer");
+  m.publications[0].issue_date = "2026-10-29";
+  m.publications[1] = {
+    ...m.publications[1],
+    id: "old-new-edition",
+    revision_no: 2,
+  };
   await act(async () => {
     await client.invalidateQueries({ queryKey: ["overview", "weather", "meta"] });
   });
   await waitFor(() => expect(result.current.meta?.data_version).toBe("w2"));
   await waitFor(() => expect(result.current.publication?.id).toBe("old"));
   expect(result.current.selectedId).toBe("old");
+  const historicalOptions = result.current.options.filter((p) => p.issue_date === "2026-10-27");
+  expect(historicalOptions).toHaveLength(1);
+  expect(historicalOptions[0].id).toBe("old");
   expect(paths.every((p) => p.startsWith("/api/v1/weather/"))).toBe(true);
 });

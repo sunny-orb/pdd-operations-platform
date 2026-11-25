@@ -219,55 +219,128 @@ def test_slow_catalog_is_cancelled_before_any_retirement(sales_pg, project, monk
         assert c.scalar(sa.text("SELECT count(*) FROM region_retirements")) == 0
 
 
-def test_real_ingest_worker_reclaims_only_proven_obsolete_version(sales_pg, project):
-    from app.modules.region_retention_runtime import maintain_regions
+@pytest.fixture
+def ingest(sales_pg):
     from migrations_v2.local import local_url
-    from tests.test_region_retention import sequence
 
-    old = sequence(sales_pg)
     password = (ROOT / "var/local-db/sync.env").read_text().strip().split("=", 1)[1]
     ingest = sa.create_engine(
         local_url(sales_pg.url.database).set(username="pdd_ingest", password=password),
         hide_parameters=True,
     )
     try:
-        with ingest.connect() as c:
-            assert c.scalar(sa.text("SELECT session_user")) == "pdd_ingest"
-            before = c.scalar(
+        yield ingest
+    finally:
+        ingest.dispose()
+
+
+def test_ingest_reuses_online_region_while_retirement_defers(sales_pg, ingest):
+    from app.modules.region_retention import rebuild_version
+    from tests.test_region_retention import rows, sequence, step
+
+    old = sequence(sales_pg)
+    with ingest.begin() as c:
+        assert c.exec_driver_sql("SELECT session_user").scalar_one() == "pdd_ingest"
+        assert not c.exec_driver_sql(
+            "SELECT has_table_privilege('dataset_storage','UPDATE')"
+        ).scalar_one()
+        assert (
+            rebuild_version(c, old, rows(), content_fingerprint=old, row_schema_revision="test-v1")
+            is False
+        )
+        assert step(sales_pg)["status"] == "busy"
+    assert step(sales_pg)["status"] == "verifying"
+
+
+def test_ingest_waits_for_active_retirement_then_reuses_current_version(sales_pg, ingest):
+    from concurrent.futures import Future, ThreadPoolExecutor
+
+    from app.modules.region_retention import Policy, rebuild_version, step
+    from tests.test_region_retention import rows, sequence
+
+    old = sequence(sales_pg)
+    with sales_pg.connect() as c:
+        current = c.scalar(
+            sa.text("SELECT version_id FROM current_datasets WHERE dataset_code='product_regions'")
+        )
+    worker_pid = Future()
+
+    def reuse():
+        with ingest.begin() as c:
+            c.exec_driver_sql("SET LOCAL statement_timeout='8s'")
+            worker_pid.set_result(c.exec_driver_sql("SELECT pg_backend_pid()").scalar_one())
+            return rebuild_version(
+                c, current, rows(), content_fingerprint=current, row_schema_revision="test-v1"
+            )
+
+    # 保留回收事务的独占锁；另一真实连接必须等提交后才能判定是否需要恢复。
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with sales_pg.begin() as maintenance:
+            for _ in range(12):
+                if step(maintenance, Policy(batch_rows=2))["status"] == "reclaimed":
+                    break
+            else:
+                pytest.fail("未达到回收完成状态")
+            job = pool.submit(reuse)
+            pid = worker_pid.result(timeout=3)
+            deadline = time.monotonic() + 3
+            while not maintenance.scalar(
+                sa.text("SELECT pg_backend_pid()=ANY(pg_blocking_pids(:pid))"), {"pid": pid}
+            ):
+                assert time.monotonic() < deadline, "复用未在回收事务上等待"
+                time.sleep(0.02)
+        assert job.result(timeout=5) is False
+    with ingest.begin() as c:
+        assert (
+            c.scalar(sa.text("SELECT state FROM dataset_storage WHERE version_id=:v"), {"v": old})
+            == "reclaimed"
+        )
+        assert (
+            rebuild_version(
+                c, current, rows(), content_fingerprint=current, row_schema_revision="test-v1"
+            )
+            is False
+        )
+        assert c.scalar(
+            sa.text("SELECT count(*) FROM read_product_region_records WHERE dataset_version_id=:v"),
+            {"v": current},
+        ) == len(rows())
+
+
+def test_real_ingest_worker_reclaims_only_proven_obsolete_version(sales_pg, project, ingest):
+    from app.modules.region_retention_runtime import maintain_regions
+    from tests.test_region_retention import sequence
+
+    old = sequence(sales_pg)
+    with ingest.connect() as c:
+        assert c.scalar(sa.text("SELECT session_user")) == "pdd_ingest"
+        before = c.scalar(
+            sa.text("SELECT version_id FROM current_datasets WHERE dataset_code='product_regions'")
+        )
+    result = maintain_regions(ingest, project, sync_complete=True)
+    assert result["status"] == "reclaimed" and result["deleted_rows"] == 3
+    with ingest.connect() as c:
+        assert (
+            c.scalar(
                 sa.text(
                     "SELECT version_id FROM current_datasets WHERE dataset_code='product_regions'"
                 )
             )
-        result = maintain_regions(ingest, project, sync_complete=True)
-        assert result["status"] == "reclaimed" and result["deleted_rows"] == 3
-        with ingest.connect() as c:
-            assert (
-                c.scalar(
-                    sa.text(
-                        "SELECT version_id FROM current_datasets "
-                        "WHERE dataset_code='product_regions'"
-                    )
-                )
-                == before
+            == before
+        )
+        assert (
+            c.scalar(sa.text("SELECT state FROM dataset_storage WHERE version_id=:v"), {"v": old})
+            == "reclaimed"
+        )
+        assert (
+            c.scalar(
+                sa.text(
+                    "SELECT count(*) FROM read_product_region_records WHERE dataset_version_id=:v"
+                ),
+                {"v": before},
             )
-            assert (
-                c.scalar(
-                    sa.text("SELECT state FROM dataset_storage WHERE version_id=:v"), {"v": old}
-                )
-                == "reclaimed"
-            )
-            assert (
-                c.scalar(
-                    sa.text(
-                        "SELECT count(*) FROM read_product_region_records "
-                        "WHERE dataset_version_id=:v"
-                    ),
-                    {"v": before},
-                )
-                == 3
-            )
-    finally:
-        ingest.dispose()
+            == 3
+        )
 
 
 @pytest.mark.parametrize("source_status", ["succeeded", "failed"])

@@ -5,6 +5,8 @@ from typing import Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEEPSEEK_MODEL = "bailian:deepseek-v4.1-flash-1017"
+
 
 class Settings(BaseSettings):
     """应用设置；环境变量为输入，字段校验后的设置供服务使用。"""
@@ -12,13 +14,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: Literal["development", "test", "production"] = "development"
-    assistant_model: str = ""
-    assistant_model_choices: list[str] = Field(default_factory=list)
+    assistant_production_enabled: bool = False
+    assistant_max_concurrent: int = Field(default=1, ge=1, le=2)
+    assistant_requests_per_minute: int = Field(default=20, ge=1, le=60)
+    assistant_model: str = DEEPSEEK_MODEL
     assistant_business_data_enabled: bool = False
-    assistant_business_providers: list[Literal["openai-codex", "deepseek", "bailian"]] = Field(
-        default_factory=lambda: ["openai-codex"]
-    )
-    deepseek_api_key: SecretStr = SecretStr("")
+    assistant_business_providers: list[str] = Field(default_factory=list)
     bailian_api_key: SecretStr = SecretStr("")
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     database_url: SecretStr = SecretStr("")
@@ -30,10 +31,8 @@ class Settings(BaseSettings):
 
     @property
     def assistant_models(self) -> list[str]:
-        """首项为默认模型；未启用个人试用时，额外型号也不对外提供。"""
-        if not self.assistant_model:
-            return []
-        return list(dict.fromkeys([self.assistant_model, *self.assistant_model_choices]))
+        """只启用指定的 DeepSeek。留空或旧配置会关闭问答。"""
+        return [DEEPSEEK_MODEL] if self.assistant_model == DEEPSEEK_MODEL else []
 
     @field_validator("database_url")
     @classmethod

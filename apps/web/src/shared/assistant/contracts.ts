@@ -8,12 +8,20 @@ const product = z.object({
   shop_name: z.string().nullable(),
 });
 export type AssistantProduct = z.infer<typeof product>;
+const riskReference = z.object({
+  shop_id: z.string(),
+  listing_id: z.string(),
+  data_version: z.string(),
+  date_from: z.string(),
+  date_to: z.string(),
+});
 const explanationContext = z.object({
   view: z.enum(["all", "products", "promotion_store", "promotion_product", "sales", "aftersales"]),
   report_id: z.string().nullable().optional(),
 });
 export type PageContext = {
   explanation?: z.infer<typeof explanationContext> | null;
+  risk_reference?: z.infer<typeof riskReference> | null;
   domain?:
     | "all"
     | "products"
@@ -46,6 +54,7 @@ export type PageContext = {
   promotion_version?: string;
 };
 export type AssistantScope = {
+  selectionLabel?: string;
   page: string;
   subject: AssistantProduct | null;
   context: PageContext;
@@ -192,6 +201,7 @@ export const chatAnswer = z.object({
         ])
         .optional(),
       explanation: explanationContext.nullish(),
+      risk_reference: riskReference.nullish(),
       versions: z.record(z.string(), z.string()),
       date_from: z.string().optional(),
       date_to: z.string().optional(),

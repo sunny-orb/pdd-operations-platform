@@ -4,13 +4,27 @@
 
 ## 验证记录索引
 
+[浏览器刷新保留全局面板、关闭标签页后恢复默认（2026-11-25）](validation/2026-11-25.md#panel-session-refresh)。
+
+[月目标响应与真实运营决策题（2026-11-25）](validation/2026-11-25.md#operator-pilot-review)。
+
+[天气正文解析、历史只读恢复与日期展示（2026-11-25）](validation/2026-11-25.md#weather-display-fix)。
+
+[DeepSeek 单模型与五页错答复测（2026-11-25）](validation/2026-11-25.md#assistant-deepseek-grounded)。
+
+[千问与 DeepSeek 的 12 题准确度、首字、查询轮数与用量（2026-11-25）](validation/2026-11-25.md#assistant-two-models-live)。
+
+[五页真实运营问答、跨页追问及逐题首字耗时（2026-11-25）](validation/2026-11-25.md#assistant-five-page-live)。
+
+[问答预算与延迟基线](validation/2026-11-25.md#assistant-latency-audit) · [同题修复及浏览器验收（2026-11-25）](validation/2026-11-25.md#assistant-latency-fix)。
+
 [生效规则、连续追问、跨页能力与回答展示（2026-11-24）](validation/2026-11-24.md#assistant-explanations-ux)。
 
 [五页24类问答工具、真实模型与范围回归（2026-11-24）](validation/2026-11-24.md#assistant-all-pages)。
 
 [百炼 Qwen3.8 Flash 本机接入与流式工具验收（2026-11-24）](validation/2026-11-24.md#assistant-bailian)。
 
-[本机真实单款问答、趋势与同版看板对账（2026-11-24）](validation/2026-11-24.md#assistant-real-query)，[早期原型与个人 Codex 接入](validation/2026-11-24.md)。
+[本机真实单款问答、趋势与同版看板对账（2026-11-24）](validation/2026-11-24.md#assistant-real-query)，[早期原型验收](validation/2026-11-24.md)。
 
 [地区副本自动回收与原版本恢复（2026-11-19）](validation/2026-11-19.md#region-retention)。
 

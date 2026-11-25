@@ -19,8 +19,6 @@ import {
   CloseOutlined,
   CommentOutlined,
   EditOutlined,
-  DownOutlined,
-  ApiOutlined,
   LineChartOutlined,
   NodeIndexOutlined,
   TagOutlined,
@@ -37,10 +35,12 @@ import { RegisterScope, AnalyzeScope } from "./scopeContext";
 import { PanelResizer } from "../components/PanelResizer";
 import { useDashboardPanel, updatePanel } from "../layouts/panelLayout";
 import "./assistant.css";
+import { globalScope, samePageFilters, scopeSummary } from "./pageScope";
 import { readAnswer } from "./stream";
 
+const loadReply = () => import("./AssistantReply");
 const AssistantReply = lazy(async () => ({
-  default: (await import("./AssistantReply")).AssistantReply,
+  default: (await loadReply()).AssistantReply,
 }));
 
 const AssistantEvidence = lazy(async () => ({
@@ -67,15 +67,6 @@ export function AssistantEntry() {
     >
       <CommentOutlined aria-hidden /> AI助手
     </button>
-  );
-}
-
-function modelLabel(id: string) {
-  const name = id.split(":").at(-1) ?? id;
-  return name.replace(
-    /^gpt-(.+)-(sol|astra)$/i,
-    (_, version: string, family: string) =>
-      `GPT-${version} ${family[0].toUpperCase()}${family.slice(1)}`,
   );
 }
 
@@ -107,18 +98,11 @@ const pageQuestions: Record<string, string[]> = {
     "当前报告和上期相比有哪些变化？",
   ],
 };
-const discussionPages: Record<string, string> = {
-  all: "运营看板中心",
-  products: "商品数据",
-  promotion_store: "推广分析",
-  promotion_product: "推广分析",
-  sales: "店铺销售",
-  aftersales: "售后分析",
-  weather: "运营看板中心",
-  data_status: "运营看板中心",
-};
-
 type Turn = {
+  scopeId: number;
+  historyScopeId?: number;
+  historyThrough?: number;
+  resolved?: AssistantScope;
   scope: AssistantScope;
   context: PageContext & {
     listing_id?: string;
@@ -139,6 +123,7 @@ function conversationSubject(result: ChatAnswer, scope: AssistantScope) {
   if (result.subject_cleared || (result.status === "need_selection" && result.candidates.length))
     return null;
   return result.status !== "answered" ||
+    !result.reports.length ||
     result.reports.some((report) => report.kind === "dashboard")
     ? scope.subject
     : null;
@@ -155,27 +140,19 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
   const [conversation, setConversation] = useState<AssistantScope | null>(null);
   const currentScope: AssistantScope =
     pageScope?.page === currentPage ? pageScope : { page: currentPage, subject: null, context: {} };
-  const scope = conversation ?? currentScope;
-  const product = scope.subject;
+  const [scopeId, setScopeId] = useState(0);
+  const [origin, setOrigin] = useState<AssistantScope | null>(null);
+  const [following, setFollowing] = useState(true);
+  const page = following ? currentScope : globalScope;
+  const product = page.subject;
+  const sameOrigin = !!origin && samePageFilters(origin, page);
+  const summary = following ? scopeSummary(page) : "全局问答";
   const [businessEnabled, setBusinessEnabled] = useState<boolean | null>(null);
-  const [models, setModels] = useState<string[]>([]);
-  const [choice, setChoice] = useState("");
-  const model = models.includes(choice) ? choice : models[0];
   const [draft, setDraft] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const discussion = turns.length
-    ? (scope.context.explanation?.view ?? scope.context.domain)
-    : undefined;
-  const questionPage = discussion ? (discussionPages[discussion] ?? scope.page) : scope.page;
-  const useProductQuestions =
-    !!product &&
-    (!turns.length ||
-      discussion === "products" ||
-      discussion === "promotion_product" ||
-      (!discussion && (questionPage === "商品数据" || questionPage === "推广分析")));
-  const questions = useProductQuestions
+  const questions = product
     ? productQuestions
-    : (pageQuestions[questionPage] ?? pageQuestions["运营看板中心"]);
+    : (pageQuestions[page.page] ?? pageQuestions[globalScope.page]);
   const dialog = useRef<HTMLDialogElement>(null);
   const history = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -190,47 +167,28 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     });
   }, []);
   useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
-  const differentPage = currentPage !== scope.page;
-  const differentSelection = !!currentScope.subject && !sameProduct(currentScope.subject, product);
-  const differentPeriod =
-    currentScope.context.date_from !== scope.context.date_from ||
-    currentScope.context.date_to !== scope.context.date_to;
-  const differentVersion =
-    currentScope.context.product_version !== scope.context.product_version ||
-    currentScope.context.promotion_version !== scope.context.promotion_version;
-  const canUsePage =
-    JSON.stringify(currentScope.context) !== JSON.stringify(scope.context) ||
-    differentPage ||
-    differentSelection ||
-    differentPeriod ||
-    differentVersion ||
-    currentScope.context.shop_id !== scope.context.shop_id;
   const pending = turns.at(-1)?.state === "loading";
 
   const active = useRef<{ controller: AbortController; generation: string } | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    // 打开助手即预热正文排版，首次输入时与用户操作并行加载。
+    void loadReply().catch(() => {});
     const controller = new AbortController();
-    async function loadModels() {
+    async function checkAvailability() {
       try {
         const response = await fetch("/api/v1/assistant/models", { signal: controller.signal });
-        if (!response.ok) throw new Error();
+        if (!response.ok) return;
         const data = await response.json();
-        if (
-          !Array.isArray(data.models) ||
-          !data.models.every((name: unknown) => typeof name === "string")
-        )
-          throw new Error();
-        if (!controller.signal.aborted) {
-          setModels(data.models);
-          setBusinessEnabled(data.business_data_enabled ?? true);
+        if (!controller.signal.aborted && Array.isArray(data.models)) {
+          setBusinessEnabled(data.models.length > 0 && data.business_data_enabled !== false);
         }
       } catch {
-        if (!controller.signal.aborted) setModels([]);
+        // 状态查询失败仍可由正常发送入口重试，并显示服务端的具体错误。
       }
     }
-    void loadModels();
+    void checkAvailability();
     return () => controller.abort();
   }, [open]);
 
@@ -264,7 +222,6 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
       close();
       return;
     }
-    if (!conversation) setConversation(currentScope);
     updatePanel("assistant", { open: true });
   }
   function cancelActive() {
@@ -282,12 +239,18 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
   }
   useEffect(() => () => cancelActive(), []);
 
-  function reset(nextScope: AssistantScope) {
+  function clearActiveScope() {
+    setScopeId((id) => id + 1);
+    setOrigin(null);
+    setConversation(null);
+  }
+
+  function reset() {
     cancelActive();
     setTurns([]);
-    setConversation(nextScope);
-    setDraft("");
+    clearActiveScope();
     input.current?.focus();
+    setDraft("");
   }
 
   /** 一次生成绑定提问当时的范围。重答/候选确认重用该快照，跨页不会改变请求。 */
@@ -315,12 +278,13 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           page: turn.scope.page,
           generation,
-          model,
           question: turn.question,
           context: turn.context,
           history: previous
+            .slice(0, turn.historyThrough)
             .filter(
               (t) =>
+                t.scopeId === (turn.historyScopeId ?? turn.scopeId) &&
                 t.state === "done" &&
                 t.result &&
                 sameProduct(conversationSubject(t.result, t.scope), turn.scope.subject),
@@ -342,7 +306,6 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
       });
       if (controller.signal.aborted) return;
       const subject = conversationSubject(result, turn.scope);
-      const changed = subject && !sameProduct(turn.scope.subject, subject);
       const nextContext = { ...turn.scope.context };
       if (result.subject_cleared) {
         delete nextContext.listing_ids;
@@ -354,12 +317,10 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
       }
       const mergedContext = { ...nextContext, ...result.query_context };
       if (mergedContext.explanation === null) delete mergedContext.explanation;
-      setConversation({
-        ...turn.scope,
-        subject,
-        context: mergedContext,
-      });
-      setTurns([...(changed ? [] : previous), { ...turn, state: "done", result }]);
+      if (mergedContext.risk_reference === null) delete mergedContext.risk_reference;
+      const resolved = { ...turn.scope, subject, context: mergedContext };
+      setConversation((current) => current && resolved);
+      setTurns([...previous, { ...turn, state: "done", result, resolved }]);
     } catch (error) {
       if (!controller.signal.aborted)
         setTurns([
@@ -381,15 +342,44 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     }
   }
 
-  function send(question: string, target = scope, previous = turns) {
+  function send(question: string, chosen?: AssistantScope, previous = turns, keepDraft = false) {
     const value = question.trim();
     if (!value || active.current || businessEnabled === false) return;
+    // 指向上文时取当次已确认的对象；“这款”和页面快捷问题使用界面当前选款。
+    const recall =
+      !chosen && /刚才|方才|上一问|上面(?:提到|说|那)|之前(?:说|聊|提到|那)/.test(value);
+    const earlier = recall ? previous.slice().reverse() : [];
+    const remembered =
+      earlier.find((t) => t.resolved?.subject?.name && value.includes(t.resolved.subject.name)) ??
+      earlier.find((t) => t.resolved);
+    const historyThrough = remembered ? previous.indexOf(remembered) + 1 : undefined;
+    const pageRequest =
+      !!chosen ||
+      /本页|当前页|当前筛选|所选/.test(value) ||
+      (!!product &&
+        !sameProduct(product, conversation?.subject ?? null) &&
+        /这款|这个商品/.test(value));
+    const target =
+      chosen ??
+      remembered?.resolved ??
+      (pageRequest || !sameOrigin ? page : (conversation ?? page));
+    const startsRange =
+      !sameOrigin ||
+      (pageRequest && conversation && !samePageFilters(conversation, target)) ||
+      keepDraft;
+    const nextId =
+      startsRange || (remembered && remembered.scopeId !== scopeId) ? scopeId + 1 : scopeId;
+    const historyId = remembered?.scopeId ?? nextId;
+    setScopeId(nextId);
+    setOrigin(page);
+    setConversation(target);
     const { date_from, date_to, ...base } = target.context;
-    const clearedAt = previous.reduce(
+    const thread = previous.slice(0, historyThrough).filter((t) => t.scopeId === historyId);
+    const clearedAt = thread.reduce(
       (last, turn, index) => (turn.state === "done" && turn.result?.subject_cleared ? index : last),
       -1,
     );
-    const scopedTurns = clearedAt < 0 ? previous : previous.slice(clearedAt);
+    const scopedTurns = clearedAt < 0 ? thread : thread.slice(clearedAt);
     const lastReport = scopedTurns
       .flatMap((t) => t.result?.reports ?? [])
       .filter((report) => "product" in report && sameProduct(report.product, target.subject))
@@ -403,7 +393,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
         ? { date_from: lastContext.date_from, date_to: lastContext.date_to }
         : lastReport?.period
           ? { date_from: lastReport.period.date_from, date_to: lastReport.period.date_to }
-          : {};
+          : { date_from, date_to };
     const context = {
       ...base,
       ...lastContext,
@@ -416,15 +406,27 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
         : {}),
     };
     if (context.explanation === null) delete context.explanation;
-    setDraft("");
-    void requestTurn({ question: value, scope: target, context, state: "loading" }, previous);
+    if (context.risk_reference === null) delete context.risk_reference;
+    if (!keepDraft) setDraft("");
+    void requestTurn(
+      {
+        scopeId: nextId,
+        historyScopeId: historyId,
+        historyThrough,
+        question: value,
+        scope: target,
+        context,
+        state: "loading",
+      },
+      previous,
+    );
   }
 
   function selectCandidate(turn: Turn, candidate: AssistantProduct) {
     if (active.current) return;
     const target = { ...turn.scope, subject: candidate };
     setConversation(target);
-    const previous = sameProduct(turn.scope.subject, candidate) ? turns.slice(0, -1) : [];
+    const previous = turns.slice(0, -1);
     void requestTurn(
       {
         ...turn,
@@ -444,9 +446,12 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
 
   function analyze(target: Omit<AssistantScope, "page">) {
     const next = { ...target, page: currentPage };
-    reset(next);
+    cancelActive();
     updatePanel("assistant", { open: true });
-    send(productQuestions[0], next, []);
+    const previous = turns.map((t): Turn =>
+      t.state === "loading" ? { ...t, state: "stopped" } : t,
+    );
+    send(productQuestions[0], next, previous, true);
   }
   function stop() {
     cancelActive();
@@ -493,11 +498,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                   <CommentOutlined aria-hidden />
                 </span>
                 <h2 id="assistant-title">AI助手</h2>
-                <button
-                  className="assistant-new"
-                  onClick={() => reset({ page: currentPage, subject: null, context: {} })}
-                  title="新对话"
-                >
+                <button className="assistant-new" onClick={reset} title="新对话">
                   <EditOutlined aria-hidden /> 新对话
                 </button>
                 <button className="assistant-icon-button" aria-label="收起助手" onClick={close}>
@@ -505,31 +506,23 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                 </button>
               </header>
               <div className="assistant-scope">
-                <div>
-                  <NodeIndexOutlined aria-hidden /> <strong>{scope.page}</strong>
-                  {product && <span>{product.shop_name ?? product.shop_id}</span>}
-                </div>
-                {product && (
-                  <div className="assistant-object">
-                    <TagOutlined aria-hidden />
-                    <span>
-                      {product.name ?? product.listing_id}
-                      <small>
-                        {product.product_id ? "商品 ID " + product.product_id : product.listing_id}
-                      </small>
-                    </span>
-                  </div>
-                )}
-                {scope.context.date_from && scope.context.date_to && (
-                  <small>
-                    页面期间 {scope.context.date_from} 至 {scope.context.date_to}
-                  </small>
-                )}
-                {canUsePage && (
-                  <button type="button" onClick={() => reset(currentScope)}>
-                    使用当前页范围 · {currentPage}
-                  </button>
-                )}
+                {product ? <TagOutlined aria-hidden /> : <NodeIndexOutlined aria-hidden />}
+                <strong title={summary} aria-label={summary}>
+                  {summary}
+                </strong>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={following}
+                  className="assistant-follow-mode"
+                  onClick={() => {
+                    setFollowing(!following);
+                    clearActiveScope();
+                  }}
+                >
+                  <span className="assistant-follow-track" aria-hidden="true" />
+                  跟随页面
+                </button>
               </div>
               <div
                 ref={history}
@@ -556,11 +549,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                   <article className="assistant-turn" key={i}>
                     <div className="assistant-question">{turn.question}</div>
                     <div className="assistant-byline">
-                      <CommentOutlined aria-hidden /> AI助手{" "}
-                      <span>
-                        · {turn.scope.page}
-                        {turn.result?.model && ` · ${modelLabel(turn.result.model)}`}
-                      </span>
+                      <CommentOutlined aria-hidden /> AI助手 <span>· {turn.scope.page}</span>
                     </div>
                     <Suspense fallback={null}>
                       <AssistantReply
@@ -572,25 +561,29 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                     </Suspense>
                     {turn.state === "done" && turn.result ? (
                       <div className="assistant-answer">
-                        {turn.result.candidates.length > 0 && i === turns.length - 1 && (
-                          <div className="assistant-candidates" aria-label="选择商品">
-                            {turn.result.candidates.map((candidate) => (
-                              <button
-                                key={candidate.listing_id}
-                                onClick={() => selectCandidate(turn, candidate)}
-                              >
-                                <b>{candidate.name ?? candidate.listing_id}</b>
-                                <small>
-                                  {candidate.shop_name ?? candidate.shop_id} ·{" "}
-                                  {candidate.product_id ?? candidate.listing_id}
-                                </small>
-                              </button>
-                            ))}
-                          </div>
+                        {turn.result.candidates.length > 0 &&
+                          turn.scopeId === scopeId &&
+                          i === turns.length - 1 && (
+                            <div className="assistant-candidates" aria-label="选择商品">
+                              {turn.result.candidates.map((candidate) => (
+                                <button
+                                  key={candidate.listing_id}
+                                  onClick={() => selectCandidate(turn, candidate)}
+                                >
+                                  <b>{candidate.name ?? candidate.listing_id}</b>
+                                  <small>
+                                    {candidate.shop_name ?? candidate.shop_id} ·{" "}
+                                    {candidate.product_id ?? candidate.listing_id}
+                                  </small>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        {(turn.result.reports.length > 0 || !!turn.result.evidence.trim()) && (
+                          <Suspense fallback={null}>
+                            <AssistantEvidence result={turn.result} question={turn.question} />
+                          </Suspense>
                         )}
-                        <Suspense fallback={null}>
-                          <AssistantEvidence result={turn.result} question={turn.question} />
-                        </Suspense>
                       </div>
                     ) : (
                       <div className="assistant-answer">
@@ -601,6 +594,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                               : (turn.progress ?? "正在查询…")
                             : (turn.error ?? "已停止回答")}
                           {(turn.state === "stopped" || turn.state === "error") &&
+                            turn.scopeId === scopeId &&
                             i === turns.length - 1 && (
                               <button
                                 onClick={() =>
@@ -624,18 +618,16 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                     aria-label="建议问题"
                   >
                     {questions.map((q, i) => (
-                      <button key={q} onClick={() => send(q)}>
+                      <button key={q} onClick={() => send(q, page)}>
                         {!turns.length && questionIcons[i]}
                         <span>
-                          {turns.length && useProductQuestions
-                            ? ["近期表现", "异常在哪", "再看推广"][i]
-                            : q}
+                          {turns.length && product ? ["近期表现", "异常在哪", "再看推广"][i] : q}
                         </span>
                         {!turns.length && <ArrowRightOutlined aria-hidden />}
                       </button>
                     ))}
-                    {scope.context.date_from && scope.context.date_to && (
-                      <button onClick={() => send("看看这款在当前期间的表现")}>
+                    {product && page.context.date_from && page.context.date_to && (
+                      <button onClick={() => send("看看这款在当前期间的表现", page)}>
                         <span>查看当前期间</span>
                       </button>
                     )}
@@ -676,28 +668,6 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                     }}
                   />
                   <div className="assistant-compose-tools">
-                    <div className="assistant-model">
-                      <ApiOutlined aria-hidden />
-                      <select
-                        aria-label="回答模型"
-                        value={model ?? ""}
-                        disabled={pending || models.length < 2}
-                        onChange={(event) => setChoice(event.target.value)}
-                      >
-                        {models.length ? (
-                          models.map((id) => (
-                            <option key={id} value={id}>
-                              {modelLabel(id)}
-                            </option>
-                          ))
-                        ) : (
-                          <option value="">默认模型</option>
-                        )}
-                      </select>
-                      {models.length > 1 && (
-                        <DownOutlined className="assistant-model-caret" aria-hidden />
-                      )}
-                    </div>
                     {pending ? (
                       <button type="button" onClick={stop}>
                         停止

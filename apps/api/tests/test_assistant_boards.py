@@ -1,5 +1,6 @@
 """共用助手整页工具：真实隔离PG、合成输入，不访问上游。"""
 
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -144,6 +145,173 @@ def test_catalog_identity_filtering_and_paging_across_fixed_domain_page(board):
     assert same["tables"][0]["total"] == 33
     empty = read(board, "products_overview", {**version, "keyword": "不存在"})
     assert values(empty)["revenue"] is None
+
+
+@pytest.fixture
+def risk_board(sales_pg, tmp_path):
+    products = (
+        (SHOP, "100", "雪原帽", "24100", 120, 6),
+        (SHOP, "101", "露营鞋", None, 200, 0),
+        (OTHER, "101", "露营鞋", "0", 200, 0),
+        (SHOP, "1772", "雨林伞", "10", 200, 4),
+    )
+    rows, profiles = [], []
+    for shop, pid, name, day_revenue, visitors, orders in products:
+        profiles.append(
+            dict(
+                __id=len(profiles) + 1,
+                **{"spigf" if shop == SHOP else "spihw": pid},
+                spmc=name,
+                cpdj="A级",
+            )
+        )
+        for lag in range(8):
+            rows.append(
+                dict(
+                    z_id=len(rows) + 1,
+                    shop_id=shop,
+                    shop_name="雪原官方店" if shop == SHOP else "雪原户外店",
+                    spu_id=pid,
+                    spu_name=name,
+                    dt=str(END - timedelta(days=lag)),
+                    time_granularity="day",
+                    product_uv=240 if lag else visitors,
+                    transaction_orders=12 if lag else orders,
+                    transaction_amount=("36650" if pid == "100" else "100") if lag else day_revenue,
+                )
+            )
+    sources = {
+        "product_daily": normalize("product_daily", rows, END),
+        "profile_records": normalize("profile_records", profiles, END),
+        "product_promotion": [],
+    }
+    ProductBoardStore(sales_pg, tmp_path).run(lambda hb: (END, sources))
+    return sales_pg
+
+
+def test_risk_evidence_separates_daily_money_period_total_and_rule_units(risk_board):
+    from app.modules.assistant.board_tools import read
+
+    report = read(risk_board, "products_risks", params(risk_board))
+    table = report["tables"][0]
+    rows = {(r["shop_id"], r["product_id"]): r for r in table["rows"]}
+    row = rows[(SHOP, "100")]
+    assert Decimal(row["period_revenue"]) == 244000
+    assert Decimal(row["evaluation_day_revenue"]) == 24100
+    assert rows[(SHOP, "101")]["evaluation_day_revenue"] is None
+    assert Decimal(rows[(OTHER, "101")]["evaluation_day_revenue"]) == 0
+    assert row["metric"] == "商品访客数" and row["unit"] == "人"
+    assert (Decimal(row["current"]), Decimal(row["baseline"])) == (120, 240)
+    assert "日均" in row["baseline_method"]
+    assert rows[(SHOP, "101")]["metric"] == "支付订单数" and rows[(SHOP, "101")]["unit"] == "单"
+    conversion = rows[(SHOP, "1772")]
+    assert conversion["metric"] == "订单转化率" and "小数" in conversion["unit"]
+    assert Decimal(conversion["current"]) == Decimal("0.02")
+    assert "合计" in conversion["baseline_method"]
+    columns = {column["key"]: column for column in table["columns"]}
+    for key in ("period_revenue", "evaluation_day_revenue", "estimated_impact"):
+        assert columns[key]["unit"] == "currency" and "元" in columns[key]["label"]
+        assert "2026-10-26" in columns[key]["label"]
+    assert (
+        "2026-10-20" in columns["period_revenue"]["label"]
+        and "累计" in columns["period_revenue"]["label"]
+    )
+    assert "当天" in columns["evaluation_day_revenue"]["label"]
+    assert "估算" in columns["estimated_impact"]["label"]
+    assert "2026-10-26" in columns["current"]["label"]
+    assert all(day in columns["baseline"]["label"] for day in ("2026-10-19", "2026-10-25"))
+    counts = {f["key"]: f for f in report["facts"] if f["key"].endswith("_product_count")}
+    assert counts["selected_product_count"]["value"] == 4
+    assert len(counts) == 6 and all("款" in f["label"] for f in counts.values())
+
+
+def test_risk_reference_requires_one_named_observed_listing_across_pages(risk_board):
+    from app.modules.assistant.board_tools import read, risk_product_reference
+    from app.modules.assistant.references import reference_from_answer
+    from app.modules.product_board.source import identity
+
+    p = params(risk_board, limit=1)
+    pages = [read(risk_board, "products_risks", {**p, "offset": i}) for i in range(4)]
+    first, shoe, other_shoe, umbrella = [r["tables"][0]["rows"][0] for r in pages]
+    assert [r["product_name"] for r in (first, shoe, other_shoe, umbrella)] == [
+        "雪原帽",
+        "露营鞋",
+        "露营鞋",
+        "雨林伞",
+    ]
+    expected = dict(
+        listing_id=identity(SHOP, "1772"),
+        shop_id=SHOP,
+        product_id="1772",
+        name="雨林伞",
+        shop_name="雪原官方店",
+    )
+    all_rows = (first, shoe, other_shoe, umbrella)
+    estimates = [
+        Decimal(r["estimated_impact"]) for r in all_rows if r["estimated_impact"] is not None
+    ]
+    for row in all_rows:
+        amount = row["estimated_impact"]
+        expected_rank = (
+            1 + sum(a > Decimal(amount) for a in estimates) if amount is not None else None
+        )
+        assert row["estimated_impact_rank"] == expected_rank
+    assert risk_product_reference(pages + pages[-1:], "建议先看**雨林伞**。") == expected
+    assert risk_product_reference(pages[-1:], "先看商品 ID：1772。") == expected
+    recorded_page = json.loads(json.dumps(pages[-1], ensure_ascii=False))
+    assert "雪原帽" not in json.dumps(recorded_page, ensure_ascii=False)
+    assert risk_product_reference([recorded_page], "雨林伞。") is None
+    assert risk_product_reference([recorded_page], f"商品ID 1772，店铺ID {SHOP}。") == expected
+    for answer in (
+        "本轮共有 1772 款。",
+        "建议先查列表第一款。",
+        "雪原帽和雨林伞都要查。",
+        "雨林伞（商品ID 999）。",
+    ):
+        assert risk_product_reference(pages, answer) is None
+    assert risk_product_reference(pages[:1], "先查雨林伞。") is None
+    assert risk_product_reference(pages[:1], "雪原帽、雨林伞一起核查。") is None
+    catalog = {
+        "capability": "products_catalog",
+        "tables": [
+            {
+                "rows": [
+                    dict(listing_id="other", shop_id=SHOP, product_id="300", product_name="山茶衫")
+                ]
+            }
+        ],
+    }
+    assert risk_product_reference([pages[0], catalog], "雪原帽和山茶衫都要核查。") is None
+    assert reference_from_answer([pages[0], catalog], "雪原帽和山茶衫都要核查。") is None
+    assert risk_product_reference(pages[-1:], "商品ID：1772、101。") is None
+    assert risk_product_reference(pages[1:2], "先查露营鞋。") is None
+    assert risk_product_reference(pages[1:2], "商品ID 101。") is None
+    assert risk_product_reference(pages[1:2], "雪原户外店的露营鞋。") is None
+    outdoor = risk_product_reference(pages[1:3], "先核查雪原户外店的露营鞋。")
+    assert outdoor and outdoor["listing_id"] == identity(OTHER, "101")
+
+
+def test_risk_reference_distinguishes_complete_names_from_parts_of_another_name():
+    from app.modules.assistant.board_tools import risk_product_reference
+    from app.modules.product_board.source import identity
+
+    rows = [
+        dict(
+            listing_id=identity(SHOP, pid),
+            product_id=pid,
+            shop_id=SHOP,
+            product_name=name,
+            shop_name="雪原店",
+        )
+        for pid, name in (("100", "雪原帽"), ("101", "加绒雪原帽"), ("102", "雨靴A1"))
+    ]
+    reports = [
+        {"capability": "products_risks", "tables": [{"rows": rows, "total": 3, "offset": 0}]}
+    ]
+    ref = risk_product_reference(reports, "优先复核加绒雪原帽。")
+    assert ref and ref["product_id"] == "101"
+    assert risk_product_reference(reports, "加绒雪原帽和雪原帽的情况不同。") is None
+    assert risk_product_reference(reports, "雨靴A10值得复核。") is None
 
 
 @pytest.mark.parametrize(

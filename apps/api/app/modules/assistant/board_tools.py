@@ -1,9 +1,10 @@
 """商品与推广看板的助手只读适配；所有指标、排序和规则复用领域查询。"""
 
+import re
 from dataclasses import replace
 from datetime import timedelta
 
-from app.modules.assistant.business import fact, report, table, window
+from app.modules.assistant.business import change_points, fact, report, table, window
 from app.modules.assistant.versions import report_versions
 from app.modules.product_board import query as products
 from app.modules.product_board.repository import BoardError, wire
@@ -281,6 +282,7 @@ def _comparison_table(metrics, *, product=False):
         ("current", "本期", "text"),
         ("previous", "前一期", "text"),
         ("change", "环比", "percent"),
+        ("change_pp", "比例变化（个百分点）", "number"),
         ("status", "比较状态", "text"),
         ("reason", "比较说明", "text"),
     )
@@ -289,12 +291,14 @@ def _comparison_table(metrics, *, product=False):
     rows = []
     for metric in metrics.values():
         comparison = metric.get("mom_comparison", {})
+        previous = metric.get("previous_period" if product else "previous")
         rows.append(
             dict(
                 label=metric["label"],
                 unit=metric["type"],
                 current=metric["value"],
-                previous=metric.get("previous_period" if product else "previous"),
+                previous=previous,
+                change_pp=change_points(metric["type"], metric["value"], previous),
                 change=metric.get("mom" if product else "change"),
                 status=comparison.get("reason")
                 or metric.get("comparison_status")
@@ -318,22 +322,189 @@ def _product_catalog(repo, q):
     ]
 
 
-def _product_risks(data):
-    return [
-        dict(
+RISK_METRICS = {
+    "visitors": ("商品访客数", "人"),
+    "orders": ("支付订单数", "单"),
+    "conversion": ("订单转化率", "小数（1 为 100%）"),
+}
+RISK_BASELINES = {
+    "daily_average": "基准期日均",
+    "ratio_of_totals": "基准期支付订单合计 ÷ 商品访客合计",
+}
+
+
+class _RiskReport(dict):
+    """序列化时只返回已读页。当前请求在内存中保留其余风险身份以核对重名。"""
+
+    def __init__(self, report, risks):
+        super().__init__(report)
+        shown = {row["listing_id"] for row in report["tables"][0]["rows"]}
+        self.other_identities = [
+            {
+                key: row.get(key)
+                for key in ("listing_id", "shop_id", "shop_name", "product_id", "product_name")
+            }
+            for row in risks
+            if row["listing_id"] not in shown
+        ]
+
+
+def _risk_table(data, limit, offset):
+    """按领域顺序切页，保留判断日、比较期和经营期各自的指标含义。"""
+    selected = data["risks"][offset : offset + limit]
+    day, period, baseline = data["evaluation_date"], data["period"], data["baseline_period"]
+    impacts = [row["alert"]["expected_loss"] for row in data["risks"]]
+    impact_ranks = {}
+    for rank, value in enumerate(sorted((v for v in impacts if v is not None), reverse=True), 1):
+        impact_ranks.setdefault(value, rank)
+    columns = IDENTITY + (
+        ("priority", "优先级", "text"),
+        ("risk", "关注项", "text"),
+        ("metric", "风险指标", "text"),
+        ("current", f"{day} 评估日观察值", "text"),
+        ("baseline", f"{baseline['start']} 至 {baseline['end']} 基准值", "text"),
+        ("unit", "观察值与基准值的单位", "text"),
+        ("baseline_method", "基准口径", "text"),
+        ("change", "观察值较基准变化率", "percent"),
+        ("evaluation_day_revenue", f"{day} 当天交易金额（元）", "currency"),
+        ("period_revenue", f"{period['start']} 至 {period['end']} 累计交易金额（元）", "currency"),
+        ("estimated_impact", f"{day} 单日规则估算影响金额（元）", "currency"),
+        ("estimated_impact_rank", "估算影响排名（完整命中清单中有估值的款，同额并列）", "number"),
+        ("reasons", "排查方向", "text"),
+        ("action", "建议动作", "text"),
+    )
+    rows = []
+    for row in selected:
+        alert = row["alert"]
+        metric, unit = RISK_METRICS[alert["metric"]]
+        item = dict(
             row,
-            priority=row["alert"]["priority"],
-            risk=row["alert"]["label"],
-            current=row["alert"]["current"],
-            baseline=row["alert"]["baseline"],
-            change=row["alert"]["change"],
-            unit=row["alert"]["type"],
-            estimated_impact=row["alert"]["expected_loss"],
-            reasons="；".join(row["alert"]["reasons"]),
-            action=row["alert"]["action"],
+            priority=alert["priority"],
+            risk=alert["label"],
+            metric=metric,
+            current=alert["current"],
+            baseline=alert["baseline"],
+            unit=unit,
+            baseline_method=RISK_BASELINES[alert["baseline_method"]],
+            change=alert["change"],
+            estimated_impact=alert["expected_loss"],
+            estimated_impact_rank=impact_ranks.get(alert["expected_loss"]),
+            reasons="；".join(alert["reasons"]),
+            action=alert["action"],
         )
-        for row in data
+        rows.append(_projection(item, columns))
+    return table("商品经营关注清单", columns, rows, total=data["total"], offset=offset)
+
+
+def _stated_ids(label, text):
+    """只取带商品或店铺 ID 标签的完整值，保留并列 ID 以发现多款。"""
+    token = r"[a-zA-Z0-9_-]+"
+    pattern = (
+        rf"(?:{label})\s*(?:为|是)?\s*[：:=#]?\s*"
+        rf"({token}(?:\s*[、,，]\s*{token})*)(?![a-zA-Z0-9_-]|\.\d|[、,，]\s*\d)"
+    )
+    return {
+        value for group in re.findall(pattern, text, re.I) for value in re.findall(token, group)
+    }
+
+
+def _mentioned_names(rows, field, text):
+    """只计完整名称的提及，长名中包含的短名需在正文中单独出现才算第二款。"""
+    spans = []
+    for name in {row.get(field) for row in rows}:
+        if not name or name.isdecimal() or name not in text:
+            continue
+        pattern = re.escape(name)
+        if name[0].isascii() and name[0].isalnum():
+            pattern = r"(?<![A-Za-z0-9_])" + pattern
+        if name[-1].isascii() and name[-1].isalnum():
+            pattern += r"(?![A-Za-z0-9_])"
+        spans.extend((m.start(), m.end(), name) for m in re.finditer(pattern, text))
+    mentioned = set()
+    last_end = -1
+    for _, end, name in sorted(spans, key=lambda s: (s[0], -s[1])):
+        if end > last_end:
+            mentioned.add(name)
+            last_end = end
+    return mentioned
+
+
+def risk_product_reference(reports: list[dict], answer: str) -> dict | None:
+    """从本轮已读风险页找正文明确指认的一款。无法唯一核实身份时返回空。"""
+    risks = [r for r in reports if r.get("capability") == "products_risks"]
+    shown = [row for r in risks for t in r.get("tables", []) for row in t["rows"]]
+    if not shown:
+        return None
+    # 其他工具可作为点了第二款的反例。最终只能绑定实际展示过的风险条目。
+    rows = [
+        row
+        for r in reports
+        for t in r.get("tables", [])
+        for row in t["rows"]
+        if row.get("listing_id") and row.get("shop_id") and row.get("product_id")
     ]
+    for r in risks:
+        rows.extend(getattr(r, "other_identities", ()))
+    for r in reports:
+        if (product := r.get("product")) and product.get("listing_id"):
+            rows.append(dict(product, product_name=product["name"]))
+    text = answer.replace("**", "").replace("`", "")
+
+    named = _mentioned_names(rows, "product_name", text)
+    shop_text = text
+    for name in named:
+        shop_text = shop_text.replace(name, "")
+    mentions = {
+        "product_name": named,
+        "shop_name": _mentioned_names(rows, "shop_name", shop_text),
+        "product_id": _stated_ids(r"商品\s*(?:ID|编号)|product_id", text),
+        "shop_id": _stated_ids(r"店铺\s*(?:ID|编号)|shop_id", text),
+        "listing_id": {
+            v.lower()
+            for v in re.findall(
+                r"(?<![a-z0-9_-])[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?![a-z0-9_-])",
+                text,
+                re.I,
+            )
+        },
+    }
+    if any(len(values) > 1 for values in mentions.values()):
+        return None
+    fields = {key: next(iter(values)) for key, values in mentions.items() if values}
+    if not fields.keys() & {"listing_id", "product_id", "product_name"}:
+        return None
+    # 单独重放已序列化的残页时，只有完整链接身份仍可证明唯一。
+    if (
+        "listing_id" not in fields
+        and not {"shop_id", "product_id"} <= fields.keys()
+        and any(
+            t.get("total") != len(t["rows"])
+            for r in risks
+            if not isinstance(r, _RiskReport)
+            for t in r["tables"]
+        )
+    ):
+        return None
+    matched = {r["listing_id"] for r in rows if all(r.get(k) == v for k, v in fields.items())}
+    if len(matched) != 1:
+        return None
+    row = next(
+        (
+            r
+            for r in shown
+            if r["listing_id"] in matched and all(r.get(k) == v for k, v in fields.items())
+        ),
+        None,
+    )
+    if row is None:
+        return None
+    return dict(
+        listing_id=row["listing_id"],
+        product_id=row["product_id"],
+        shop_id=row["shop_id"],
+        name=row.get("product_name") or row["product_id"],
+        shop_name=row.get("shop_name") or row["shop_id"],
+    )
 
 
 def _read_products(repo, capability, params, limit, offset):
@@ -438,38 +609,18 @@ def _read_products(repo, capability, params, limit, offset):
             notes.append("趋势仅返回最后25日；汇总覆盖所选完整期间。")
     elif capability == "products_risks":
         data = products.risk_feed(repo, q)
-        columns = IDENTITY + (
-            ("priority", "优先级", "text"),
-            ("risk", "关注项", "text"),
-            ("period_revenue", "经营期交易金额", "currency"),
-            ("current", "当前值", "text"),
-            ("baseline", "基准值", "text"),
-            ("unit", "指标单位", "text"),
-            ("change", "变化", "percent"),
-            ("estimated_impact", "估算影响金额", "currency"),
-            ("reasons", "排查方向", "text"),
-            ("action", "建议动作", "text"),
-        )
-        tables = [
-            _limited_table(
-                "商品经营关注清单",
-                columns,
-                _product_risks(data["risks"]),
-                limit,
-                offset,
-                total=data["total"],
-            )
-        ]
+        tables = [_risk_table(data, limit, offset)]
         count_labels = {
-            "selected": "所选商品",
-            "evaluated": "已评估",
-            "unevaluated": "未评估",
-            "excluded": "不适用",
-            "flagged": "命中关注",
-            "unflagged": "未命中",
+            "selected": "筛选内商品数",
+            "evaluated": "已评估商品数",
+            "unevaluated": "未评估商品数",
+            "excluded": "不适用商品数",
+            "flagged": "命中关注商品数",
+            "unflagged": "可评未命中商品数",
         }
         facts = [
-            fact(key, count_labels[key], value, "number") for key, value in data["counts"].items()
+            fact(f"{key}_product_count", f"{count_labels[key]}（款）", value, "number")
+            for key, value in data["counts"].items()
         ]
         facts.append(fact("status", "评估状态", data["status"]))
         scope.update(
@@ -478,7 +629,10 @@ def _read_products(repo, capability, params, limit, offset):
             baseline_period=data["baseline_period"],
             evaluation_date=data["evaluation_date"],
         )
-        notes.append("关注清单按领域优先级和规则分值排序；影响金额为规则估算。")
+        notes.append(
+            "清单按规则优先级和规则分值排序。比较估算影响用单列的估算影响排名。"
+            "销售额排名须另查成交额榜单。商品数的单位为款。"
+        )
     elif capability in ("products_scores", "products_days"):
         scoring = capability == "products_scores"
         data = _page(products.score_cards if scoring else products.days, repo, q, limit, offset)
@@ -529,7 +683,7 @@ def _read_products(repo, capability, params, limit, offset):
     else:
         items = _product_catalog(repo, q)
         tables = [_limited_table("商品目录", IDENTITY, items, limit, offset)]
-    return report(
+    result = report(
         "products",
         capability,
         "商品数据",
@@ -543,6 +697,7 @@ def _read_products(repo, capability, params, limit, offset):
         series=series,
         versions=report_versions(repo, from_promotion=False),
     )
+    return _RiskReport(result, data["risks"]) if capability == "products_risks" else result
 
 
 def _diagnosis_rows(items):

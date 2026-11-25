@@ -1,5 +1,6 @@
 """API 应用工厂与统一错误处理。"""
 
+from collections import deque
 import asyncio
 import logging
 from collections.abc import AsyncIterator
@@ -85,8 +86,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ThreadPoolExecutor(max_workers=1, thread_name_prefix="assistant-query")
             )
         )
-        application.state.assistant_agents = {}
-        application.state.assistant_active = None
+        application.state.assistant_agent = None
+        application.state.assistant_active = {}
         application.state.engine = build_engine(configured)
         logger.info("API 启动；数据库配置=%s", application.state.engine is not None)
         try:
@@ -139,7 +140,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(title="拼多多运营平台 API", version="0.1.0", lifespan=lifespan)
     application.state.assistant_settings = configured
-    application.state.assistant_lock = asyncio.Lock()
+    application.state.assistant_lock = asyncio.Semaphore(configured.assistant_max_concurrent)
+    application.state.assistant_agent_lock = asyncio.Lock()
+    application.state.assistant_requests = deque()
     application.state.engine = None
     application.state.product_overview_cache = DefaultOverviewCache()
     application.state.product_daily_overview_cache = DefaultOverviewCache()

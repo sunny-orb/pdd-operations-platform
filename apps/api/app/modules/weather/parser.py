@@ -11,7 +11,7 @@ from app.modules.weather.contracts import (
     WeatherSource,
 )
 
-PARSER_REVISION = "nmc-national-v2"
+PARSER_REVISION = "nmc-national-v3"
 FOCUS_REGIONS = ["广东", "江苏", "山东", "浙江", "河南", "河北", "北京", "四川", "辽宁"]
 REFERENCE_URL = "https://kocotree.feishu.cn/sheets/USG4sA8qjhYqDotULUQcH5uznJd?sheet=jvTHJw"
 RAIN = re.compile(r"雨|雪|降水")
@@ -77,18 +77,25 @@ def _block(text, pattern, label):
     )
 
 
+def _bulletin_forecasts(text: str) -> tuple[str | None, str | None]:
+    """按新版/旧版完整章节标题取重点和三天预报；缺章节返回None，不混入实况。"""
+    daily = re.split(r"(?m)^\s*三[、.．]\s*(?:国内)?未来三天具体预报", text, maxsplit=1)
+    domestic = re.split(r"(?m)^\s*二[、.．]\s*全球天气情况", text, maxsplit=1)[0]
+    key = re.split(r"(?m)^\s*(?:2[.．、]|二[、.．])\s*重点天气预报", domestic, maxsplit=1)
+    key_text = re.split(r"(?m)^\s*三[、.．]", key[1], maxsplit=1)[0] if len(key) == 2 else None
+    return key_text, daily[1] if len(daily) == 2 else None
+
+
 def today_temperature(sources, issue):
     """从归档国内重点/逐日及中期过程取覆盖发布日的气温原句；不把未来或实况当今日。"""
     by_url = {s.url: s for s in sources}
     bulletin = by_url[BULLETIN_URL]
-    daily = re.split(r"三[、.．]\s*国内未来三天具体预报", bulletin.text, maxsplit=1)
-    domestic = re.split(r"二[、.．]\s*全球天气情况", bulletin.text, maxsplit=1)[0]
-    key = re.split(r"2[.．、]\s*重点天气预报", domestic, maxsplit=1)
-    if len(daily) != 2 or len(key) != 2:
+    key, daily = _bulletin_forecasts(bulletin.text)
+    if daily is None or key is None:
         return WeatherBlock(
             regions=[], detail="本期气温预报暂无法读取，请查看原文。", status="unidentified"
         )
-    lines = [(line, issue) for line in (key[1] + "\n" + daily[1]).splitlines()]
+    lines = [(line, issue) for line in (key + "\n" + daily).splitlines()]
     medium = by_url[MID_RANGE_URL]
     part = re.split(r"主要天气过程[：:]", medium.text, maxsplit=1)
     if len(part) == 2:
@@ -129,7 +136,12 @@ def today_temperature(sources, issue):
 def presentation_document(raw):
     """按当前定义解释已归档原文，不改写发布记录、不访问上游；版本含定义哈希。"""
     doc = WeatherDocument.model_validate(raw)
-    doc.today_temperature = today_temperature(doc.sources, _stamp(doc.issue_time).date())
+    _, interpreted = build_document(
+        [SourceDocument(**source.model_dump()) for source in doc.sources]
+    )
+    doc.today_rain = interpreted.today_rain
+    doc.today_temperature = interpreted.today_temperature
+    doc.next_7_days = interpreted.next_7_days
     doc.note = doc.note.replace(
         "今日气温缺明确证据则待核。", "今日气温按国内当日预报识别；未提及不代表无天气风险。"
     )
@@ -150,8 +162,8 @@ def build_document(sources: list[SourceDocument]) -> tuple[date, WeatherDocument
     bulletin, medium = by_url[BULLETIN_URL], by_url[MID_RANGE_URL]
     issue = _stamp(bulletin.issue_time).date()
     # 降水只从国内未来三天读取；排除前置实况、全球及先出现的大风预计。
-    part = re.split(r"三[、.．]\s*国内未来三天具体预报", bulletin.text, maxsplit=1)
-    daily = part[1].splitlines() if len(part) == 2 else []
+    _, daily_text = _bulletin_forecasts(bulletin.text)
+    daily = daily_text.splitlines() if daily_text is not None else []
     current = next((line for line in daily if (p := _period(line, issue)) and p[0] == issue), "")
     rain = _block(current, RAIN, "今日降水")
     temperature = today_temperature(sources, issue)

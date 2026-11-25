@@ -1,6 +1,8 @@
 """销售/天气/状态助手契约：仅合成输入，读取真实隔离PostgreSQL。"""
 
 import json
+from dataclasses import replace
+from datetime import date
 
 import pytest
 from sqlalchemy import event
@@ -8,8 +10,12 @@ from sqlalchemy import event
 from app.modules.assistant import sales_tools
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.contracts import SalesError
+from app.modules.sales.normalization import fingerprint, normalize_shop_daily
+from app.modules.sales.source_policy import SHOPS
+from app.modules.sales.storage import ShopDailyStore
 from tests.test_sales_extended_api import publish, setup
-from tests.test_sales_extended_sources import sample
+from tests.test_sales_extended_sources import sample, window
+from tests.test_sales_source import raw_row
 from tests.test_sales_targets import SalesTargetStore, candidate
 from tests.test_weather import sources
 
@@ -102,6 +108,89 @@ def test_pagination_does_not_change_totals_and_shop_scope(prepared):
     assert len(trend["series"][0]["points"]) == 1
 
 
+def test_shop_revenue_fact_precedes_pagination_and_keeps_six_shop_denominator(sales_pg, tmp_path):
+    rows = [raw_row(id=sid, shop_id=sid, shop_name=identity[1]) for sid, identity in SHOPS.items()]
+    for row, amount in zip(rows, ["80.55", "19.45", "0", "0", "0", "0"], strict=True):
+        row["metrics"]["成交金额"] = amount
+    ShopDailyStore(sales_pg, archive_root=tmp_path, approved=window()).publish_candidate(
+        normalize_shop_daily(rows, window())
+    )
+    params = args(sales_pg)
+    full = sales_tools.read(sales_pg, "sales_shops", {**params, "limit": 1, "offset": 6})
+    assert full["tables"][0]["rows"] == []
+    total = next(f for f in full["facts"] if f["key"] == "all_shops_revenue")
+    assert (total["value"], total["unit"], total["status"]) == ("100.00", "currency", "observed")
+    assert "六店" in total["label"]
+    single = sales_tools.read(sales_pg, "sales_shops", {**params, "shop_id": "spihw"})
+    facts = {f["key"]: f for f in single["facts"]}
+    assert facts["all_shops_revenue"] == total
+    assert facts["shop_revenue"]["value"] == "19.45"
+    assert "户外" in facts["shop_revenue"]["label"]
+    assert single["tables"][0]["rows"][0]["sales_share"] == "0.194500000000"
+
+
+def test_shop_revenue_reports_published_null_amount_without_losing_observed_row(sales_pg, tmp_path):
+    # 为读取端构造可空金额的已封版行。现行接收器会拒绝这种核心字段缺失。
+    normal = normalize_shop_daily([raw_row()], window())
+    raw = normal.raw_rows[0]
+    raw_rows = (dict(raw, metrics={**raw["metrics"], "成交金额": None}),)
+    nullable = replace(
+        normal,
+        rows=(dict(normal.rows[0], shop_revenue=None),),
+        raw_rows=raw_rows,
+        fingerprint=fingerprint(raw_rows),
+    )
+    ShopDailyStore(sales_pg, archive_root=tmp_path, approved=window()).publish_candidate(nullable)
+    result = sales_tools.read(sales_pg, "sales_shops", args(sales_pg, shop_id="spigf"))
+    facts = {f["key"]: f for f in result["facts"]}
+    for key in ("shop_revenue", "all_shops_revenue"):
+        assert facts[key]["value"] is None
+        assert facts[key]["status"] == "field_null"
+    assert result["tables"][0]["rows"][0]["rank"] is None
+
+
+def test_target_report_separates_published_channel_goal_from_requested_shop(prepared):
+    p = args(prepared, month="2026-10")
+    channel = sales_tools.read(prepared, "sales_targets", p)
+    single = sales_tools.read(prepared, "sales_targets", {**p, "shop_id": "spigf"})
+    for result in (channel, single):
+        assert result["scope"]["target_grain"] == "channel"
+        assert result["scope"]["shop_target_status"] == "not_published"
+        facts = {f["key"]: f for f in result["facts"]}
+        assert "六店渠道" in facts["month_target"]["label"]
+        assert "六店渠道" in facts["month_ratio"]["label"]
+        assert facts["month_target"]["value"] == "25000.25"
+        assert facts["month_ratio"]["value"] == "0.003999960000"
+    assert single["scope"]["requested_shop_id"] == "spigf"
+    facts = {f["key"]: f for f in single["facts"]}
+    assert "官方" in facts["shop_month_target"]["label"]
+    assert "官方" in facts["shop_month_ratio"]["label"]
+    assert facts["shop_month_target"]["value"] is None
+    assert facts["shop_month_target"]["status"] == "not_published"
+    assert facts["shop_month_ratio"]["value"] is None
+    assert facts["shop_month_ratio"]["reason"]
+    with pytest.raises(BoardError, match="INVALID_SCOPE"):
+        sales_tools.read(prepared, "sales_targets", {**p, "shop_id": "invalid"})
+
+
+def test_default_target_uses_sales_calendar_when_latest_sale_falls_in_prior_month(
+    prepared, monkeypatch
+):
+    from app.modules.sales import detail_queries, source_policy
+
+    monkeypatch.setattr(source_policy, "calendar_through", lambda: date(2026, 11, 2))
+    monkeypatch.setattr(detail_queries, "calendar_through", lambda: date(2026, 11, 2))
+    metadata = sales_tools.describe(prepared)
+    assert metadata["date_to"] == "2026-10-26"
+    target = sales_tools.read(prepared, "sales_targets", {"data_version": metadata["data_version"]})
+    assert target["period"] == {"date_from": "2026-11-01", "date_to": "2026-11-02"}
+    assert metadata["options"]["default_month"] == target["scope"]["month"] == "2026-11"
+    facts = {f["key"]: f for f in target["facts"]}
+    assert facts["month_target"]["value"] == "25000.25"
+    assert facts["month_actual"]["value"] is None
+    assert facts["month_ratio"]["value"] is None
+
+
 @pytest.mark.parametrize(
     "changes",
     [
@@ -164,11 +253,6 @@ def test_weather_status_are_local_read_only(prepared, tmp_path):
 
 
 def test_zero_missing_and_empty_sources(sales_pg, tmp_path):
-    from app.modules.sales.normalization import normalize_shop_daily
-    from app.modules.sales.storage import ShopDailyStore
-    from tests.test_sales_extended_sources import window
-    from tests.test_sales_source import raw_row
-
     ShopDailyStore(sales_pg, archive_root=tmp_path / "daily", approved=window()).publish_candidate(
         normalize_shop_daily(
             [
@@ -190,11 +274,21 @@ def test_zero_missing_and_empty_sources(sales_pg, tmp_path):
                         "成交订单数": "0",
                     },
                 ),
+                raw_row(id="0003", dt="2026-10-24 00:00:00"),
             ],
             window(),
         )
     )
     p = args(sales_pg, shop_id="spigf")
+    for day, expected, state in [
+        ("2026-10-25", None, "no_records"),
+        ("2026-10-26", "0.00", "partial"),
+    ]:
+        report = sales_tools.read(sales_pg, "sales_shops", {**p, "date_from": day, "date_to": day})
+        facts = {f["key"]: f for f in report["facts"]}
+        assert facts["all_shops_revenue"]["value"] == expected
+        assert facts["all_shops_revenue"]["status"] == state
+        assert facts["all_shops_revenue"]["reason"]
     zero = sales_tools.read(
         sales_pg, "sales_performance", {**p, "date_from": "2026-10-26", "date_to": "2026-10-26"}
     )

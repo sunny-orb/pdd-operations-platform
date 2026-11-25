@@ -7,8 +7,12 @@ import pytest
 import sqlalchemy as sa
 
 from app.modules.aftersales.classification import rule_parameters
+from app.modules.aftersales.rpa_publisher import sync_rpa
+from app.modules.aftersales.targets import publish_targets
 from app.modules.product_board.repository import BoardError
 from tests.test_aftersales_api import publish
+from tests.test_aftersales_rpa import delivery
+from tests.test_aftersales_targets import config
 
 pytest_plugins = ["tests.sales_pg_support"]
 
@@ -75,6 +79,9 @@ def test_overview_preserves_full_scope_decimal_and_read_only(sales_pg):
     assert Decimal(values["inbound_amount"]) == 15
     assert values["total_rate"] == "0.34482758620689655172413793103448275862068965517241"
     assert result["domain"] == "aftersales" and result["source"]
+    target_gap = next(item for item in result["facts"] if item["key"] == "risk_target_gap")
+    assert target_gap["value"] is None and "没有可比较的整体目标" in target_gap["reason"]
+    assert "总退款率" in target_gap["reason"]
     assert_scalar_tables(result)
     with sales_pg.connect() as c:
         assert c.scalar(sa.text("SELECT count(*) FROM task_runs")) == before
@@ -206,11 +213,6 @@ def test_report_catalog_limit_can_be_continued_and_selected(sales_pg):
 
 
 def test_rpa_zero_denominator_and_bound_targets_remain_explicit(sales_pg, tmp_path):
-    from app.modules.aftersales.rpa_publisher import sync_rpa
-    from app.modules.aftersales.targets import publish_targets
-    from tests.test_aftersales_rpa import delivery
-    from tests.test_aftersales_targets import config
-
     publish_targets(sales_pg, config(), tmp_path)
     rows = delivery()
     for row in rows:
@@ -227,7 +229,74 @@ def test_rpa_zero_denominator_and_bound_targets_remain_explicit(sales_pg, tmp_pa
     assert [r["upper_rate"] for r in targets["rows"]] == ["0.43", "0.36"]
     assert all(r["current"] is None and r["state"] == "metric_unavailable"
                for r in targets["rows"])
+    assert all("实际值不可用" in row.get("comparison", "") for row in targets["rows"])
     assert "RPA" in result["source"]
-    filtered = adapter().read(sales_pg, "aftersales_overview", {"category": "童帽"})
-    targets = next(t for t in filtered["tables"] if t["title"] == "整体目标区间")
-    assert all(r["state"] == "scope_not_applicable" for r in targets["rows"])
+
+
+def test_bound_target_directions_use_report_rates_and_percentage_points(sales_pg, tmp_path):
+    publish_targets(sales_pg, config(), tmp_path)
+    previous = delivery(date(2026, 11, 16), 100)
+    previous[1]["json_data"]["实际入库金额"] = "24.725"
+    current = delivery(date(2026, 11, 23), 200)
+    current[1]["json_data"]["实际入库金额"] = "27.0125"
+    sync_rpa(sales_pg, lambda: previous + current, tmp_path)
+
+    result = adapter().read(sales_pg, "aftersales_overview", {})
+    assert result["period"] == {"date_from": "2026-10-25", "date_to": "2026-11-23"}
+    by_key = {item["key"]: item for item in result["facts"]}
+    assert Decimal(by_key["total_rate"]["value"]) == Decimal("0.4161")
+    gap = by_key["risk_target_gap"]
+    assert Decimal(gap["value"]) == Decimal("-1.39") and gap["unit"] == "number"
+    assert "上界" in gap["label"] and "百分点" in gap["label"]
+    change = by_key["risk_change_pp"]
+    assert Decimal(change["value"]) == Decimal("1.83") and change["unit"] == "number"
+    assert "总退款率" in change["label"] and "较上期" in change["label"]
+    assert "总退款率高于上期 1.83 个百分点" in change["reason"]
+
+    targets = next(t for t in result["tables"] if t["title"] == "整体目标区间")
+    total, after = targets["rows"]
+    assert total["state"] == "within_range" and after["state"] == "below_range"
+    for phrase in ("区间内", "40%–43%", "高于下界 1.61 个百分点", "低于上界 1.39 个百分点"):
+        assert phrase in total["comparison"]
+    assert total["comparison"] == gap["reason"]
+    assert "售后退款率" in after["comparison"] and "低于下界 4.99 个百分点" in after["comparison"]
+
+    for filters in ({"category": "童帽"}, {"keyword": "K01"}, {"focus": "quality"}):
+        filtered = adapter().read(sales_pg, "aftersales_overview", filters)
+        assert facts(filtered)["total_rate"] is not None
+        targets = next(t for t in filtered["tables"] if t["title"] == "整体目标区间")
+        assert len(targets["rows"]) == 2
+        for row in targets["rows"]:
+            assert row["state"] == "scope_not_applicable" and "不适用" in row["comparison"]
+            assert row["current"] is None and row["upper_gap_pp"] is None
+
+
+def test_closed_target_bounds_and_directions_survive_display_rounding(sales_pg, tmp_path):
+    publish_targets(sales_pg, config(), tmp_path)
+    # 每期实发100元、取消25元。按指定的入库金额核对各期整体总退款率。
+    examples = [
+        (date(2026, 10, 19), "25", "within_range", ("区间内", "等于下界")),
+        (date(2026, 10, 26), "28.75", "within_range", ("区间内", "等于上界")),
+        (date(2026, 10, 31), "30", "above_range", ("高于上界 1.00 个百分点",)),
+        (date(2026, 11, 2), "23.75", "below_range", ("低于下界 1.00 个百分点",)),
+        (date(2026, 11, 9), "28.75125", "above_range", ("高于上界", "不足 0.01 个百分点")),
+    ]
+    rows = []
+    for i, (end, inbound, _, _) in enumerate(examples):
+        sample = delivery(end, i * 100)
+        sample[1]["json_data"]["实际入库金额"] = inbound
+        if end == date(2026, 10, 31):
+            for row in sample:
+                row.update(time_granularity="monthly", start_date=date(2026, 10, 1))
+        rows.extend(sample)
+    sync_rpa(sales_pg, lambda: rows, tmp_path)
+    catalog = adapter().describe(sales_pg)
+    report_ids = {r["date_to"]: r["id"] for r in catalog["reports"]}
+    for end, _, state, phrases in examples:
+        report = adapter().read(
+            sales_pg, "aftersales_overview", {"report_id": report_ids[str(end)]}
+        )
+        target = next(t for t in report["tables"] if t["title"] == "整体目标区间")["rows"][0]
+        assert target["state"] == state
+        for phrase in phrases:
+            assert phrase in target.get("comparison", "")

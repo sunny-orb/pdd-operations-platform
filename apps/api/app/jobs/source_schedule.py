@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
 
+from app.jobs.gap_repair import DailyGapRepair
 from app.jobs.source_monitor import fingerprint
 from app.modules.data_status.catalog import job_for
 from app.modules.data_status.checkpoint_store import (
@@ -146,6 +147,7 @@ def run_scheduled_sources(
     reconciliation_time=RECONCILIATION_TIME,
     reconciliation_retry_seconds=RECONCILIATION_RETRY_SECONDS,
     force=False,
+    gap_candidates=None,
 ):
     """接收器在持锁连接上串行处理范围；同轮普通与对账共享下载和前后标记。"""
     clock = clock or (lambda: now or datetime.now(UTC))
@@ -166,6 +168,7 @@ def run_scheduled_sources(
             legacy_tasks = read_legacy_tasks(c) if cycles else {}
         observed, selected, ordinary, weekly = {}, [], {}, {}
         regular_codes = set()
+        gaps = DailyGapRepair(None if force else gap_candidates, warehouse_times, clock)
 
         def observe(code, *, ordinary_check):
             if ordinary_check:
@@ -174,9 +177,8 @@ def run_scheduled_sources(
                         c, code, checked_at=clock(), check_status="checking", error_code=None
                     )
             value = _probe(probes[code], clock)
-            if ordinary_check:
-                with c.begin():
-                    store.write(c, code, **value)
+            with c.begin():
+                store.write(c, code, timing_only=not ordinary_check, **value)
             return value
 
         for code in probes:
@@ -226,7 +228,9 @@ def run_scheduled_sources(
                 if not force and not cooling_down and code in RECONCILIATION_SOURCES
                 else None
             )
-            if not regular and weekly_slot is None:
+            if not cooling_down:
+                gaps.plan(c, code, prior, started, cycle, weekly_slot)
+            if not regular and weekly_slot is None and code not in gaps.dates:
                 continue
             if regular:
                 regular_codes.add(code)
@@ -276,12 +280,24 @@ def run_scheduled_sources(
                         sync_started_at=ordinary[code],
                         sync_finished_at=None,
                     )
-            if code in ordinary or code in weekly:
+            if code in gaps.dates and not digest:
+                with c.begin():
+                    gaps.finish(c, code, False)
+                del gaps.dates[code]
+            if code in ordinary or code in weekly or code in gaps.dates:
                 selected.append(code)
         if not observed:
+            if gaps.failures:
+                count = len(gaps.failures)
+                return {"status": "partial", "checked": count, "failed": count, "sources": []}
             return {"status": "checked", "checked": 0, "sources": []}
         try:
-            results = synchronize(tuple(selected), c)
+            repair_options = (
+                {"repair_dates": gaps.dates, "repair_only": gaps.dates.keys() - ordinary.keys()}
+                if gaps.dates
+                else {}
+            )
+            results = synchronize(tuple(selected), c, **repair_options)
         except Exception as exc:
             reason = deferred_reason(exc)
             results = (
@@ -300,6 +316,7 @@ def run_scheduled_sources(
             finished = clock()
             prior = previous.get(code, {})
             with c.begin():
+                gaps.finish(c, code, stable)
                 if code in ordinary:
                     if code in deferred:
                         store.write(
@@ -390,12 +407,16 @@ def run_scheduled_sources(
             c, now=clock(), warehouse_times=warehouse_times, feishu_times=feishu_times
         )
         current = store.read(c)
-        failures = weekly_failed | {
-            code
-            for code in regular_codes
-            if current[code]["check_status"] == "failed"
-            or current[code].get("error_code") in SYNC_FAILURE_CODES
-        }
+        failures = (
+            gaps.failures
+            | weekly_failed
+            | {
+                code
+                for code in regular_codes
+                if current[code]["check_status"] == "failed"
+                or current[code].get("error_code") in SYNC_FAILURE_CODES
+            }
+        )
         pending = sum(
             current[code].get("error_code") == "SOURCE_CHANGED_DURING_SYNC"
             for code in regular_codes

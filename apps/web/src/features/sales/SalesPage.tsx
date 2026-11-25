@@ -69,6 +69,7 @@ export function SalesPage() {
     >
       <AssistantPageContext
         page="店铺销售"
+        selectionLabel={scope.shop && filters ? selectedName : undefined}
         subject={null}
         context={
           filters && !scopeError

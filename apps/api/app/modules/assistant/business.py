@@ -1,6 +1,7 @@
 """助手领域适配的展示契约。只整理既有查询结果，不定义新的业务公式。"""
 
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 from app.modules.product_board.repository import BoardError, wire
 
@@ -22,6 +23,14 @@ def window(params, start, end):
     if not start <= first <= last <= end or (last - first).days >= 366:
         raise BoardError("INVALID_SCOPE")
     return first, last
+
+
+def change_points(unit, current, previous):
+    """两期原始比例的百分点差。任一期缺值时保留缺项，ROI 等倍数不适用。"""
+    if unit != "percent" or current is None or previous is None:
+        return None
+    delta = (Decimal(str(current)) - Decimal(str(previous))) * 100
+    return format(delta.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP), "f")
 
 
 def fact(key, label, value, unit="text", *, status="observed", reason=None):

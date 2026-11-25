@@ -122,3 +122,16 @@ it("流式语法跨块补全后正确排版，完成事件不打断收尾", () =
   expect(view.container.querySelector("li")?.textContent).toBe("先核查渠道");
   expect(frames.size).toBe(0);
 });
+
+it("完成帧到达后，长回答在短时间内平滑补齐", () => {
+  const props = { text: "", streaming: true, paused: false, onReveal: vi.fn() };
+  const view = render(<AssistantReply {...props} />);
+  const text = "访客有所增长。".repeat(70);
+  view.rerender(<AssistantReply {...props} text={text} />);
+  step(2);
+  view.rerender(<AssistantReply {...props} streaming={false} text={text} />);
+  step(1);
+  expect(view.container.textContent).not.toBe(text);
+  step(15);
+  expect(view.container.textContent).toBe(text);
+});

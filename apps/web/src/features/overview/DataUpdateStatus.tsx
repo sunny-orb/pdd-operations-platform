@@ -661,7 +661,9 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
             聚水潭、天气沿用原计划。
           </p>
         )}
-        <p>按昨天更新时间推到今天加一小时判断延迟；没有可靠时间依据则不判定。</p>
+        <p>
+          上游日报按北京时间昨天的业务日期核对。以昨天首次见到前一业务日数据的钟点加一小时为今天的期限，超过期限再核对仍无记录时显示延迟。平台接收结果和历史缺口分别见同步状态、记录情况。
+        </p>
         <p>打开时读取状态，可手动刷新。刷新状态只读取平台；同步失败时保留最近成功的数据。</p>
       </details>
       <Tabs
@@ -870,7 +872,7 @@ function StatusContent({ query }: { query: ReturnType<typeof useDataUpdateStatus
   );
 }
 
-/** 入口与弹窗共用状态查询；全来源故障红点优先于延迟黄点，缺记录只在内部说明。 */
+/** 入口与弹窗共用状态查询；故障红点优先于确认延迟黄点，缺记录只在内部说明。 */
 export const DataUpdateStatus = memo(function DataUpdateStatus() {
   const [open, setOpen] = useState(false);
   const query = useDataUpdateStatus(open);
@@ -880,7 +882,7 @@ export const DataUpdateStatus = memo(function DataUpdateStatus() {
   const summary = [
     alerts.failed ? `数据更新异常：${alerts.description}` : "",
     alerts.delayed.length
-      ? `上游更新延迟：${alerts.delayed.map((row) => row.name).join("、")}`
+      ? `数据更新延迟：${alerts.delayed.map((row) => row.name).join("、")}`
       : "",
     query.isError ? "状态读取失败，暂时无法确认最新状态" : "",
     !query.isError && alerts.stale ? "部分来源检查已过期" : "",
@@ -926,7 +928,7 @@ export const DataUpdateStatus = memo(function DataUpdateStatus() {
         {alerts.failed && <span aria-label="数据更新异常">{summary}</span>}
         {!alerts.failed && <span>{summary}</span>}
         {alerts.delayed.length > 0 && (
-          <span aria-label="上游更新延迟">已核对{alerts.delayed.length}个来源更新延迟</span>
+          <span aria-label="数据更新延迟">已核对{alerts.delayed.length}个来源更新延迟</span>
         )}
       </span>
       <Modal

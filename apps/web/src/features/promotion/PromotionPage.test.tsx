@@ -463,6 +463,7 @@ it.each([
     () =>
       expect(register).toHaveBeenLastCalledWith({
         page: "推广分析",
+        selectionLabel: selectedShop === "shop-a" ? "商品推广 · 甲店" : "商品推广 · 乙店",
         context: expect.objectContaining({
           domain: "promotion_product",
           mode: "product",

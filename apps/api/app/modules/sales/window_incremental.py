@@ -1,7 +1,7 @@
 """销售固定日来源窗口接收：保留批准历史，不把业务日当修改游标。"""
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 import sqlalchemy as sa
@@ -16,7 +16,7 @@ from .normalization import fingerprint, normalize_shop_daily
 from .source_normalization import normalize_source
 from .source_policy import MAX_ROWS
 
-# 普通接收只重查最新业务日；更早修订由批准的周对账发现，不视为修改游标。
+# 普通接收重查最新业务日；有来源证据的旧缺日按日补齐，其余历史修订由周对账发现。
 LOOKBACK_DAYS = 1
 SALES_INCREMENTAL_SOURCES = frozenset(
     {
@@ -45,14 +45,89 @@ def normalize_sales_window(code, rows, window, heartbeat=lambda: None, *, allow_
     return normalize_source(code, rows, window, heartbeat)
 
 
-def receive_sales_window(store, read, *, heartbeat=lambda: None, full=False, row_limit=None):
-    """在store.run来源锁内接收；read稳定双读，返回可独立重放的完整候选。
+def _read_windows(approved, baseline_end, repair_dates, repair_only):
+    """合并相邻业务日；普通接收保留最新日及停机续接，单独补缺仅加尚未读过的尾段。"""
+    days = set(repair_dates)
+    start = max(approved.start, approved.end - timedelta(days=LOOKBACK_DAYS - 1))
+    if repair_only:
+        start = baseline_end + timedelta(days=1)
+    else:
+        start = min(start, baseline_end + timedelta(days=1))
+    days.update(start + timedelta(days=i) for i in range((approved.end - start).days + 1))
+    spans = []
+    for day in sorted(days):
+        if spans and day == spans[-1][1] + timedelta(days=1):
+            spans[-1] = (spans[-1][0], day)
+        else:
+            spans.append((day, day))
+    return days, [type(approved)(first, last, approved.shop_ids) for first, last in spans]
 
-    周对账/无基线读完整批准范围；普通接收只替换回看窗口，缺键和跨日移键拒绝。
-    已验证范围取归档窗口，不用最大业务日期推定齐数；断档补齐旧窗口之后的日期。
-    """
+
+def _merge_window_rows(store, baseline, read, windows, days, repair_dates, row_limit, heartbeat):
+    """仅替换稳定双读的日期。保留其他日期的原投影，缺键、跨日移键或补缺证据落空均拒绝。"""
+    combined, new, observed = [], {}, set()
+    for window in windows:
+        heartbeat()
+        incoming = read(window)
+        if incoming.window != window:
+            raise SalesError("PUBLICATION_SCOPE_MISMATCH")
+        for row in incoming.rows:
+            key = row["source_row_key"]
+            if key in new:
+                raise SalesError("SOURCE_KEY_MOVED")
+            new[key] = row
+            observed.add(row[store.date_column])
+        combined.extend(incoming.raw_rows)
+        if len(combined) > row_limit:
+            raise SalesError("SOURCE_ROW_LIMIT")
+    if not repair_dates <= observed:
+        raise SalesError("SOURCE_REPAIR_DATE_NO_RECORDS", 503)
+    for index, (old, raw) in enumerate(zip(baseline.rows, baseline.raw_rows, strict=True)):
+        if index % 1000 == 0:
+            heartbeat()
+        key = old["source_row_key"]
+        if old[store.date_column] not in days:
+            if key in new:
+                raise SalesError("SOURCE_KEY_MOVED")
+            combined.append(raw)
+        elif key not in new:
+            raise SalesError("SOURCE_OLD_KEY_MISSING")
+        elif (old["shop_id"], old[store.date_column]) != (
+            new[key]["shop_id"],
+            new[key][store.date_column],
+        ):
+            raise SalesError("SOURCE_KEY_MOVED")
+        elif (
+            store.code == "shop_regions"
+            and old["source_region_name"] != new[key]["source_region_name"]
+        ):
+            raise SalesError("SOURCE_KEY_MOVED")
+    if len(combined) > row_limit:
+        raise SalesError("SOURCE_ROW_LIMIT")
+    return combined
+
+
+def receive_sales_window(
+    store,
+    read,
+    *,
+    heartbeat=lambda: None,
+    full=False,
+    row_limit=None,
+    repair_dates=(),
+    repair_only=False,
+):
+    """在来源锁内稳定双读；以已核归档为基线，将指定补缺日和普通增量合成一个完整候选。"""
     if store.code not in SALES_INCREMENTAL_SOURCES:
         raise SalesError("INVALID_INCREMENTAL_DATASET")
+    approved = store.approved
+    repair_dates = frozenset(repair_dates)
+    if any(
+        type(day) is not date or not approved.start <= day <= approved.end for day in repair_dates
+    ):
+        raise SalesError("SOURCE_WINDOW_NOT_APPROVED")
+    if (repair_dates and full) or (repair_only and not repair_dates):
+        raise SalesError("INVALID_REPAIR_SCOPE")
     if row_limit is None:
         row_limit = (
             MAX_ROWS
@@ -79,9 +154,9 @@ def receive_sales_window(store, read, *, heartbeat=lambda: None, full=False, row
         )
         if head:
             ensure_online(c, [head["id"]])
-    approved = store.approved
-    window = approved
-    baseline = None
+    if repair_dates and not head:
+        raise SalesError("INCREMENTAL_BASELINE_REQUIRED")
+    windows = [approved]
     if head and not full:
         source = Path(require_archive(head["retained_input_ref"]))
         for name in ("interpretation.json", "producer-source.json"):
@@ -97,59 +172,32 @@ def receive_sales_window(store, read, *, heartbeat=lambda: None, full=False, row
             or baseline.window.end > approved.end
         ):
             raise SalesError("INCREMENTAL_BASELINE_SCOPE_MISMATCH")
-        start = max(approved.start, approved.end - timedelta(days=LOOKBACK_DAYS - 1))
-        if baseline.window.end < start:
-            start = max(approved.start, baseline.window.end + timedelta(days=1))
-        window = type(approved)(start, approved.end, approved.shop_ids)
-    heartbeat()
-    incoming = read(window)
-    if incoming.window != window:
-        raise SalesError("PUBLICATION_SCOPE_MISMATCH")
-    if baseline is not None:
-        # 同一ID不能从历史段跨入窗口，窗口内旧键也不能不明消失或改店/改日期。
-        new = {r["source_row_key"]: r for r in incoming.rows}
-        retained = []
-        for index, (old, raw) in enumerate(zip(baseline.rows, baseline.raw_rows, strict=True)):
-            if index % 1000 == 0:
-                heartbeat()
-            key = old["source_row_key"]
-            if old[store.date_column] < window.start:
-                if key in new:
-                    raise SalesError("SOURCE_KEY_MOVED")
-                retained.append(raw)
-            elif key not in new:
-                raise SalesError("SOURCE_OLD_KEY_MISSING")
-            elif (old["shop_id"], old[store.date_column]) != (
-                new[key]["shop_id"],
-                new[key][store.date_column],
-            ):
-                raise SalesError("SOURCE_KEY_MOVED")
-            elif (
-                store.code == "shop_regions"
-                and old["source_region_name"] != new[key]["source_region_name"]
-            ):
-                raise SalesError("SOURCE_KEY_MOVED")
-        combined = [*retained, *incoming.raw_rows]
-        if len(combined) > row_limit:
-            raise SalesError("SOURCE_ROW_LIMIT")
-        # 原投影已收集，提前释放两份规范化中间结果，避免与完整候选并存。
-        del baseline, new, incoming
+        days, windows = _read_windows(approved, baseline.window.end, repair_dates, repair_only)
+        combined = _merge_window_rows(
+            store, baseline, read, windows, days, repair_dates, row_limit, heartbeat
+        )
+        del baseline
         incoming = normalize_sales_window(store.code, combined, approved, heartbeat)
+    else:
+        heartbeat()
+        incoming = read(approved)
+        if incoming.window != approved:
+            raise SalesError("PUBLICATION_SCOPE_MISMATCH")
     if not incoming.rows:
         raise SalesError("SOURCE_NO_RECORDS")
     if len(incoming.rows) > row_limit:
         raise SalesError("SOURCE_ROW_LIMIT")
-    return replace(
-        incoming,
-        source_metadata={
-            "incremental_baseline": str(head["id"]) if head else None,
-            "receipt_mode": "full_reconciliation"
-            if full
-            else "bootstrap"
-            if not head
-            else "lookback",
-            "read_start": str(window.start),
-            "read_end": str(window.end),
-            "lookback_days": LOOKBACK_DAYS,
-        },
-    )
+    metadata = {
+        "incremental_baseline": str(head["id"]) if head else None,
+        "receipt_mode": "full_reconciliation" if full else "lookback" if head else "bootstrap",
+        "lookback_days": LOOKBACK_DAYS,
+    }
+    if len(windows) == 1:
+        metadata.update(read_start=str(windows[0].start), read_end=str(windows[0].end))
+    if repair_dates:
+        metadata.update(
+            receipt_mode="gap_repair",
+            repair_dates=[str(day) for day in sorted(repair_dates)],
+            read_windows=[[str(window.start), str(window.end)] for window in windows],
+        )
+    return replace(incoming, source_metadata=metadata)

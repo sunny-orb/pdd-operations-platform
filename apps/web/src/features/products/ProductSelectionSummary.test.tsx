@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ProductAssistantContext } from "./ProductAssistantContext";
 import { ProductSelectionSummary } from "./ProductSelectionSummary";
 import { readScope } from "./scope";
 import type { ProductsState } from "./data";
@@ -113,7 +114,7 @@ it("助手完整采用四维多选，不把跨店、品类、运营和等级条�
           published = value;
         }}
       >
-        <ProductSelectionSummary
+        <ProductAssistantContext
           scope={{
             ...scope,
             shop: ["s", "t"],
@@ -122,10 +123,8 @@ it("助手完整采用四维多选，不把跨店、品类、运营和等级条�
             level: ["A", "B"],
             products: ["s/A", "t/B"],
           }}
-          state={state}
-          name="main"
+          version={state.version}
           ready
-          count="2"
         />
       </RegisterScope.Provider>
     </QueryClientProvider>,

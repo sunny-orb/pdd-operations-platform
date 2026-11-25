@@ -1,7 +1,7 @@
 import { waitForPublicationBaseline } from "../../shared/api/publishedVersions";
 import { shouldRetryRequest } from "../../shared/api/client";
 import { usePublishedDomainRefresh } from "../../shared/api/usePublishedDomainRefresh";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { useSearchRestoreKey } from "../../shared/components/useSearchRestoreKey";
@@ -14,6 +14,7 @@ import { patchScope, readScope, scopeError, type Scope, type ScopeName } from ".
 
 export function useProducts() {
   const client = useQueryClient();
+  const [assistantScope, setAssistantScope] = useState<ScopeName>("main");
   const [search, setSearch] = useSearchParams();
   const searchRestoreKey = useSearchRestoreKey();
   const metadata = useQuery({
@@ -45,11 +46,19 @@ export function useProducts() {
     const explicit = readScope(search, name, "", "");
     return JSON.stringify([explicit.from, explicit.to]);
   };
-  const change = (name: ScopeName, patch: Partial<Scope>) =>
+  const change = (name: ScopeName, patch: Partial<Scope>, fromUser = true) => {
+    if (
+      fromUser &&
+      name !== "score" &&
+      Object.keys(patch).some((k) => k !== "page" && k !== "size")
+    )
+      setAssistantScope(name);
     setSearch((p) => patchScope(p, name, patch, from, metadata.data?.date_to ?? ""), {
       replace: true,
     });
-  const reset = (name: ScopeName) =>
+  };
+  const reset = (name: ScopeName) => {
+    if (name !== "score") setAssistantScope(name);
     setSearch(
       (p) => {
         const next = new URLSearchParams(p);
@@ -58,7 +67,18 @@ export function useProducts() {
       },
       { replace: true },
     );
-  return { metadata, version, scope, change, reset, stale, searchRestoreKey, dateSelectionKey };
+  };
+  return {
+    metadata,
+    version,
+    scope,
+    change,
+    reset,
+    stale,
+    searchRestoreKey,
+    dateSelectionKey,
+    assistantScope,
+  };
 }
 export type ProductsState = ReturnType<typeof useProducts>;
 export function useResource<T>(

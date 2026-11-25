@@ -29,3 +29,36 @@ def test_runtime_groups_only_refresh_dependencies_that_changed():
         "refund_targets",
         "aftersales_report",
     )
+
+
+def test_daily_monitor_reuses_same_scoped_aggregate_for_yesterday(tmp_path, monkeypatch):
+    from datetime import datetime
+    from unittest.mock import MagicMock
+
+    from app.connectors import source_probes
+    from app.jobs.source_monitor import fingerprint
+    from app.modules.sales import source_policy
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, zone):
+            return cls(2026, 11, 24, 12, 0, tzinfo=zone)
+
+    monkeypatch.setattr(source_probes, "datetime", Clock)
+    monkeypatch.setattr(source_policy, "calendar_through", lambda: date(2026, 11, 23))
+    probes = source_probes.SourceProbes(lambda: None, tmp_path)
+    probes.reader = MagicMock()
+    cursor = probes.reader.connection.cursor.return_value.__enter__.return_value
+    for code, day, present in (
+        ("shop_daily", date(2026, 11, 23), True),
+        ("product_daily", date(2026, 11, 22), False),
+        ("product_promotion", None, False),
+    ):
+        cursor.fetchone.return_value = {"date": day, "count": 5 if day else 0}
+        result = probes.read(code)
+        assert result["upstream_day"] == {"date": "2026-11-23", "present": present}
+        assert fingerprint(result) == fingerprint(
+            {k: v for k, v in result.items() if k != "upstream_day"}
+        )
+        cursor.execute.assert_called_once()
+        cursor.execute.reset_mock()

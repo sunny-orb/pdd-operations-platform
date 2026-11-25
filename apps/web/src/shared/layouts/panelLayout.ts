@@ -12,8 +12,10 @@ const defaults: Layout = {
   directory: { open: true, width: panelWidths.directory.initial },
   assistant: { open: false, width: panelWidths.assistant.initial },
 };
+const storageKey = "pdd.dashboard.panels.v1";
 const listeners = new Set<() => void>();
 let layout = defaults;
+let storageDirty = false;
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
@@ -24,12 +26,45 @@ function subscribe(listener: () => void) {
 
 function publish(next: Layout) {
   layout = next;
+  try {
+    window.sessionStorage.setItem(storageKey, JSON.stringify(layout));
+    storageDirty = false;
+  } catch {
+    storageDirty = true;
+    // 浏览器禁用存储时，仍允许在当前页面调整面板。
+  }
   for (const notify of listeners) notify();
 }
 
 function boundedWidth(panel: Panel, width: number) {
   const { min, max } = panelWidths[panel];
   return Math.min(max, Math.max(min, Math.round(width)));
+}
+
+function restorePanel(panel: Panel, saved: unknown): PanelState {
+  if (!saved || typeof saved !== "object") return defaults[panel];
+  const { open, width } = saved as Partial<PanelState>;
+  return {
+    open: typeof open === "boolean" ? open : defaults[panel].open,
+    width:
+      typeof width === "number" && Number.isFinite(width)
+        ? boundedWidth(panel, width)
+        : defaults[panel].width,
+  };
+}
+
+function readLayout(fallback = defaults): Layout {
+  try {
+    const saved = JSON.parse(window.sessionStorage.getItem(storageKey) ?? "null") as Partial<
+      Record<Panel, unknown>
+    > | null;
+    return {
+      directory: restorePanel("directory", saved?.directory),
+      assistant: restorePanel("assistant", saved?.assistant),
+    };
+  } catch {
+    return fallback;
+  }
 }
 
 export function updatePanel(panel: Panel, patch: Partial<PanelState>) {
@@ -44,11 +79,11 @@ export function useDashboardPanel(panel: Panel) {
   return useSyncExternalStore(subscribe, () => layout[panel]);
 }
 
-/** 宽度和开合只在当前文档内共享。刷新、重新进入或从外部返回时恢复默认布局。 */
+/** 面板开合和宽度在当前标签页会话内共享；刷新保留，关闭标签页后恢复默认。 */
 export function startPanelSession() {
-  publish(defaults);
+  publish(readLayout());
   function resume(event: PageTransitionEvent) {
-    if (event.persisted) publish(defaults);
+    if (event.persisted && !storageDirty) publish(readLayout(layout));
   }
   window.addEventListener("pageshow", resume);
   return () => window.removeEventListener("pageshow", resume);

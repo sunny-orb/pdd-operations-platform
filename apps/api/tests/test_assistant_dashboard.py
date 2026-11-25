@@ -255,21 +255,14 @@ def test_all_shop_context_roundtrips_and_model_payload_is_compact(backend):
 def test_tool_budget_reserves_final_response():
     from types import SimpleNamespace
 
-    from app.modules.assistant.chat import budgeted_tool
+    from app.modules.assistant.answer_policy import AnswerPolicy
 
-    tool = object()
-    assert (
-        asyncio.run(
-            budgeted_tool(SimpleNamespace(usage=SimpleNamespace(requests=4, tool_calls=4)), tool)
-        )
-        is tool
-    )
-    assert (
-        asyncio.run(
-            budgeted_tool(SimpleNamespace(usage=SimpleNamespace(requests=5, tool_calls=4)), tool)
-        )
-        is None
-    )
+    prepare = AnswerPolicy().prepare_tools
+    tools = [object()]
+    available = SimpleNamespace(usage=SimpleNamespace(requests=4, tool_calls=4), messages=[])
+    reserve = SimpleNamespace(usage=SimpleNamespace(requests=5, tool_calls=4))
+    assert asyncio.run(prepare(available, tools)) == tools
+    assert asyncio.run(prepare(reserve, tools)) == []
 
 
 def test_scalar_and_all_scope_replace_old_multiselect_on_followup(backend):
@@ -332,7 +325,8 @@ def test_budget_exhaustion_retains_existing_evidence(backend):
     result = asyncio.run(answer_question(ExhaustedAgent(), run.question, "店铺销售", [], run))
     assert result["status"] == "answered"
     assert result["reports"][0]["capability"] == "sales_performance"
-    assert "已取得部分查询结果" in result["answer"]
+    assert "成交金额" in result["answer"] and "100.01" in result["answer"]
+    assert "2026-11-16" in result["answer"]
 
 
 def test_documented_promotion_formulas_match_real_domain_calculation():
@@ -356,3 +350,221 @@ def test_documented_promotion_formulas_match_real_domain_calculation():
         with localcontext() as ctx:
             ctx.prec = 50
             assert metrics[key]["value"] == data[numerator] / data[denominator]
+
+
+def test_discovery_defaults_to_scope_and_all_is_explicit(backend):
+    from types import SimpleNamespace
+
+    from app.modules.assistant.chat import discover_dashboard
+
+    ctx = SimpleNamespace(deps=QueryRun(None, ChatScope(domain="sales"), "有哪些可选项"))
+    local = asyncio.run(discover_dashboard(ctx))
+    global_catalog = asyncio.run(discover_dashboard(ctx, "all"))
+    assert local["scope"]["domain"] == "sales"
+    assert len(local["capabilities"]) < len(global_catalog["capabilities"])
+    assert backend[1] == ["sales"]
+
+
+def test_unresolved_product_reference_does_not_use_totals_or_model_history():
+    from app.api.assistant import PriorTurn
+
+    history = [PriorTurn(page="运营看板中心", question="优先看什么？", answer="查到商品共1772款。")]
+    run = QueryRun(None, ChatScope(domain="all"), "刚才你点名的那一款，触发那天的实际值是多少？")
+    result = asyncio.run(answer_question(None, run.question, "运营看板中心", history, run))
+    assert result["status"] == "no_evidence" and "商品名称" in result["answer"]
+    assert result["usage"]["requests"] == result["usage"]["tool_calls"] == run.query_count == 0
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "如果这款的成交没记录，可能是哪种情况？",
+        "刚才那一款，商品ID 12345，表现怎么样？",
+        "看看这款的表现，我指的是「雪原帽」。",
+        "刚才那款怎么样？另外查一下六店成交额。",
+    ],
+)
+def test_missing_reference_does_not_block_another_answerable_request(question):
+    from app.modules.assistant.references import needs_product_clarification
+
+    assert not needs_product_clarification(question)
+
+
+def test_wanyuan_display_rounds_half_up_and_keeps_exact_yuan():
+    r = report(
+        "sales",
+        "sales_performance",
+        "销售",
+        "销售",
+        "v1",
+        facts=[fact("revenue", "成交额", "10050.00", "currency")],
+    )
+    available = dashboard.model_view(r, "成交额是多少？")["facts"][0]
+    assert available["value"] == "10050.00" and available["display"] == "1.01 万元"
+
+
+def test_verified_reference_applies_to_product_followup_only(backend, monkeypatch):
+    from app.modules.assistant import chat
+
+    item = {
+        "listing_id": "one",
+        "product_id": "sku",
+        "shop_id": "663599807",
+        "shop_name": "测试店",
+        "name": "测试帽",
+    }
+    ref = {
+        "listing_id": "one",
+        "shop_id": "663599807",
+        "data_version": "products-v1",
+        "date_from": str(START),
+        "date_to": str(END),
+    }
+    scope = ChatScope(domain="all", risk_reference=ref)
+    monkeypatch.setattr(chat, "search_products", lambda engine, keyword, **kwargs: [item])
+    follow = QueryRun(None, scope, "刚才那款具体命中什么规则？")
+    query(follow, "products_risks")
+    req = backend[0][-1][1]
+    assert req["listing_ids"] == ["one"] and (req["date_from"], req["date_to"]) == (START, END)
+    assert follow.subject is None
+    assert follow.response("当日访客下降。", "answered")["query_context"]["risk_reference"] == ref
+    assert not follow.query_context().get("shop_id")
+
+    other = QueryRun(None, scope, "查看所有商品的风险")
+    query(other, "products_risks")
+    assert backend[0][-1][1]["listing_ids"] == []
+    assert other.response("共三款。", "answered")["query_context"]["risk_reference"] is None
+
+
+def test_reference_version_or_identity_change_never_falls_back_to_all_products(
+    backend, monkeypatch
+):
+    from app.modules.assistant import chat
+
+    ref = dict(
+        listing_id="gone",
+        shop_id="663599807",
+        data_version="old",
+        date_from=str(START),
+        date_to=str(END),
+    )
+    run = QueryRun(None, ChatScope(domain="all", risk_reference=ref), "刚才那款的触发日呢？")
+    with pytest.raises(BoardError, match="DATA_VERSION_CHANGED"):
+        query(run, "products_risks")
+    run.scope.risk_reference.data_version = "products-v1"
+    monkeypatch.setattr(chat, "search_products", lambda *args, **kwargs: [])
+    with pytest.raises(chat.Clarify, match="商品"):
+        query(run, "products_risks")
+    assert backend[0] == []
+
+
+def test_rate_only_projection_keeps_period_and_three_rates_without_unasked_diagnosis():
+    from app.modules.assistant.business import table
+
+    r = report(
+        "aftersales",
+        "aftersales_overview",
+        "最新周报",
+        "售后",
+        "v1",
+        period={"date_from": str(START), "date_to": str(END)},
+        facts=[
+            fact(key, key, "0.4", "percent")
+            for key in ("presale_rate", "aftersale_rate", "total_rate", "risk_target_gap")
+        ],
+        tables=[
+            table("整体目标区间", [("state", "目标判定", "text")], [{"state": "区间内"}]),
+            table("优先行动", [], []),
+        ],
+    )
+    plain = dashboard.model_view(r, "这期售后报告的三率分别是多少？把报告期间也告诉我。")
+    assert [f["key"] for f in plain["facts"]] == ["presale_rate", "aftersale_rate", "total_rate"]
+    assert not plain["tables"] and plain["period"] == r["period"]
+    with_target = dashboard.model_view(r, "三率分别是多少，有没有超出上限？")
+    assert any(t["title"] == "整体目标区间" for t in with_target["tables"])
+
+
+def test_today_budget_decision_uses_selected_period_and_store_channels(backend):
+    question = "明星店铺的投产很高，今天要不要把商品推广的预算挪过去？"
+    run = QueryRun(
+        None, ChatScope(domain="promotion_store", date_from=START, date_to=END), question
+    )
+    query(run, "promotion_overview", mode="store")
+    params = backend[0][-1][1]
+    assert params["mode"] == "store"
+    assert (params["date_from"], params["date_to"]) == (START, END)
+    query(run, "promotion_overview", channel="product_promotion")
+    params = backend[0][-1][1]
+    assert params["mode"] == "store" and params["channel"] == "product_promotion"
+
+
+def test_action_date_keeps_actual_today_or_yesterday_metrics():
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo("Asia/Shanghai")).date()
+    for question, expected in [
+        ("今天的投产是多少，今天要不要停？", today),
+        ("查看昨天的投产，今天要不要停？", today - timedelta(days=1)),
+    ]:
+        run = QueryRun(None, ChatScope(domain="promotion_store"), question)
+        assert run.dates("default", None, None)[:2] == (expected, expected)
+
+
+def test_explicit_channel_monthly_target_keeps_published_grain_from_multishop_page(backend):
+    scope = ChatScope(domain="products", shop_ids=["one", "two"])
+    run = QueryRun(None, scope, "六店合计本月GMV目标达成多少？")
+    query(run, "sales_targets")
+    assert not backend[0][-1][1].get("shop_id")
+
+
+def test_budget_advice_distinguishes_observed_roi_from_unpublished_execution_limits():
+    r = report("promotion_store", "promotion_overview", "推广", "测试来源", "v1")
+    view = dashboard.model_view(r, "能把商品推广的预算挪过去吗？")
+    assert any("预算上限" in note and "停投线" in note for note in view["notes"])
+    assert not r["notes"]
+    assert not dashboard.model_view(r, "上周的实际投产是多少？")["notes"]
+
+
+def test_single_style_action_does_not_inherit_category_alerts_or_report_totals():
+    from app.modules.assistant.business import table
+
+    r = report(
+        "aftersales",
+        "aftersales_overview",
+        "售后",
+        "报告",
+        "v1",
+        scope={"focus": "size"},
+        facts=[fact("decision", "品类预警", "P1")],
+        tables=[
+            table(t, [], [{"detail": t}])
+            for t in ["规则建议", "优先行动", "单款风险排序", "单款优先核查建议", "尺码拆分"]
+        ],
+    )
+    action = dashboard.model_view(r, "优先处理哪一款的尺码退货，先核查什么？")
+    assert "规则建议" not in {t["title"] for t in action["tables"]}
+    assert "单款优先核查建议" in {t["title"] for t in action["tables"]}
+    assert not action["facts"]
+    assert dashboard.model_view(r, "哪款优先核查尺码，另外总退款率是多少？")["facts"]
+    mixed = dashboard.model_view(r, "优先处理哪一款？全报告有哪些预警？")
+    assert mixed["facts"] and any(t["title"] == "规则建议" for t in mixed["tables"])
+
+
+def test_latest_size_action_gets_style_evidence_on_category_page(backend):
+    from pydantic_ai import Agent
+    from pydantic_ai.messages import ModelResponse, TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    def model(messages, info):
+        assert "单款" in messages[-1].parts[0].content
+        return ModelResponse(parts=[TextPart("按该款的尺码记录复核。")])
+
+    question = "最新报告里，优先处理哪一款的尺码退货？今天先核查什么？"
+    run = QueryRun(None, ChatScope(domain="aftersales", view="category"), question)
+    result = asyncio.run(
+        answer_question(Agent(FunctionModel(model)), question, "售后分析", [], run)
+    )
+    assert result["status"] == "answered" and result["usage"]["requests"] == 1
+    assert backend[0][0][0] == "aftersales_overview"
+    assert backend[0][0][1]["view"] == "style" and backend[0][0][1]["focus"] == "size"

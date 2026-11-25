@@ -229,6 +229,7 @@ it("售后助手绑定当前报告、品质焦点和明细筛选，报告期间�
   await waitFor(() =>
     expect(register).toHaveBeenLastCalledWith({
       page: "售后分析",
+      selectionLabel: "期间报告 · 单款分析",
       subject: null,
       context: {
         domain: "aftersales",

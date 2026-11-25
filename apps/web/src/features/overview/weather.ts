@@ -52,7 +52,7 @@ const publication = z.object({
   document: weatherDocument,
 });
 export type WeatherDocument = z.infer<typeof weatherDocument>;
-/** 默认选择跟随最新发布；用户明确选择后保留不可变发布ID，天气不改变经营范围。 */
+/** 默认跟随最新；选择历史日期后保留不可变发布ID，天气不改变经营范围。 */
 export function useWeather() {
   const [selected, setSelected] = useState<z.infer<typeof publicationOption> | null>(null);
   const meta = useQuery({
@@ -95,14 +95,23 @@ export function useWeather() {
     }
   }, [doc.error, version, meta]);
   const options = [...(meta.data?.publications ?? [])];
-  if (selected && !options.some((p) => p.id === selected.id)) options.push(selected);
+  if (selected) {
+    const index = options.findIndex((p) => p.issue_date === selected.issue_date);
+    if (index < 0) options.push(selected);
+    else options[index] = selected;
+  }
   const select = (next: string) => {
     if (next === "latest") {
       setSelected(null);
       return;
     }
     const option = options.find((p) => p.id === next);
-    if (option) setSelected(option);
+    if (option) {
+      const latest = meta.data?.publications.find(
+        (p) => p.id === meta.data?.default_publication_id,
+      );
+      setSelected(option.issue_date === latest?.issue_date ? null : option);
+    }
   };
   const refresh = () => {
     void meta.refetch().then((next) => {

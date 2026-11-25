@@ -2,8 +2,8 @@ import { useContext, useEffect } from "react";
 import { AnalyzeScope, RegisterScope } from "./scopeContext";
 import type { AssistantScope } from "./contracts";
 
-/** 页面发布已应用的对象、筛选和版本；已打开的会话须显式切换才采用新范围。 */
-export function AssistantPageContext({ page, subject, context }: AssistantScope) {
+/** 页面发布已应用的对象、筛选和版本；发送时冻结本轮快照。 */
+export function AssistantPageContext({ page, subject, context, selectionLabel }: AssistantScope) {
   const publish = useContext(RegisterScope);
   const listingId = subject?.listing_id,
     shopId = subject?.shop_id;
@@ -14,6 +14,7 @@ export function AssistantPageContext({ page, subject, context }: AssistantScope)
   useEffect(() => {
     publish?.({
       page,
+      selectionLabel,
       subject:
         listingId && shopId
           ? {
@@ -27,7 +28,7 @@ export function AssistantPageContext({ page, subject, context }: AssistantScope)
       context: JSON.parse(contextKey),
     });
     return () => publish?.(null);
-  }, [publish, page, listingId, productId, shopId, name, shopName, contextKey]);
+  }, [publish, page, listingId, productId, shopId, name, shopName, contextKey, selectionLabel]);
   return null;
 }
 

@@ -159,6 +159,19 @@ def nginx_config(record):
     gzip_types application/javascript application/json application/manifest+json application/xml image/svg+xml text/css text/javascript text/plain text/xml;
     location = /healthz {{ access_log off; return 200 'ok'; }}
     location = {MARKER} {{ add_header Cache-Control "no-store" always; return 200 '{commit}'; }}
+    location /api/v1/assistant/ {{
+        resolver 127.0.0.11 valid=1s;
+        set $api http://{upstream}:8000;
+        proxy_pass $api;
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "";
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_hide_header Cache-Control;
+        add_header Cache-Control "no-store" always;
+        proxy_buffering off;
+        client_max_body_size 256k;
+        proxy_read_timeout 120s;
+    }}
     location /api/ {{
         resolver 127.0.0.11 valid=1s;
         set $api http://{upstream}:8000;

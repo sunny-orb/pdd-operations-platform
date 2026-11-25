@@ -66,13 +66,15 @@ export const AssistantReply = memo(function AssistantReply({
     const letters = Array.from(segmenter.segment(text), (part) => part.segment);
     let visible = Array.from(segmenter.segment(state.text)).length;
     if (!visible && letters.length) render(letters[visible++], true);
+    // 正文已收齐时用约 200ms 显示积压的字，避免长回答在网络结束后还要等很久。
+    const finishRate = (letters.length - visible) / 200;
     const tick = (now: number) => {
       const elapsed = state.lastFrame ? Math.min(now - state.lastFrame, 50) : 16;
       state.lastFrame = now;
       const remaining = letters.length - visible;
-      // 小块匀速输出，积压较大时适度加速，让完成事件到达后也能自然收尾。
-      state.credit += (elapsed * Math.max(80, remaining * 6)) / 1000;
-      const count = Math.min(remaining, Math.floor(state.credit), 8);
+      const rate = streaming ? Math.max(0.08, remaining * 0.006) : Math.max(0.08, finishRate);
+      state.credit += elapsed * rate;
+      const count = Math.min(remaining, Math.floor(state.credit), streaming ? 8 : remaining);
       if (count > 0) {
         visible += count;
         state.credit -= count;

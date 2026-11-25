@@ -45,7 +45,7 @@ export default defineConfig((env) => ({
   },
   server: {
     proxy: {
-      // 开发看板代理生产查询时，个人模型仍只走本机 API。
+      // 看板代理远程查询时，问答仍使用本机 API 的百炼配置。
       "/api/v1/assistant/": localApiTarget,
       "/api": resolveApiProxy(env),
       "/health": localApiTarget,

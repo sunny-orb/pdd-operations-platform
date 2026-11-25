@@ -28,6 +28,30 @@ PDD_DEV_API_TARGET=https://dashboard.example.com
 
 该文件已被 Git 忽略；配置中只填写地址，不写账号或密码。修改配置后重启 Vite。此配置只影响开发服务器的 `/api` 代理，`/health` 仍指向本机后端，构建和部署不使用该地址。
 
+<a id="ai-runtime"></a>
+
+### 本机 AI 问答配置
+
+本机问答固定使用公司百炼的 DeepSeek V4.1 Flash-1017。设置 `apps/api/.env` 后重启 API，右侧输入框可直接提问。[设置定义](../apps/api/app/core/config.py) · [无密钥样例](../apps/api/.env.example)
+
+| 环境变量                                                          | 默认值                                                | 用途                                             |
+| ----------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| `APP_ENV`、`CORS_ORIGINS`                                         | development，本机 localhost 和 127.0.0.1 的 5173 端口 | 本机开发访问。生产环境助手入口关闭               |
+| `ASSISTANT_MODEL`                                                 | `bailian:deepseek-v4.1-flash-1017`                    | 唯一支持的型号。显式留空或配置其他型号会关闭问答 |
+| `ASSISTANT_BUSINESS_DATA_ENABLED`、`ASSISTANT_BUSINESS_PROVIDERS` | false、`[]`                                           | 发送获准数据时分别设为 true 和 `["bailian"]`     |
+| `BAILIAN_API_KEY`、`BAILIAN_BASE_URL`                             | 空密钥，默认官方兼容入口                              | 公司百炼密钥与业务空间的兼容地址。仅由后端读取   |
+| `DATABASE_URL`                                                    | 空                                                    | 经营数据来自已初始化的应用 PostgreSQL            |
+| `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_CONNECT_TIMEOUT_SECONDS`   | 代码默认 8 / 4 / 5 秒，样例 4 / 0 / 5 秒              | 连接池、溢出连接和连接等待                       |
+| `CONTENT_REUSE_ENABLED`                                           | false                                                 | 独立的数据库试验开关，问答沿用关闭值             |
+
+在仓库根目录运行 `npm run dev`。用 `GET /api/v1/assistant/models` 核对 DeepSeek 和业务数据开关，再用一条获准的问题验证。百炼请求设 temperature=0.3、enable_thinking=false，沿用供应商的输出长度默认值。
+
+按响应头 `X-Request-ID` 在 Uvicorn 日志关联 `assistant_model`（每次模型往返耗时）、`assistant_tool`（已执行的工具名和耗时）与 `assistant_result`（本轮模型请求／工具调用、领域读取次数和耗时、SQL 累计耗时、首条正文增量及总耗时）。`first_delta_ms` 从后端开始执行问答计时，浏览器绘制另测；JSON 请求这一项为空。日志仅记摘要。
+
+每进程一个查询线程，数据库单语句期限 5 秒。生成预算和锁等待由代码设置，数值见[接口说明](api/ai-assistant.md)。Docker、HTTPS 和发布操作见[部署手册](implementation/deployment.md)。
+
+生产沿用网站匿名访问决定。启用 `ASSISTANT_PRODUCTION_ENABLED=true`、`ASSISTANT_BUSINESS_DATA_ENABLED=true` 与获准百炼供应商，在权限600的 `.env.runtime` 填入 `BAILIAN_API_KEY`。正式域名须在 `CORS_ORIGINS`。通过 `ASSISTANT_MAX_CONCURRENT=2`、`ASSISTANT_REQUESTS_PER_MINUTE=20` 限制请求；查询仍仅用一个后台线程，模型请求90秒超时。关闭生产开关即可停用模型问答。此方式适用现有公开访问范围，接入按账号区分的店铺权限需另行实施。
+
 ## 本地 PostgreSQL
 
 沿用现有 PG17 容器、`pdd_operations` 项目库和独立 v2 迁移链。本机默认API 使用只读 `pdd_app`，接收使用 `pdd_ingest`，结构迁移由 `pdd_admin` 执行。公司部署的账号选择按[架构中的用户决定](architecture.md)：允许使用songbing及其现有读写权限；连接配置及独立初始化入口已按[部署方案](implementation/deployment.md)适配，本轮仅本地验证。

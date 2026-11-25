@@ -4,11 +4,27 @@
 
 ## 当前任务与范围
 
+- [x] 11/25 浏览器刷新保留左右全局面板开合与宽度，关闭标签页后重新打开恢复默认；五页与实际刷新／关闭重入已核验，仅本机未部署。[验收](docs/validation/2026-11-25.md#panel-session-refresh)。
+
+- [x] 11/25 月目标简单问法直接回答，行动日期与经营日期分开，比例差和售后单款依据已校正。[运营实测](docs/validation/2026-11-25.md#operator-pilot-review) · [建议试用条件](docs/implementation/ai-assistance.md#operator-pilot)。
+- [x] 11/25 右侧问答统一使用 DeepSeek，移除模型选择框。六店成交、单店目标、退款率上下界和风险商品追问已接入同版看板依据。[错答复测](docs/validation/2026-11-25.md#assistant-deepseek-grounded) · [原双模型对比](docs/validation/2026-11-25.md#assistant-two-models-live)。
+
+- [x] 11/25问答文档归并为[内部开发设计](docs/implementation/ai-assistance.md)和[对接 API](docs/api/ai-assistant.md)，运行配置归入[开发手册](docs/development.md#ai-runtime)。全局共用、当前页优先已定，下一版改造待实施。
+
+- [x] 11/25 本机问答按问题取证，缺记录解释一轮交付，重复查询提前收尾。分段日志与浏览器回放已验，暂未部署。[同题对照与验收](docs/validation/2026-11-25.md#assistant-latency-fix)。
+
 - [x] 11/24修复规则阈值、未答追问与全局解释主题，接入第25类生效定义；统一折叠依据及相关单主图，保留选款／跨页／流式行为。五页跨域真实模型、565项前端和后端专项已验证；全量与限制见[验收](docs/validation/2026-11-24.md#assistant-explanations-ux)，未部署。
+
 - [x] 11/24助手正文改为Markdown排版，保留逐帧显示；前端514项、检查／构建与桌面／窄屏浏览器通过。动态飞书SOP接入已补方案，尚未开发。[验收](docs/validation/2026-11-24.md#assistant-markdown)、[SOP方案](docs/implementation/ai-assistance.md#sop-dynamic-plan)。
 
-- [x] 11/24右侧助手首版已提交推送e8bc15e；本轮扩展五页24类只读能力、逐页真实模型及浏览器联调，保留SSE和平滑显示，修复多选与跨域追问范围。[测试题与后续建议](docs/implementation/ai-assistance.md#assistant-all-pages-20261124)、[验收](docs/validation/2026-11-24.md#assistant-all-pages)。仅本机，未部署。
+- [x] 11/24商品地区版本复用已用本机实际同步账号、调度自动恢复与回收并发验收，并随80bc4ac上线，见[验证](docs/validation/2026-11-24.md#region-ingest-reuse)。
+
+- [x] 11/24线上已补44个有来源证据的店铺日。按昨日首次见数钟点加一小时判断时效、按日复查近30日缺口已随80bc4ac经CI/CD上线，AI助手排除。[验收边界](docs/validation/2026-11-24.md#daily-arrivals-gap-repair)。
+
+- [x] 11/24右侧助手首版已提交推送e8bc15e；本轮扩展五页24类只读能力、逐页真实模型及浏览器联调，保留SSE和平滑显示，修复多选与跨域追问范围。[测试题与后续建议](docs/implementation/ai-assistance.md#use-cases)、[验收](docs/validation/2026-11-24.md#assistant-all-pages)。仅本机，未部署。
 - [ ] 运营按同批问题试用；优先补动作型SOP场景读取。公司身份、数据授权、费用与维护负责人在共享上线前落实；知识库平台及MCP按第二个实际接入需求再议。
+
+- [x] 11/19库存监控导航PR #3已快进合入main并经CI/CD上线1b8947d；五页本地/生产导航、窄屏与新标签页通过，156次切换探测均200，193份报告保留，唯一Worker恢复且首轮成功。[证据](docs/validation/2026-11-19.md#inventory-navigation)。
 
 - [x] 11/19商品地区长期回收机制已上线cff0ae9：构建前端473/后端1717项通过，生产18→20后193份报告及五组地区响应不变，唯一Worker恢复；两轮累计核查20000行、负载越界自动延期并恢复续做，项目0.964GiB、临时残留0，两份退役镜像已清。见[验收与限制](docs/validation/2026-11-19.md#region-retention)。
 - [ ] 商品地区旧副本物理回收尚未完成：五个旧legacy候选共1546738行，加上具备条件的共享旧表示，由后台按完整证明、小批删除及五分钟间隔续做；当前删除0行，数据库仍约17.06GiB。历史报告/评分依赖和13个退出未知旧版保留，COMMON-ISS-14不关闭。

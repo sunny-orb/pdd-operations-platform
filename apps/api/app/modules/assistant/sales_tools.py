@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.modules.data_status.repository import read_status
 from app.modules.product_board.repository import BoardError, wire
+from app.modules.sales import source_policy
 from app.modules.sales.detail_queries import SalesDetails
 from app.modules.sales.query import SalesQuery, SalesService
 from app.modules.sales.region_queries import RegionQueries
@@ -103,7 +104,7 @@ def describe(engine, domain="sales"):
             ],
             sources=data["sources"],
             capabilities=data["capabilities"],
-            options=dict(months=data["months"], default_month=(meta["observed_through"] or "")[:7]),
+            options=dict(months=data["months"], default_month=data["default_month"]),
         )
     )
 
@@ -152,6 +153,23 @@ def _facts(data, columns):
         )
         for key, label, unit in columns
     ]
+
+
+def _shop_revenue_fact(key, label, amount, items):
+    """成交额沿用看板原值，按该合计的完整店铺范围说明缺记录和空金额。"""
+    missing = sum(len(item["coverage"]["missing_dates"]) for item in items)
+    nulls = sum(item["coverage"]["field_null_counts"]["shop_revenue"] for item in items)
+    status, reason = "observed", None
+    if amount is None:
+        status, reason = (
+            ("field_null", "期间有销售记录，已记录的成交额均为空。")
+            if nulls
+            else ("no_records", "期间没有销售记录。")
+        )
+    elif missing or nulls:
+        status = "partial"
+        reason = f"按已有金额累计。缺记录 {missing} 个店铺日，成交额为空 {nulls} 个店铺日。"
+    return fact(key, label, amount, "currency", status=status, reason=reason)
 
 
 def _coverage(data):
@@ -267,8 +285,20 @@ def read(engine, capability, params):
     elif capability == "sales_shops":
         data = SalesService(engine).shops(query)["data"]
         items = data["items"]
+        facts = [
+            _shop_revenue_fact(
+                "all_shops_revenue", "六店成交额合计", data["all_shops_revenue"], items
+            )
+        ]
         if query.shop_id:
             items = [r for r in items if r["shop_id"] == query.shop_id]
+            (shop,) = items
+            facts.insert(
+                0,
+                _shop_revenue_fact(
+                    "shop_revenue", shop["shop_name"] + "成交额", shop["shop_revenue"], items
+                ),
+            )
         data["missing_shop_days"] = sum(len(r["coverage"]["missing_dates"]) for r in items)
         title = "店铺经营明细与销售贡献"
         columns = (
@@ -399,35 +429,70 @@ def _options(engine, params, version):
 
 
 def _targets(engine, params, version):
-    month = params.get("month") or describe(engine)["options"]["default_month"]
+    month = params.get("month") or source_policy.calendar_through().strftime("%Y-%m")
     data = SalesDetails(engine).targets(month, version)["data"]
+    members = data["target_coverage"]["member_shop_ids"]
+    shop_id = params.get("shop_id")
+    if shop_id and shop_id not in members:
+        raise BoardError("INVALID_SCOPE")
     columns = (
-        ("month_actual", "月度完成额", "currency"),
-        ("month_target", "月度目标", "currency"),
-        ("month_ratio", "月度达成率", "percent"),
-        ("gap", "月度缺口", "currency"),
-        ("annual_actual", "财年完成额", "currency"),
-        ("annual_target", "财年目标", "currency"),
-        ("annual_ratio", "财年达成率", "percent"),
-        ("month_missing_days", "月度缺销售店铺日", "number"),
-        ("annual_missing_days", "财年缺销售店铺日", "number"),
+        ("month_actual", "六店渠道月度完成额", "currency"),
+        ("month_target", "六店渠道月度目标", "currency"),
+        ("month_ratio", "六店渠道月度达成率", "percent"),
+        ("gap", "六店渠道月度缺口", "currency"),
+        ("annual_actual", "六店渠道财年完成额", "currency"),
+        ("annual_target", "六店渠道财年目标", "currency"),
+        ("annual_ratio", "六店渠道财年达成率", "percent"),
+        ("month_missing_days", "六店渠道月度缺销售店铺日", "number"),
+        ("annual_missing_days", "六店渠道财年缺销售店铺日", "number"),
     )
+    facts = _facts(data, columns)
+    scope = dict(
+        month=month,
+        shop_ids=members,
+        target_basis=data["target_basis"],
+        target_grain="channel",
+        target_source_state=data["target_source"]["state"],
+        shop_target_status="not_published",
+        annual_window=data["annual_window"],
+    )
+    if shop_id:
+        name = next(name for sid, name, _label in source_policy.SHOPS.values() if sid == shop_id)
+        scope["requested_shop_id"] = shop_id
+        facts = [
+            fact(
+                "shop_month_target",
+                name + "月度目标",
+                None,
+                "currency",
+                status="not_published",
+                reason="目标台账只发布六店渠道目标。",
+            ),
+            fact(
+                "shop_month_ratio",
+                name + "月度达成率",
+                None,
+                "percent",
+                status="unavailable",
+                reason="单店目标未发布，无法计算达成率。",
+            ),
+            *facts,
+        ]
     monthly = data["monthly_window"]
     return report(
         "sales",
         "sales_targets",
-        "渠道销售目标进度",
+        "六店渠道销售目标进度",
         SALES_SOURCE,
         version,
         period=dict(date_from=monthly["start"], date_to=monthly["end"]),
-        scope=dict(
-            month=month,
-            shop_ids=data["target_coverage"]["member_shop_ids"],
-            target_basis=data["target_basis"],
-            annual_window=data["annual_window"],
-        ),
-        facts=_facts(data, columns),
-        notes=[data["note"], "目标按固定六店及所选月累计，不受经营选店与自定义日期影响。"],
+        scope=scope,
+        facts=facts,
+        notes=[
+            data["note"],
+            "目标按所选月累计，与经营选店和自定义日期独立。单店目标及分配比例未发布，"
+            "无法按成交占比分摊目标或计算单店达成率。",
+        ],
     )
 
 

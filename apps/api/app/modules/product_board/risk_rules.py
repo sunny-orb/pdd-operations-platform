@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 RULE_VERSION = "product-risk-traffic-v2"
+TOP_TRAFFIC_ALERT = "爆品严重流量下滑"
 TRAFFIC_MIN = 100
 BASELINE_DAYS = 7
 CONVERSION_SEVERE_FACTOR = Decimal(".7")

@@ -1,8 +1,9 @@
-"""右侧运营问答协议，仅向本机开发看板开放模型试用。"""
+"""右侧运营问答：限定站点、显式启用、全局速率与并发边界。"""
 
 import asyncio
 import json
 import logging
+import time
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -12,11 +13,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, StringConstraints
 from pydantic_ai.exceptions import UsageLimitExceeded
 
+from app.core.config import Settings
 from app.modules.assistant.chat import ChatScope, Product, QueryRun, answer_question, build_agent
 from app.modules.product_board.repository import BoardError
 
 router = APIRouter(prefix="/api/v1/assistant")
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error.assistant")
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 Page = Literal["运营看板中心", "店铺销售", "商品数据", "推广分析", "售后分析"]
 Question = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
@@ -61,9 +63,17 @@ def unavailable(status: int, message: str, code: str | None = None) -> JSONRespo
     return JSONResponse({"error": error}, status_code=status)
 
 
-def local_preview(request: Request) -> bool:
+def allowed_site(request: Request) -> bool:
     settings = request.app.state.assistant_settings
     origin = request.headers.get("origin")
+    if settings.app_env == "production":
+        sites = [urlsplit(site) for site in settings.cors_origins]
+        return (
+            settings.assistant_production_enabled
+            and request.url.hostname in {site.hostname for site in sites if site.scheme == "https"}
+            and (origin is None or origin in settings.cors_origins)
+            and request.headers.get("sec-fetch-site") not in ("cross-site", "same-site")
+        )
     return not (
         settings.app_env != "development"
         or request.url.hostname not in LOCAL_HOSTS
@@ -78,20 +88,19 @@ def local_preview(request: Request) -> bool:
     )
 
 
-def approved_models(settings) -> list[str]:
-    if not settings.assistant_business_data_enabled:
+def approved_models(settings: Settings) -> list[str]:
+    if (
+        not settings.assistant_business_data_enabled
+        or "bailian" not in settings.assistant_business_providers
+    ):
         return []
-    return [
-        name
-        for name in settings.assistant_models
-        if name.partition(":")[0] in settings.assistant_business_providers
-    ]
+    return settings.assistant_models
 
 
 @router.get("/models")
 async def models(request: Request):
-    if not local_preview(request):
-        return unavailable(403, "模型试用仅在本机开发看板开放")
+    if not allowed_site(request):
+        return unavailable(403, "此站点尚未启用问答服务")
     settings = request.app.state.assistant_settings
     return {
         "models": approved_models(settings),
@@ -101,11 +110,12 @@ async def models(request: Request):
 
 @router.post("/stop")
 async def stop(request: Request, body: Generation):
-    if not local_preview(request):
-        return unavailable(403, "模型试用仅在本机开发看板开放")
+    if not allowed_site(request):
+        return unavailable(403, "此站点尚未启用问答服务")
     active = request.app.state.assistant_active
-    if active is not None and active[0] == body.generation:
-        active[1].cancel()
+    task = active.get(body.generation)
+    if task is not None:
+        task.cancel()
     return {"stopped": True}
 
 
@@ -114,19 +124,16 @@ async def chat(request: Request, body: ChatInput):
     if "text/event-stream" not in request.headers.get("accept", ""):
         return await chat_response(request, body)
     # 本机访问边界在发送响应头前验证；流中错误通过 error 事件结束。
-    if not local_preview(request):
-        return unavailable(403, "模型试用仅在本机开发看板开放")
+    if not allowed_site(request):
+        return unavailable(403, "此站点尚未启用问答服务")
 
     async def events():
         queue = asyncio.Queue()
         task = asyncio.create_task(chat_response(request, body, queue.put_nowait))
+        task.add_done_callback(lambda _: queue.put_nowait(None))
         try:
             yield 'data: {"type":"status","text":"正在理解问题…"}\n\n'
-            while not task.done() or not queue.empty():
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=0.1)
-                except TimeoutError:
-                    continue
+            while (event := await queue.get()) is not None:
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
             result = task.result()
             if isinstance(result, JSONResponse):
@@ -150,30 +157,40 @@ async def chat(request: Request, body: ChatInput):
 
 
 async def chat_response(request: Request, body: ChatInput, emit=None):
-    if not local_preview(request):
-        return unavailable(403, "模型试用仅在本机开发看板开放")
+    if not allowed_site(request):
+        return unavailable(403, "此站点尚未启用问答服务")
     state = request.app.state
     settings = state.assistant_settings
-    if not settings.assistant_model:
+    if not settings.assistant_models:
         return unavailable(503, "本机尚未配置问答模型")
-    allowed = approved_models(settings)
-    name = body.model or next(iter(allowed), settings.assistant_model)
-    if name not in settings.assistant_models:
-        return unavailable(422, "此模型未启用，请重新选择模型")
-    if name not in allowed:
+    name = settings.assistant_model
+    if body.model is not None and body.model != name:
+        return unavailable(422, "此模型未启用。请省略 model，使用看板默认的 DeepSeek。")
+    if name not in approved_models(settings):
         return unavailable(403, "本机尚未授权此模型接收经营问题和查询摘要")
+    if body.generation in state.assistant_active:
+        return unavailable(409, "此问题正在回答，请等待或停止后重试")
+    if settings.app_env == "production":
+        now = time.monotonic()
+        recent = state.assistant_requests
+        while recent and recent[0] <= now - 60:
+            recent.popleft()
+        if len(recent) >= settings.assistant_requests_per_minute:
+            return unavailable(429, "提问较多，请稍候再试")
+        recent.append(now)
     try:
         await asyncio.wait_for(state.assistant_lock.acquire(), timeout=1)
     except TimeoutError:
-        return unavailable(429, "上一条请求正在结束，请稍后再试")
+        return unavailable(429, "当前提问较多，请稍后再试")
     try:
-        if name not in state.assistant_agents:
-            state.assistant_agents[name] = await state.assistant_resources.enter_async_context(
-                build_agent(settings.model_copy(update={"assistant_model": name}))
-            )
+        async with state.assistant_agent_lock:
+            if state.assistant_agent is None:
+                state.assistant_agent = await state.assistant_resources.enter_async_context(
+                    build_agent(settings)
+                )
         task = asyncio.create_task(
             answer_question(
-                state.assistant_agents[name],
+                state.assistant_agent,
                 body.question,
                 body.page,
                 body.history,
@@ -183,11 +200,11 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
                     body.question,
                     executor=state.assistant_query_executor,
                     emit=emit,
-                    request_id=str(body.generation),
+                    request_id=request.state.request_id,
                 ),
             )
         )
-        state.assistant_active = (body.generation, task)
+        state.assistant_active[body.generation] = task
         try:
             async with asyncio.timeout(90):
                 while not task.done():
@@ -198,7 +215,7 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
                     return unavailable(499, "已停止回答")
                 answer = task.result()
         finally:
-            state.assistant_active = None
+            state.assistant_active.pop(body.generation, None)
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         if not answer["answer"].strip():
@@ -218,6 +235,6 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
         return unavailable(504, "回答超时，请重试")
     except Exception as exc:
         logger.warning("问答生成失败 type=%s", type(exc).__name__)
-        return unavailable(502, "模型暂时不可用，请检查本机模型登录或配置后重试")
+        return unavailable(502, "模型暂时不可用，请稍后重试")
     finally:
         state.assistant_lock.release()

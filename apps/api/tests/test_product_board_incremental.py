@@ -3,6 +3,7 @@
 import hashlib
 import json
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 import sqlalchemy as sa
@@ -465,3 +466,179 @@ def test_bounded_reader_double_reads_only_requested_days():
             periods={"product_daily": ((date(2020, 1, 1), source.end),)},
             end=source.end,
         )
+
+
+@pytest.mark.parametrize(
+    "code,key,amount,table,day_field",
+    [
+        ("product_daily", "z_id", "transaction_amount", "product_daily_facts", "business_date"),
+        ("product_promotion", "id", "total_cost", "product_promotion_records", "period_start"),
+    ],
+)
+@pytest.mark.parametrize("shared", [False, True])
+def test_repair_partial_shop_day_and_repeat(
+    sales_pg, tmp_path, monkeypatch, code, key, amount, table, day_field, shared
+):
+    from app.modules.product_board.incremental import (
+        missing_product_shop_days,
+        receive_product_board,
+    )
+    from app.modules.sales.source_policy import SHOPS
+
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(shared).lower())
+    end = date(2026, 11, 23)
+    day = date(2026, 11, 21)
+    source = Source(end)
+    store = ProductBoardStore(sales_pg, tmp_path)
+    first = receive(store, source)
+    with sales_pg.connect() as c:
+        assert missing_product_shop_days(c, code, [day]) == {
+            day: tuple(s for s in SHOPS if s != "663599807")
+        }
+    original = next(r for r in source.raw[code] if r["dt"] == str(day))
+    source.raw[code].remove(original)
+    late = {**original, key: "late", "shop_id": "191467219", amount: "0.00"}
+    source.raw[code].append(late)
+    source.calls.clear()
+
+    def exact():
+        return store.run_selected(
+            [code],
+            lambda hb: receive_product_board(
+                store, source, [code], heartbeat=hb, repair_days={code: [day]}, repair_only=True
+            ),
+        )
+
+    second = exact()
+    assert source.calls == [(code, ((day, day),))]
+    old_id, new_id = first["versions"][code], second["versions"][code]
+    assert old_id != new_id
+    assert all(first["versions"][k] == second["versions"][k] for k in TABLES if k != code)
+    with sales_pg.connect() as c:
+        statement = sa.text(
+            f"SELECT source_row_key FROM read_{table} "
+            f"WHERE dataset_version_id=:v AND {day_field}=:d"
+        )
+        assert set(c.scalars(statement, dict(v=new_id, d=day))) == {str(day), "late"}
+        assert set(c.scalars(statement, dict(v=old_id, d=day))) == {str(day)}
+        assert missing_product_shop_days(c, code, [day]) == {
+            day: tuple(s for s in SHOPS if s not in ("663599807", "191467219"))
+        }
+    before = set(tmp_path.rglob("*"))
+    source.raw[code].remove(late)
+    assert exact()["versions"] == second["versions"]
+    assert set(tmp_path.rglob("*")) == before
+
+
+def test_regular_and_gap_share_read_and_publication(sales_pg, tmp_path):
+    from app.modules.product_board.incremental import receive_product_board
+
+    end = date(2026, 11, 23)
+    code = "product_daily"
+    day = end - timedelta(days=2)
+    source = Source(end)
+    store = ProductBoardStore(sales_pg, tmp_path)
+    first = receive(store, source)
+    old = next(r for r in source.raw[code] if r["dt"] == str(day))
+    source.raw[code].append({**old, "z_id": "late", "shop_id": "191467219"})
+    source.raw[code][0]["transaction_amount"] = "80.00"
+    source.calls.clear()
+    second = store.run_selected(
+        [code],
+        lambda hb: receive_product_board(
+            store, source, [code], heartbeat=hb, repair_days={code: [day]}
+        ),
+    )
+    assert source.calls == [(code, ((day, day), (end, end)))]
+    assert len(list(tmp_path.iterdir())) == 2
+    with sales_pg.connect() as c:
+        assert set(
+            c.execute(
+                sa.text(
+                    "SELECT source_row_key, product_revenue FROM read_product_daily_facts "
+                    "WHERE dataset_version_id=:v AND source_row_key IN ('late', '2026-11-23')"
+                ),
+                dict(v=second["versions"][code]),
+            )
+        ) == {("late", Decimal("12.34")), (str(end), 80)}
+    assert second["versions"][code] != first["versions"][code]
+
+
+def test_normal_advance_skips_gap_that_aged_out_of_approved_window(sales_pg, tmp_path):
+    from app.modules.product_board.incremental import receive_product_board
+
+    end = date(2026, 11, 23)
+    old_end = end - timedelta(days=3)
+    source = Source(end)
+    store = ProductBoardStore(sales_pg, tmp_path)
+    source.end = old_end
+    receive(store, source)
+    code = "product_promotion"
+    day = windows(old_end, code)[0][0]
+    source.end = end
+    source.calls.clear()
+    updated = store.run_selected(
+        [code],
+        lambda hb: receive_product_board(
+            store, source, [code], heartbeat=hb, repair_days={code: [day]}
+        ),
+    )
+    assert updated["end"] == str(end)
+    assert all(not (lo <= day <= hi) for _, spans in source.calls for lo, hi in spans)
+
+
+def test_repair_only_rejects_outside_day_before_read(sales_pg, tmp_path):
+    from app.modules.product_board.incremental import receive_product_board
+
+    end = date(2026, 11, 23)
+    code = "product_daily"
+    store = ProductBoardStore(sales_pg, tmp_path)
+    source = Source(end)
+    first = receive(store, source)
+    source.calls.clear()
+    with pytest.raises(ValueError, match="SOURCE_DATE_SCOPE_INVALID"):
+        store.run_selected(
+            [code],
+            lambda hb: receive_product_board(
+                store,
+                source,
+                [code],
+                heartbeat=hb,
+                repair_days={code: [end + timedelta(days=1)]},
+                repair_only=True,
+            ),
+        )
+    assert source.calls == []
+    assert heads(sales_pg) == first["versions"]
+
+
+def test_empty_gap_repair_keeps_historical_producer_and_ordinary_receipt_still_upgrades(
+    sales_pg, tmp_path, monkeypatch
+):
+    from app.modules.product_board import storage
+    from app.modules.product_board.incremental import receive_product_board
+    from app.modules.product_board.source import fingerprint
+
+    code = "product_promotion"
+    source = Source(date(2026, 11, 23))
+    day = date(2026, 11, 21)
+    store = ProductBoardStore(sales_pg, tmp_path)
+    old_sources = storage.producer_sources()
+    old_sources["incremental.py"] += "\n# historical producer\n"
+    with monkeypatch.context() as old:
+        old.setattr(storage, "producer_sources", lambda: old_sources)
+        old.setattr(storage, "LOADED_PRODUCER_HASH", fingerprint(old_sources))
+        first = receive(store, source)
+    original = next(r for r in source.raw[code] if r["dt"] == str(day))
+    source.raw[code].remove(original)
+    before = set(tmp_path.rglob("*"))
+    empty = store.run_selected(
+        [code],
+        lambda hb: receive_product_board(
+            store, source, [code], heartbeat=hb, repair_days={code: [day]}, repair_only=True
+        ),
+    )
+    assert empty["versions"] == first["versions"]
+    assert set(tmp_path.rglob("*")) == before
+    ordinary = receive(store, source, [code])
+    assert ordinary["versions"][code] != first["versions"][code]

@@ -286,7 +286,7 @@ def _risk(rows, end, top):
     ):
         priority = "P0" if top and po >= risk_rules.TOP_PREVIOUS_ORDERS_MIN else "P1"
         label, score, now, baseline, kind, field = (
-            "爆品严重流量下滑" if priority == "P0" else "严重流量下滑",
+            risk_rules.TOP_TRAFFIC_ALERT if priority == "P0" else "严重流量下滑",
             95 if priority == "P0" else 85,
             v,
             avg,

@@ -245,10 +245,21 @@ def test_weather_truncate_cannot_bypass_immutable_archive(sales_pg, tmp_path):
         c.execute(sa.text("TRUNCATE public.weather_publications"))
 
 
-def test_archived_weather_temperature_is_projected_without_rewriting(sales_pg, tmp_path):
+def test_archived_weather_is_projected_without_rewriting(sales_pg, tmp_path, monkeypatch):
     from app.jobs.sync_weather import sync_weather
+    from app.modules.weather import storage
+    from app.modules.weather.contracts import WeatherBlock
+    from app.modules.weather.parser import build_document
+    from tests.test_weather import compact_sources
 
-    result = sync_weather(sales_pg, sources, tmp_path)
+    day, legacy = build_document(compact_sources())
+    legacy.today_rain = WeatherBlock(regions=[], detail="旧版未识别", status="unidentified")
+    legacy.today_temperature = WeatherBlock(regions=[], detail="旧版未识别", status="unidentified")
+    legacy.next_7_days = []
+    with monkeypatch.context() as patch:
+        patch.setattr(storage, "build_document", lambda _sources: (day, legacy))
+        result = sync_weather(sales_pg, compact_sources, tmp_path)
+
     with sales_pg.connect() as c:
         before = c.scalar(
             sa.text("SELECT document FROM weather_publications WHERE id=:id"),
@@ -256,7 +267,14 @@ def test_archived_weather_temperature_is_projected_without_rewriting(sales_pg, t
         )
     with client_for(sales_pg) as client:
         response = client.get("/api/v1/weather/publication").json()
+        assert response["data"]["id"] == result["publication_id"]
+        assert response["data"]["document"]["today_rain"]["status"] == "parsed"
+        assert response["data"]["document"]["today_rain"]["regions"] == ["江苏", "浙江"]
         assert response["data"]["document"]["today_temperature"]["status"] == "not_mentioned"
+        assert any(
+            item["regions"] == ["江苏", "浙江", "河北"]
+            for item in response["data"]["document"]["next_7_days"]
+        )
         assert response["meta"]["status"] == "ready"
     with sales_pg.connect() as c:
         after = c.scalar(

@@ -83,6 +83,16 @@ export function PromotionPage() {
     <DashboardLayout currentPage="promotion" sections={sections} context="推广分析 · 本页独立分析">
       <AssistantPageContext
         page="推广分析"
+        selectionLabel={
+          data && !state.invalid
+            ? [
+                product ? "商品推广" : "店铺推广",
+                state.shopOptions.find((s) => s.value === state.scope.shop)?.label,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : undefined
+        }
         subject={
           singleProduct
             ? {

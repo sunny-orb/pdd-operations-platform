@@ -3,13 +3,14 @@
 from datetime import UTC, datetime, timedelta
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.modules.data_status.catalog import DATASET_NAMES, SOURCES, job_for, source_identity
 from app.modules.data_status.checkpoint_store import read_legacy_tasks
 from app.modules.data_status.failure_codes import SYNC_FAILURE_CODES, safe_failure_code
 from app.modules.data_status.history_coverage import history_status
-from app.modules.data_status.timeliness import update_timeliness
+from app.modules.data_status.timeliness import source_timeliness
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.datasets import READ_SPECS
 
@@ -61,11 +62,7 @@ def refresh_platform_snapshots(c):
         for source in SOURCES:
             if source.id not in saved:
                 continue
-            snapshot = {
-                key: saved[source.id][key]
-                for key in ("history", "update_timing")
-                if key in saved[source.id]
-            }
+            snapshot = {}
             for code in source.datasets:
                 head = heads.get(code)
                 if not head:
@@ -90,7 +87,11 @@ def refresh_platform_snapshots(c):
             c.execute(
                 table.update()
                 .where(table.c.source_id == source.id)
-                .values(platform_snapshot=snapshot)
+                .values(
+                    platform_snapshot=table.c.platform_snapshot.op("-")(
+                        sa.cast(list(source.datasets), ARRAY(sa.Text))
+                    ).op("||")(sa.cast(snapshot, JSONB))
+                )
             )
 
 
@@ -408,6 +409,13 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                     # 原资料只随事实归档；不能拿事实业务日冒充资料快照日。
                     for row in datasets:
                         row["date"] = None
+                history = history_status(
+                    source.id,
+                    p.get("platform_snapshot", {}).get("history"),
+                    heads,
+                    now,
+                    *schedule_args,
+                )
                 rows.append(
                     dict(
                         id=source.id,
@@ -420,14 +428,8 @@ def _read_status_snapshot(engine, *, interval_seconds, enabled, source_schedule,
                         datasets=datasets,
                         platform_state=platform_state,
                         reconciliation=reconciliation(source.id),
-                        timeliness=update_timeliness(source, p, now),
-                        history=history_status(
-                            source.id,
-                            p.get("platform_snapshot", {}).get("history"),
-                            heads,
-                            now,
-                            *schedule_args,
-                        ),
+                        timeliness=source_timeliness(source, p, now),
+                        history=history,
                         upstream=dict(
                             state=upstream_state,
                             checked_at=p.get("checked_at"),

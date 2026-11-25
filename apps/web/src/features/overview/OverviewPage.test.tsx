@@ -124,7 +124,7 @@ const states = (): DomainState[] =>
     error: null,
     refresh: vi.fn(),
   }));
-it("运营中心向助手绑定四域实际版本，推广版本归到店铺推广域", () => {
+it("运营中心只绑定已加载的商品推广版本，跨查店铺推广时由店铺查询取版", () => {
   vi.mocked(useOverview).mockReturnValue(states());
   const register = vi.fn();
   render(
@@ -139,7 +139,7 @@ it("运营中心向助手绑定四域实际版本，推广版本归到店铺推�
     subject: null,
     context: {
       domain: "all",
-      versions: { sales: "v0", products: "v1", promotion_store: "v2", aftersales: "v3" },
+      versions: { sales: "v0", products: "v1", promotion_product: "v2", aftersales: "v3" },
     },
   });
 });

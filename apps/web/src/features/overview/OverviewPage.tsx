@@ -65,7 +65,7 @@ export function OverviewPage() {
             states
               .filter((state) => state.meta?.version)
               .map((state) => [
-                state.id === "promotion" ? "promotion_store" : state.id,
+                state.id === "promotion" ? "promotion_product" : state.id,
                 state.meta!.version,
               ]),
           ),

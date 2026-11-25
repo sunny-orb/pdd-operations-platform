@@ -9,6 +9,7 @@ import sqlalchemy as sa
 
 from app.modules.data_status.catalog import BY_ID, job_for
 from app.modules.data_status.checkpoint_store import (
+    CheckpointStore,
     reconciliation_owned_sources,
     recover_interrupted_checks,
 )
@@ -24,6 +25,8 @@ from app.modules.database_residency import deferred_reason
 
 def fingerprint(value):
     # HTTP和旧可见网页是同一tableId/dataLastUpdateTime证据；切换读取方式不制造接收副本。
+    if "upstream_day" in value:
+        value = {k: v for k, v in value.items() if k != "upstream_day"}
     if value.get("basis") == "warehouse_web_metadata":
         value = {**value, "basis": "warehouse_web_page"}
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
@@ -59,7 +62,8 @@ def run_monitor(
         return not BY_ID[code].monitor_only or code in receiving_sources
 
     started_at = clock()
-    table = sa.Table("source_checkpoints", sa.MetaData(), schema="public", autoload_with=engine)
+    store = CheckpointStore(engine)
+    table = store.table
     with engine.connect() as c:
         locked = c.scalar(sa.text("SELECT pg_try_advisory_lock(hashtext('project-source-sync'))"))
         c.commit()
@@ -68,9 +72,7 @@ def run_monitor(
 
         def write(code, **values):
             with c.begin():
-                result = c.execute(table.update().where(table.c.source_id == code).values(**values))
-                if not result.rowcount:
-                    c.execute(table.insert().values(source_id=code, **values))
+                store.write(c, code, **values)
 
         def observe(code, *, retry_error=None):
             started = time.monotonic()
@@ -87,11 +89,12 @@ def run_monitor(
                         **value,
                         "changed_since_previous_check": digest != before if before else None,
                     }
+                stamp = clock()
                 write(
                     code,
-                    checked_at=clock(),
+                    checked_at=stamp,
                     check_status="succeeded",
-                    observed_at=clock(),
+                    observed_at=stamp,
                     observation=value,
                     observed_fingerprint=digest,
                     error_code=None,

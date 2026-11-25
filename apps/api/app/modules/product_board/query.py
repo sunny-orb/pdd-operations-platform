@@ -223,7 +223,16 @@ def collect_risks(info, groups, top, q):
         alert = risk(values, q.end, lid in top)
         if alert:
             period = [r for r in values if q.start <= r["business_date"] <= q.end]
-            results.append(dict(item, alert=alert, period_revenue=total(period, "product_revenue")))
+            # 可评窗口已核验含判断日；交易额本身仍可能为空，直接保留当日原值。
+            evaluation_day = next(r for r in period if r["business_date"] == q.end)
+            results.append(
+                dict(
+                    item,
+                    alert=alert,
+                    evaluation_day_revenue=evaluation_day.get("product_revenue"),
+                    period_revenue=total(period, "product_revenue"),
+                )
+            )
     results.sort(
         key=lambda r: (r["alert"]["priority"], -r["alert"]["score"], r["shop_id"], r["product_id"])
     )

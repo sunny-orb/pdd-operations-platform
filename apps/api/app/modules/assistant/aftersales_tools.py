@@ -1,6 +1,6 @@
 """助手售后只读投影：复用固定报告与领域口径，结果有界且不猜跨页身份。"""
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 
 from app.modules.aftersales.analysis import analysis
 from app.modules.aftersales.query import AfterQuery, options, overview
@@ -162,16 +162,60 @@ def _bounded_table(title, columns, rows, limit, offset):
     )
 
 
+def _point_comparison(gap, reference):
+    """领域差值已是本期减参照的百分点，按未舍入符号确定方向。"""
+    if gap == 0:
+        return f"等于{reference}"
+    direction = "高于" if gap > 0 else "低于"
+    with localcontext(rounding=ROUND_HALF_UP):
+        magnitude = format(gap.copy_abs(), ".2f")
+    if magnitude == "0.00":
+        return f"{direction}{reference}，相差不足 0.01 个百分点"
+    return f"{direction}{reference} {magnitude} 个百分点"
+
+
+def _target_comparison(target):
+    """把固定报告的区间状态与上下界差值直接表述为可引用的中文结论。"""
+    label, state = target["label"], target["state"]
+    if state == "scope_not_applicable":
+        return "整体目标只适用于未筛选的滚动30天或完整自然月报告，当前范围不适用。"
+    bounds = f"{target['lower_rate']:%}–{target['upper_rate']:%}"
+    if state == "metric_unavailable":
+        return f"{label}实际值不可用，无法与目标区间（{bounds}）比较。"
+    position = {
+        "within_range": "位于目标区间内",
+        "above_range": "高于目标区间",
+        "below_range": "低于目标区间",
+    }[state]
+    lower = _point_comparison(target["lower_gap_pp"], "下界")
+    upper = _point_comparison(target["upper_gap_pp"], "上界")
+    return f"{label}{position}（{bounds}），{lower}，{upper}。"
+
+
 def _overview(repo, q, limit, offset):
     data = add_target_ranges(repo, q, overview(repo, q))
+    targets = [dict(row, comparison=_target_comparison(row)) for row in data["target_ranges"]]
+    total_target = next(
+        (row["comparison"] for row in targets if row["metric_code"] == "total_refund_rate"),
+        "本报告的总退款率没有可比较的整体目标。",
+    )
     facts, notes, tables = [], [data["scope_note"], data["quality_note"]], []
     for prefix, metrics in (("", data["metrics"]), ("risk_", data["risk_metrics"])):
         for item in metrics:
+            key = prefix + item["key"]
             unit = _unit(item["type"])
-            label = item["label"] + ("（百分点）" if item["type"] == "points" else "")
+            label = item["label"]
             reason = "；".join(filter(None, (item.get("note"), item.get("detail"))))
+            if key == "risk_target_gap":
+                label, reason = "总退款率减整体目标上界", total_target
+            elif key == "risk_change_pp":
+                label = "总退款率较上期变化"
+                if item["value"] is not None:
+                    reason = "本期总退款率" + _point_comparison(item["value"], "上期") + "。"
+            if item["type"] == "points":
+                label += "（百分点）"
             facts.append(fact(
-                prefix + item["key"], label, _scalar(item["value"], unit), unit,
+                key, label, _scalar(item["value"], unit), unit,
                 status=item["status"], reason=reason,
             ))
     decision = data["decision"]
@@ -213,9 +257,10 @@ def _overview(repo, q, limit, offset):
          data["actions"]),
         ("整体目标区间", [("label", "指标", "text"), ("lower_rate", "目标下界", "percent"),
                   ("upper_rate", "目标上界", "percent"), ("current", "本期", "percent"),
-                  ("lower_gap_pp", "距下界（百分点）", "number"),
-                  ("upper_gap_pp", "距上界（百分点）", "number"), ("state", "适用状态", "text"),
-                  ("version_id", "目标版本", "text")], data["target_ranges"]),
+                  ("lower_gap_pp", "本期减下界（百分点）", "number"),
+                  ("upper_gap_pp", "本期减上界（百分点）", "number"), ("state", "区间状态", "text"),
+                  ("comparison", "实际值与整体目标的比较", "text"),
+                  ("version_id", "目标版本", "text")], targets),
         ("优先行动", [("id", "建议键", "text"), ("kind", "类型", "text"),
                   ("title", "对象", "text"), ("detail", "建议", "text"),
                   ("verification", "验证指标", "text")], data["priorities"]),
@@ -223,7 +268,8 @@ def _overview(repo, q, limit, offset):
     for level, label in (("category", "品类"), ("style", "单款")):
         definitions.append((
             label + "风险排序", [("id", "对象键", "text"), ("name", "对象", "text"),
-                  ("amount", "实际入库金额", "currency"), ("amount_share", "金额占比", "percent"),
+                  ("amount", "实际入库金额", "currency"),
+                  ("amount_share", "占当前筛选入库金额", "percent"),
                   ("total_refund_rate", "总退款率", "percent"),
                   ("change_pp", "变化（百分点）", "number"),
                   ("risk_score", "本层排序分", "number"), ("note", "依据", "text")],

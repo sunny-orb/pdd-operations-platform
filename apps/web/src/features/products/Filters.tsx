@@ -7,10 +7,12 @@ import {
   dimensionSelection,
   dimensionValues,
   validDate,
+  scopeError,
   type Scope,
   type ScopeName,
 } from "./scope";
 import { useOptions, type ProductsState } from "./data";
+import { ProductAssistantContext } from "./ProductAssistantContext";
 import { catalogOptions } from "./catalog";
 import { formatProductLevel } from "../../shared/products/levels";
 
@@ -53,7 +55,7 @@ export function Filters({
         JSON.stringify(selection.level) !== JSON.stringify(scope.level) ||
         selection.products.join() !== scope.products.join())
     ) {
-      state.change(name, { ...selection, page: 1 });
+      state.change(name, { ...selection, page: 1 }, false);
     }
   }, [first, result.isFetching, result.isPlaceholderData, result.error, scope, state, name]);
   const products = first?.products ?? [];
@@ -152,6 +154,17 @@ export function Filters({
       }
       aria-label={`${label}筛选`}
     >
+      {name === state.assistantScope && (
+        <ProductAssistantContext
+          scope={scope}
+          version={state.version}
+          ready={
+            !!state.version &&
+            !scopeError(scope, state.metadata.data?.date_from, state.metadata.data?.date_to)
+          }
+          catalog={result.isPlaceholderData || result.error ? undefined : result.catalog}
+        />
+      )}
       {name === "detail" && shopSelect}
       {name !== "score" && (
         <div className="m1-date-range">

@@ -5,7 +5,11 @@ from contextlib import contextmanager
 import sqlalchemy as sa
 
 from app.modules.data_status.schedule_policy import first_reconciliation, next_reconciliation
-from app.modules.data_status.timeliness import merge_update_timing
+from app.modules.data_status.timeliness import (
+    direct_day_check,
+    merge_daily_arrivals,
+    merge_update_timing,
+)
 
 
 def recover_interrupted_checks(c, table, previous, codes, now):
@@ -88,22 +92,44 @@ class CheckpointStore:
         with c.begin():
             return {r["source_id"]: dict(r) for r in c.execute(sa.select(table)).mappings()}
 
-    def write(self, c, code, **values):
-        """在调用方事务内更新检查点，并保留网页时效及覆盖摘要。"""
-        if "web_updated_at" in values:
+    def write(self, c, code, *, timing_only=False, **values):
+        """持项目锁在同一短事务合并实读时效；独立周对账保留原普通检查状态。"""
+        day_check = (
+            direct_day_check(values, values["checked_at"])
+            if "observed_at" in values and "checked_at" in values
+            else None
+        )
+        if timing_only and not day_check:
+            return
+        if day_check or "web_updated_at" in values:
             prior = (
-                c.execute(sa.select(self.table).where(self.table.c.source_id == code))
+                c.execute(
+                    sa.select(self.table).where(self.table.c.source_id == code).with_for_update()
+                )
                 .mappings()
                 .first()
             )
             prior = dict(prior) if prior else {}
-            checked = values["web_checked_at"]
-            if prior.get("web_checked_at") and checked < prior["web_checked_at"]:
-                raise ValueError("WEB_CHECK_OLDER_OR_SOURCE_UNINITIALIZED")
-            values["platform_snapshot"] = {
-                **prior.get("platform_snapshot", {}),
-                "update_timing": merge_update_timing(prior, values["web_updated_at"], checked),
-            }
+            snapshot = dict(prior.get("platform_snapshot", {}))
+            if day_check:
+                snapshot["daily_arrivals"] = merge_daily_arrivals(
+                    snapshot.get("daily_arrivals", {}), day_check
+                )
+            if timing_only and prior:
+                c.execute(
+                    self.table.update()
+                    .where(self.table.c.source_id == code)
+                    .values(platform_snapshot=snapshot)
+                )
+                return
+            if "web_updated_at" in values:
+                checked = values["web_checked_at"]
+                if prior.get("web_checked_at") and checked < prior["web_checked_at"]:
+                    raise ValueError("WEB_CHECK_OLDER_OR_SOURCE_UNINITIALIZED")
+                snapshot["update_timing"] = merge_update_timing(
+                    prior, values["web_updated_at"], checked
+                )
+            values["platform_snapshot"] = snapshot
         self.upsert(c, self.table, code, **values)
 
     def write_reconciliation(self, c, code, **values):

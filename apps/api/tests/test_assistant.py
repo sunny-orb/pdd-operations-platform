@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.main import create_app
 
+DEEPSEEK = "bailian:deepseek-v4.1-flash-1017"
 URL = "/api/v1/assistant/chat"
 BODY = {
     "generation": "b95fc3c0-85c4-4f5d-911c-d32a64dcc7ad",
@@ -18,16 +19,14 @@ def test_local_model_is_opt_in():
         assert client.post(URL, json=BODY).status_code == 503
 
 
-def test_personal_model_is_inaccessible_outside_local_preview():
-    app = create_app(
-        Settings(_env_file=None, app_env="production", assistant_model="openai-codex:gpt-6.2-sol")
-    )
+def test_assistant_is_inaccessible_outside_local_preview():
+    app = create_app(Settings(_env_file=None, app_env="production", assistant_model=DEEPSEEK))
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
         assert client.post(URL, json=BODY).status_code == 403
 
 
 def test_untrusted_browser_origin_cannot_use_model():
-    app = create_app(Settings(_env_file=None, assistant_model="openai-codex:gpt-6.2-sol"))
+    app = create_app(Settings(_env_file=None, assistant_model=DEEPSEEK))
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
         assert (
             client.post(URL, headers={"Origin": "https://example.com"}, json=BODY).status_code
@@ -42,13 +41,14 @@ def test_business_data_never_reaches_a_provider_without_approval(monkeypatch):
         raise AssertionError("未授权时不能创建模型或发送对话")
 
     monkeypatch.setattr(assistant, "build_agent", unexpected_model)
-    for enabled, name in [
-        (False, "openai-codex:gpt-6.2-sol"),
-        (True, "deepseek:test"),
-        (True, "bailian:qwen3.8-flash"),
-    ]:
+    for enabled, providers in [(False, ["bailian"]), (True, [])]:
         app = create_app(
-            Settings(_env_file=None, assistant_model=name, assistant_business_data_enabled=enabled)
+            Settings(
+                _env_file=None,
+                assistant_model=DEEPSEEK,
+                assistant_business_data_enabled=enabled,
+                assistant_business_providers=providers,
+            )
         )
         with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
             assert client.get("/api/v1/assistant/models").json()["models"] == []
@@ -56,6 +56,17 @@ def test_business_data_never_reaches_a_provider_without_approval(monkeypatch):
                 client.post(URL, json={**BODY, "history": [{**BODY, "answer": "历史"}]}).status_code
                 == 403
             )
+
+
+def test_obsolete_model_settings_disable_only_the_assistant():
+    app = create_app(
+        Settings(
+            _env_file=None, assistant_model="external:retired", assistant_business_data_enabled=True
+        )
+    )
+    with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
+        assert client.get("/api/v1/assistant/models").json()["models"] == []
+        assert client.post(URL, json=BODY).status_code == 503
 
 
 def test_stop_cancels_only_matching_generation_and_releases_slot(monkeypatch):
@@ -92,7 +103,8 @@ def test_stop_cancels_only_matching_generation_and_releases_slot(monkeypatch):
         Settings(
             _env_file=None,
             assistant_business_data_enabled=True,
-            assistant_model="openai-codex:gpt-6.2-sol",
+            assistant_business_providers=["bailian"],
+            assistant_model=DEEPSEEK,
         )
     )
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
@@ -110,19 +122,17 @@ def test_stop_cancels_only_matching_generation_and_releases_slot(monkeypatch):
         assert client.post(URL, json={**BODY, "question": "重试"}).json()["answer"] == "已重新回答"
 
 
-def test_models_are_server_selected_and_cached_per_choice(monkeypatch):
+def test_deepseek_is_the_only_server_model_and_default(monkeypatch):
     from contextlib import asynccontextmanager
 
     from app.api import assistant
 
-    first = "openai-codex:gpt-6.2-sol"
-    second = "openai-codex:gpt-6.2-astra"
+    monkeypatch.setenv("ASSISTANT_MODEL_CHOICES", '["bailian:retired-model"]')
     app = create_app(
         Settings(
             _env_file=None,
             assistant_business_data_enabled=True,
-            assistant_model=first,
-            assistant_model_choices=[second, first],
+            assistant_business_providers=["bailian"],
         )
     )
     opened = []
@@ -146,25 +156,28 @@ def test_models_are_server_selected_and_cached_per_choice(monkeypatch):
     monkeypatch.setattr(assistant, "answer_question", echo)
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
         assert client.get("/api/v1/assistant/models").json() == {
-            "models": [first, second],
+            "models": [DEEPSEEK],
             "business_data_enabled": True,
         }
-        assert client.post(URL, json={**BODY, "model": "unlisted"}).status_code == 422
-        for name in (None, second, first):
-            assert client.post(URL, json={**BODY, "model": name}).json()["answer"] == (
-                name or first
-            )
-        assert opened == [first, second]
+        for removed in (
+            "bailian:qwen3.8-flash",
+            "unlisted",
+            "bailian:retired-model",
+            "external:retired",
+        ):
+            assert client.post(URL, json={**BODY, "model": removed}).status_code == 422
+        for name in (None, DEEPSEEK):
+            assert client.post(URL, json={**BODY, "model": name}).json()["answer"] == DEEPSEEK
+        assert opened == [DEEPSEEK]
 
 
-@pytest.mark.parametrize("vendor", ["deepseek", "bailian"])
-def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, vendor):
+def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch):
     import json
     from functools import partial
     from threading import get_ident
 
     import httpx2
-    from pydantic_ai.providers import deepseek, openai
+    from pydantic_ai.providers import openai
 
     from app.modules.assistant import chat
 
@@ -224,15 +237,18 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, ve
 
     def endpoint(request):
         payload = json.loads(request.content)
-        if vendor == "bailian":
-            assert payload["model"] == "qwen3.8-flash"
-            assert payload["enable_thinking"] is False
-            assert request.url.host == "bailian.test"
-            assert request.headers["Authorization"] == "Bearer test-only"
+        assert payload["model"] == DEEPSEEK.removeprefix("bailian:")
+        assert payload["enable_thinking"] is False
+        assert request.url.host == "bailian.test"
+        assert request.headers["Authorization"] == "Bearer test-only"
         model_thread_ids.append(get_ident())
         messages = payload["messages"]
         calls.append(messages)
-        assert {t["function"]["name"] for t in payload["tools"]} == {
+        names = {t["function"]["name"] for t in payload["tools"]}
+        assert ("explain_observation" in names) == (
+            not any(m.get("tool_call_id") == "facts" for m in messages)
+        )
+        assert names - {"explain_observation"} == {
             "find_product",
             "get_product_performance",
             "get_product_promotion",
@@ -273,7 +289,7 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, ve
                 "id": "chat-local",
                 "object": "chat.completion",
                 "created": 0,
-                "model": "deepseek-v4-pro",
+                "model": payload["model"],
                 "choices": [
                     {
                         "index": 0,
@@ -286,11 +302,6 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, ve
 
     client_transport = httpx2.AsyncClient(transport=httpx2.MockTransport(endpoint))
     monkeypatch.setattr(
-        deepseek,
-        "DeepSeekProvider",
-        partial(deepseek.DeepSeekProvider, http_client=client_transport),
-    )
-    monkeypatch.setattr(
         openai,
         "OpenAIProvider",
         partial(openai.OpenAIProvider, http_client=client_transport),
@@ -300,14 +311,11 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, ve
     app = create_app(
         Settings(
             _env_file=None,
-            assistant_model="bailian:qwen3.8-flash"
-            if vendor == "bailian"
-            else "deepseek:deepseek-v4-pro",
-            deepseek_api_key="test-only",
+            assistant_model=DEEPSEEK,
             bailian_api_key="test-only",
             bailian_base_url="https://bailian.test/compatible-mode/v1",
             assistant_business_data_enabled=True,
-            assistant_business_providers=[vendor],
+            assistant_business_providers=["bailian"],
         )
     )
     scope = {"shop_id": "s1", "date_from": "2026-10-01", "date_to": "2026-10-07"}
@@ -378,6 +386,42 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, ve
         mode = "no_tool"
         result = ask("本期如何？", {}).json()
         assert result["status"] == "no_evidence" and "555" not in result["answer"]
+
+
+def test_rule_followup_keeps_observations_with_their_dates_and_skips_period_totals(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from app.modules.assistant import chat
+
+    product = dict(listing_id="cap", shop_id="shop", name="帽子", shop_name="测试店")
+    rule = dict(label="严重流量下滑", current="60", baseline="120", trend=["80", "60"])
+    source = dict(
+        kind="product_performance",
+        product=product,
+        period=dict(date_from="2026-11-18", date_to="2026-11-24"),
+        metrics=[{"key": "visitors", "current": "840"}],
+        coverage={},
+        evidence={
+            "rules": {
+                "date_to": "2026-11-24",
+                "baseline_from": "2026-11-17",
+                "baseline_to": "2026-11-23",
+                "findings": [rule],
+            }
+        },
+        series=[{"date": "2026-11-24", "values": {"visitors": "60"}}],
+    )
+    monkeypatch.setattr(chat, "product_performance", lambda *a, **kw: source)
+    run = chat.QueryRun(None, chat.ChatScope(), "这款触发那天的访客和基准是多少？", subject=product)
+    result = asyncio.run(chat.get_product_performance(SimpleNamespace(deps=run), focus="risk"))
+    assert result["rules"]["findings"] == [{k: v for k, v in rule.items() if k != "trend"}]
+    assert result["rules"]["baseline_to"] == "2026-11-23" and "metrics" not in result
+    assert "trend" in run.reports[0]["evidence"]["rules"]["findings"][0]
+    full = asyncio.run(
+        chat.get_product_performance(SimpleNamespace(deps=run), daily_metrics=["visitors"])
+    )
+    assert full["metrics"] == source["metrics"] and full["series"] == source["series"]
 
 
 def test_daily_evidence_reuses_report_and_only_sends_requested_values(monkeypatch):
@@ -482,8 +526,9 @@ def test_new_generation_waits_for_inflight_read_after_stop(monkeypatch):
     app = create_app(
         Settings(
             _env_file=None,
-            assistant_model="openai-codex:gpt-6.2-sol",
+            assistant_model=DEEPSEEK,
             assistant_business_data_enabled=True,
+            assistant_business_providers=["bailian"],
         )
     )
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
@@ -583,7 +628,8 @@ def test_stream_runs_tools_before_text_and_keeps_final_evidence(monkeypatch):
         Settings(
             _env_file=None,
             assistant_business_data_enabled=True,
-            assistant_model="openai-codex:gpt-6-luna",
+            assistant_business_providers=["bailian"],
+            assistant_model=DEEPSEEK,
         )
     )
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
@@ -621,4 +667,30 @@ def test_bailian_requires_its_own_key(monkeypatch):
 
     monkeypatch.setenv("OPENAI_API_KEY", "other-provider-key")
     with pytest.raises(ValueError, match="百炼 API Key"):
-        build_agent(Settings(_env_file=None, assistant_model="bailian:qwen3.8-flash"))
+        build_agent(Settings(_env_file=None, assistant_model=DEEPSEEK))
+
+
+def test_production_assistant_requires_enablement_and_approved_same_origin():
+    settings = Settings(
+        _env_file=None, app_env="production", assistant_production_enabled=True,
+        assistant_business_data_enabled=True, assistant_business_providers=["bailian"],
+        cors_origins=["https://pdd-operations.kktree.cn"],
+    )
+    with TestClient(create_app(settings), base_url="https://pdd-operations.kktree.cn") as client:
+        assert client.get("/api/v1/assistant/models").json()["models"] == [DEEPSEEK]
+        assert client.get("/api/v1/assistant/models", headers={"Origin": "https://other.example"}).status_code == 403
+    with TestClient(create_app(settings), base_url="https://other.example") as client:
+        assert client.get("/api/v1/assistant/models").status_code == 403
+
+
+def test_production_model_requests_are_rate_limited_before_calling_model(monkeypatch):
+    from app.api import assistant
+    monkeypatch.setattr(assistant, "build_agent", lambda _: (_ for _ in ()).throw(RuntimeError()))
+    settings = Settings(
+        _env_file=None, app_env="production", assistant_production_enabled=True,
+        assistant_business_data_enabled=True, assistant_business_providers=["bailian"],
+        assistant_requests_per_minute=1, cors_origins=["https://pdd-operations.kktree.cn"],
+    )
+    with TestClient(create_app(settings), base_url="https://pdd-operations.kktree.cn") as client:
+        assert client.post(URL, json=BODY).status_code == 502
+        assert client.post(URL, json=BODY).status_code == 429

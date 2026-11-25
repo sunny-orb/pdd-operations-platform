@@ -9,6 +9,7 @@ import type { BusinessReport } from "./contracts";
 
 let endSession: () => void;
 beforeEach(() => {
+  sessionStorage.clear();
   endSession = startPanelSession();
   HTMLDialogElement.prototype.show = function () {
     this.open = true;
@@ -116,8 +117,8 @@ async function showAnswer(question: string, reports: BusinessReport[], evidence 
     </MemoryRouter>,
   );
   fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
-  await screen.findByRole("option", { name: "m" });
-  fireEvent.change(screen.getByRole("textbox"), { target: { value: question } });
+  const input = await screen.findByRole("textbox", { name: "输入运营问题" });
+  fireEvent.change(input, { target: { value: question } });
   fireEvent.click(screen.getByRole("button", { name: "发送问题" }));
   await screen.findByText("已按本次依据回答。");
 }

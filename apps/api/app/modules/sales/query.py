@@ -262,6 +262,7 @@ class SalesService:
                     )
                 data = dict(
                     items=items,
+                    all_shops_revenue=number(denominator, money=True),
                     missing_shop_days=sum(len(item["coverage"]["missing_dates"]) for item in items),
                 )
             from .detail_queries import enrich_metrics

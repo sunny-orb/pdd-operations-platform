@@ -1098,6 +1098,12 @@ J2/J3使用`ud_1_dsyyxskb`的`pay_time`，分别精确状态`已发货`/`取消`
 
 现行唯一生效源选NMC官网公报+中期预报，飞书为参考链接，不自动切源；两源时间独立展示。实际首发布日10/28，历史从真实接入起累积，不导入旧快照或声称60天齐备。原30经营表外的weather_publications与现有真实父版本/任务兼容，未放宽任务成功结果FK；本地迁移、真实归档/API及失败/修订反例见[本轮验收](validation/2026-10-28.md#m6-live-implementation-20261028)。
 
+<a id="weather-history-readback-20261125"></a>
+
+**2026-11-25历史留存与解析只读复核：**本机8000及5173代理的天气目录一致，当日已保存11/25修订3，公报标注18时、中期标注10时。按目录ID分别查询11/25、11/24和10/28，均返回对应发布日期及各自原文，未套用最新正文。目录仅列每个发布日最高修订，前端统一附“修订N”，包含修订1；同日发布时间或正文变化也会生成新修订，不能将该标签解释为后来改写历史。存储入口按内容摘要复用或INSERT新版，不覆盖旧行；此次未另查所有旧修订ID，不把三日抽查扩大为全历史完整性验收。归档对象是当期公报及预报文本，未建立逐城市实测日天气表；官方预报外链仍指向当前网页。
+
+修复前11/25原文已有降水段，但今日降水和气温均为unidentified。原文标题为“三、未来三天具体预报”“二、重点天气预报”，原解析器分别固定匹配“三、国内未来三天具体预报”“2.重点天气预报”，因而未取得对应段落。用真实归档在内存重放，仅将两处标题替换为原匹配形式，降水变为parsed、气温变为not_mentioned，确认是解析兼容缺口。现已按用户授权在本机兼容两类标题，并对旧归档只读重新解释降水、气温及未来过程；11/25、11/24和10/28降水均恢复，原发布ID不变。11/25和10/28无当日气温预报，11/24气温时段仍不明确，未用实况或未来降温补值。用户同时确认日期展示去掉修订编号，后台版本保留，现行需求见[天气展示](requirements.md#m6-local-display)。验证与未上线边界见[本轮验收](validation/2026-11-25.md#weather-display-fix)。
+
 M6最终补跑已接14步骤全部成功，真实API观察日商品/推广/店铺仍10/26，JST三角色至10/27；天气同内容复用原发布。中心同版字段与负责API精确一致，但10/26店铺成交389,506.07与商品成交389,484.07有22.00差额，这是不同RPA粒度的真实反例，未以修前端数值或二次扣减调平；完整性/跨源含义沿契约及issues待核。全部实际验收仍以validation为唯一记录。
 
 <a id="data-completion-sources-20261028"></a>
@@ -2544,7 +2550,7 @@ JST按编码复核另发现一条11/05 13:25:43售后记录，名称为`kk树-ko
 
 另查看AI产出目录的经营日报、TOP30单品诊断。页面标示Skill／MCP来源、生成时间、历史版本，抽看两份显示2026-11-23 14:00生成。TOP30页面说明由服务端生成器取数渲染，日报的要点标注规则化生成。由此可确认该产出区包含定时取数与规则报告，不能将目录中的每份产物认定为模型实时生成。
 
-拼多多现有`product_board/actions.py`返回generation_method=rules和ai_status=not_connected，`query.py`的risk_feed返回rules及rule_version。推广`diagnosis.py`由指标和配置阈值生成判断。可复用为问答证据。库存导航及售后关联范围见requirements第2节和[M5现行方案](implementation/m5-aftersales-implementation.md)，后续建议维护于[AI规划第5.5节](implementation/ai-assistance.md#pdd-ai-business-plan-20261123)。
+拼多多现有`product_board/actions.py`返回generation_method=rules和ai_status=not_connected，`query.py`的risk_feed返回rules及rule_version。推广`diagnosis.py`由指标和配置阈值生成判断。可复用为问答证据。库存导航及售后关联范围见requirements第2节和[M5现行方案](implementation/m5-aftersales-implementation.md)，后续建议维护于[五页用例](implementation/ai-assistance.md#use-cases)。
 
 <a id="ai-sidebar-sop-discussion-20261123"></a>
 
@@ -2560,8 +2566,23 @@ JST按编码复核另发现一条11/05 13:25:43售后记录，名称为`kk树-ko
 
 天猫本次在1440×900视口展开ChatBI，DOM显示`ant-drawer-section dsh-chatbi-drawer`及`dsh-chatbi-body`，iframe地址为`https://dsh.tmall.kktree.cn/?app=chatbi`。外层Drawer从x=980起，宽460px，无`ant-drawer-mask`。页面右侧内容被覆盖，主内容并未缩为并排列；570px宽视口下抽屉仍宽460px。顶栏有折叠、独立打开、刷新和重新登录入口。商品下钻弹层与这个ChatBI抽屉分开。布局截图仅保存临时私有目录，视口覆盖已恢复。
 
-上述事实支持以公共右侧面板承载拼多多问答，桌面并排、窄屏抽屉／全屏为本轮建议。约440px初始宽度、入口位置及上下文交互仍为设计候选。当前`DashboardLayout.tsx`提供共享顶栏与Ant Design主题，适合统一助手入口；会话状态应跨路由保留。交互建议唯一维护于[AI计划第4节](implementation/ai-assistance.md#4-共用右侧问答怎么用交互建议)。
+上述事实支持以公共右侧面板承载拼多多问答，桌面并排、窄屏抽屉／全屏为本轮建议。约440px初始宽度、入口位置及上下文交互仍为设计候选。当前`DashboardLayout.tsx`提供共享顶栏与Ant Design主题，适合统一助手入口；会话状态应跨路由保留。交互建议唯一维护于[侧栏设计](implementation/ai-assistance.md#sidebar)。
 
 ## 2026-11-24 本轮SOP复核
 
-通过 `lark-cli docs +fetch --as user` 再读[拼多多分析SOP](https://kocotree.feishu.cn/docx/EA2fdkbbLoMhYnxNEEvcxFhPnoc)，取得revision 30，重点第7、9、10章。商品异常已有双7日比较与样本门槛；9.3已有素材测试、承接改善、退款口径检查；10.3已有尺码实测、质量核查及7日动作复核。现有程序覆盖和未接数据仍须逐项区分；本轮不据文档更新擅自改生效阈值。建议接入方式唯一维护于[本轮实施报告](implementation/ai-assistance.md#assistant-all-pages-20261124)。
+通过 `lark-cli docs +fetch --as user` 再读[拼多多分析SOP](https://kocotree.feishu.cn/docx/EA2fdkbbLoMhYnxNEEvcxFhPnoc)，取得revision 30，重点第7、9、10章。商品异常已有双7日比较与样本门槛；9.3已有素材测试、承接改善、退款口径检查；10.3已有尺码实测、质量核查及7日动作复核。现有程序覆盖和未接数据仍须逐项区分；本轮不据文档更新擅自改生效阈值。建议接入方式唯一维护于[动作型 SOP 接入设计](implementation/ai-assistance.md#sop-dynamic-plan)。
+
+<a id="aftersales-order-detail-20261125"></a>
+
+## 2026-11-25 新增数仓RPA售后单明细核查
+
+用户指定仅核查 `cubeappdata.bwd_rpa_pdd_trd_aftersale_order_detail_f` 能否补充售后看板。使用项目既有数仓只读身份，读取30列定义、聚合及5条必要业务字段样例；未读取买家资料、备注、运单号原值，未接入、同步、写库或部署。字段注释均为空，下述含义以字段及实值限定，不冒充RPA业务说明。
+
+- 当次193,271行，193,271个不同id及店铺＋售后单号，189,168个不同店铺＋订单号；6店，售后单号、订单号、spu_id非空。支持本次数据的一单一行候选粒度，不证明后续始终唯一；同订单可多售后。
+- 全部time_granularity=day，dt与apply_time的日期不等数为0。实际有记录日期52天，范围2026-09-28～11-24；区间内09-29、09-30、10-04、10-05、10-06、10-08无记录，不能判断是无申请还是未交付。max(updated_at)=2026-11-25 06:48:28，来源时区未另获说明；无去年数据。
+- aftersale_status=退款成功100,842行，均有refund_approved_time，其中100,701行refund_amount>0。另有待商家处理20,763、待用户发货64,326、撤销2,212及换货/补寄等；处理中和撤销也有正refund_amount。因此不能把全表refund_amount当实际成功退款，refund_approved_time不能未经确认改名为支付到账时间。
+- 金额列transaction_amount/refund_amount均DOUBLE且无单位注释；9,153行refund_amount>transaction_amount。样例存在63.4与66.4，不可用两列相等假设或擅自解释差额；未验证运费/补偿/申请与实付的含义。
+- 退款状态、申请原因、售后类型、申请日趋势及店铺/商品明细可成为独立补充展示。使用aftersale_id计单数，不能冒充件数；有sku_info文本，但无明确sku_id、款式编码或商品数量列，spu_id与项目商品映射尚未验证。
+- express_intercept_status全部为空；return_logistics_status包括发件/揽件/派件/签收及空值和nan，51,128行有return_logistics_time。退货物流签收不是消费者收到原商品的时间；待用户拒收848行也不能算已实际拒收。缺原发货、买家签收及实际入库事件，尚不能补齐原看板三阶段实退金额/件数。
+- 历史更新风险：09-28这批1,255行最大updated_at仍为09-29 14:22:13，其中166条仍待用户发货。状态是否持续回补需RPA确认，不能直接把历史待处理视为当前积压，也不能用旧状态计算实时成功率或处理时长。
+- 现有public.aftersales_reports_rpa继续作为期间实退数量、实际入库金额及销售分母的生效来源。新表不能与其叠加退款或直接替换三率；没有全部销售/支付分母、数量及实际入库金额，新增来源需另行确认日期/金额/更新语义后实施。

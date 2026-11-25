@@ -184,6 +184,9 @@ def test_triggered_product_rule_and_absent_promotion_keep_their_own_state(sales_
     assert rule["baseline_from"] == "2026-10-19" and rule["baseline_to"] == "2026-10-25"
     (finding,) = rule["findings"]
     assert finding["label"] == "有流量无成交" and finding["action"]
+    assert finding["rule_id"] == "products.risk.zero_orders"
+    assert "当日支付订单数=0" in finding["condition"] and "访客" in finding["sample"]
+    assert "status" not in finding and "deadline" not in finding
     assert "同店" in rule["ranking_basis"] and "20%" in rule["ranking_basis"]
     ads = product_promotion(sales_pg, product["listing_id"])
     assert ads["coverage"]["current"]["observed_days"] == 0

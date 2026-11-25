@@ -3,6 +3,7 @@
 import json
 import re
 from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.modules.product_board.repository import BoardError
 
 from . import catalog
+from .references import refers_to_product
 
 ALIASES = {"product_version": "products", "promotion_version": "promotion_product"}
 
@@ -23,6 +25,7 @@ class DashboardRequest(BaseModel):
     date_to: date | None = None
     shop_id: str | None = Field(default=None, max_length=128)
     all_shops: bool = False
+    previous_product: bool = False
     listing_ids: list[str] | None = Field(default=None, max_length=20)
     month: str | None = Field(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
     report_id: str | None = Field(default=None, max_length=128)
@@ -49,6 +52,7 @@ def versions(report):
 
 def check_versions(run, report):
     expected = dict(run.scope.versions)
+    reference = run.scope.risk_reference
     for key, value in (
         ("products", run.scope.product_version),
         ("promotion_product", run.scope.promotion_version),
@@ -57,6 +61,10 @@ def check_versions(run, report):
             expected[key] = value
     for previous in run.reports:
         expected.update(versions(previous))
+    if run.referred_subject and reference:
+        if expected.get("products", reference.data_version) != reference.data_version:
+            raise BoardError("DATA_VERSION_CHANGED", 409)
+        expected["products"] = reference.data_version
     if any(key in expected and expected[key] != value for key, value in versions(report).items()):
         raise BoardError("DATA_VERSION_CHANGED", 409)
 
@@ -154,7 +162,14 @@ async def read(run, request):
         or ("store" if run.scope.domain == "promotion_store" else "product")
     )
     if request.capability.startswith("promotion_"):
-        if "店铺推广" in run.question and "商品推广" not in run.question:
+        if request.channel or (
+            "明星店铺" in run.question
+            and not request.listing_ids
+            and not request.previous_product
+            and not (request.mode == "product" and re.search(r"单款|同款|这款|那款", run.question))
+        ):
+            mode = "store"
+        elif "店铺推广" in run.question and "商品推广" not in run.question:
             mode = "store"
         elif "商品推广" in run.question and "店铺推广" not in run.question:
             mode = "product"
@@ -192,9 +207,11 @@ async def read(run, request):
             run.question,
         )
     )
+    if request.capability == "sales_targets" and re.search(r"六店|渠道", run.question):
+        explicitly_all = True
     if request.all_shops and not explicitly_all:
         raise Clarify("请确认要查看全部店铺还是当前店铺。")
-    all_shops = explicitly_all or request.capability == "sales_shops"
+    all_shops = explicitly_all or (request.capability == "sales_shops" and not request.shop_id)
     all_products = all_shops or bool(re.search(r"所有商品|全部商品|全店商品", run.question))
     page_shop = run.scope.filter_shop_id or run.scope.shop_id
     if domain not in ("aftersales", "weather", "data_status", "definitions"):
@@ -254,9 +271,20 @@ async def read(run, request):
 
     if domain in ("products", "promotion_product") and all_products:
         params["listing_ids"] = []
+    referenced = False
     if domain in ("products", "promotion_product") and not all_products:
         ids = request.listing_ids
-        if ids is None:
+        if (
+            (request.previous_product or refers_to_product(run.question))
+            and not run.subject
+            and not run.scope.listing_id
+        ):
+            product = await run.resolve_reference()
+            if ids is not None and ids != [product["listing_id"]]:
+                raise Clarify("本轮追问的是上次点名的商品，请按该款查看。")
+            ids = [product["listing_id"]]
+            referenced = True
+        elif ids is None:
             ids = (
                 [run.subject["listing_id"]]
                 if run.subject
@@ -268,6 +296,8 @@ async def read(run, request):
             allowed.add(run.scope.listing_id)
         if run.subject:
             allowed.add(run.subject["listing_id"])
+        if referenced:
+            allowed.update(ids)
         for prior in run.reports:
             for table in prior.get("tables", []):
                 allowed.update(
@@ -281,7 +311,7 @@ async def read(run, request):
         and request.capability != "sales_targets"
     ):
         first, last, days = run.dates(
-            request.period, request.date_from, request.date_to, max_days=366
+            request.period, request.date_from, request.date_to, max_days=366, referenced=referenced
         )
         params.update(date_from=first, date_to=last, recent_days=days)
     if domain == "aftersales":
@@ -293,7 +323,7 @@ async def read(run, request):
             raise Clarify("售后报告暂不能直接对应当前店铺商品链接。请指定报告中的品类或款号再查。")
         params.pop("date_from", None)
         params.pop("date_to", None)
-    for unused in ("capability", "period", "all_shops"):
+    for unused in ("capability", "period", "all_shops", "previous_product"):
         params.pop(unused, None)
     if domain == "aftersales":
         params = {
@@ -319,9 +349,35 @@ async def read(run, request):
     return run.report_cache[key]
 
 
+def style_action_question(question: str) -> bool:
+    """判断用户是否在要单款优先核查动作，混合问题保留原有工具选择。"""
+    return (
+        bool(re.search(r"哪一?款|单款|款号|哪个款", question))
+        and bool(re.search(r"优先|核查|处理|先查|先做", question))
+        and not re.search(
+            r"整体|全店|全报告|品类|全局|预警|级别|同比|环比|趋势|推广|销售|库存|周报|月报|"
+            r"另外|同时|顺便|分别|退款率|金额|占比|目标|上期|去年|对比|历史",
+            question,
+        )
+    )
+
+
 def model_view(report, question):
     """向模型只投影本题所需证据；页面仍得到完整、可追溯的报告。"""
     tables = report["tables"]
+    facts = report["facts"]
+    notes = report["notes"]
+    if report["domain"] in {"promotion_store", "promotion_product"} and re.search(
+        r"预算|加投|停投|调投|加钱", question
+    ):
+        notes = [
+            *notes,
+            (
+                "本次数据是历史实际表现。投放试验的预算上限、最低样本、观察期和停投线均未接入。"
+                "只能给核查动作和复看指标，具体数值由运营确认，连举例也不要代填。"
+                "小额样本限制推断，不能解释为高投产的原因；历史投产不是放量后的边际回报。"
+            ),
+        ]
     if report["capability"] == "aftersales_overview":
         needed = {"报告来源与覆盖", "优先行动", "规则建议"}
         if re.search(r"品类", question):
@@ -332,12 +388,43 @@ def model_view(report, question):
             (r"原因|为什么|质量|品质", ("退款原因",)),
             (r"尺码|大小", ("尺码拆分",)),
             (r"阶段|拒收|签收", ("退款阶段",)),
-            (r"目标|达标|区间|超标", ("整体目标区间",)),
+            (r"目标|达标|区间|超标|超出|越界|上限|下限|上界|下界", ("整体目标区间",)),
             (r"历史|趋势|走势|上期|同比|环比|变化|比较|对比", ("历史报告趋势（整体）",)),
         ):
             if re.search(pattern, question):
                 needed.update(names)
+        if style_action_question(question):
+            # 当前报告的品类预警和整体决策不能充当某款的等级或归因。
+            needed &= {"单款风险排序", "单款优先核查建议", "尺码拆分", "报告来源与覆盖"}
+            facts = []
+            notes = [
+                "按当前报告筛选范围解释单款。金额占比的分母是该筛选范围的入库金额。"
+                "单款风险排序只表示核查顺序；这些行没有单款预警等级。"
+                "动作完成时间与效果可评估时间分别按该款的验证指标说明。"
+            ]
         tables = [table for table in tables if table["title"] in needed]
+        rate_question = question.replace("金额退款率", "退款率")
+        three_rates = re.search(r"三率|三[项种个](?:退款)?率", rate_question) or all(
+            label in rate_question for label in ("售前", "售后", "总退款率")
+        )
+        if three_rates and not re.search(
+            r"原因|建议|优先|风险|趋势|变化|变动|上期|同比|环比|品类|单款|款号|尺码|分析|分解|金额",
+            rate_question,
+        ):
+            tables = [t for t in tables if t["title"] == "整体目标区间"]
+            fields = {"presale_rate", "aftersale_rate", "total_rate"}
+            if "整体目标区间" in needed:
+                fields.add("risk_target_gap")
+            facts = [f for f in facts if f["key"] in fields]
+    # 金额保留精确元，常用的万元展示由 Decimal 换算，模型可直接引用。
+    display_facts = []
+    with localcontext(rounding=ROUND_HALF_UP):
+        for entry in facts:
+            if entry["unit"] == "currency" and entry["value"] is not None:
+                amount = Decimal(str(entry["value"]))
+                if abs(amount) >= 10000:
+                    entry = {**entry, "display": f"{amount / 10000:,.2f} 万元"}
+            display_facts.append(entry)
     compact = []
     for table in tables:
         columns = [
@@ -345,6 +432,12 @@ def model_view(report, question):
             for column in table["columns"]
             if column["key"] not in ("rule_set_id", "data_version")
         ]
+        if report["capability"] == "products_risks" and not re.search(
+            r"成交额|销售额|金额|交易额|卖了多少钱", question
+        ):
+            columns = [
+                c for c in columns if c["key"] not in ("period_revenue", "evaluation_day_revenue")
+            ]
         compact.append(
             dict(
                 title=table["title"],
@@ -362,9 +455,9 @@ def model_view(report, question):
         title=report["title"],
         period=report["period"],
         scope=scope,
-        facts=report["facts"],
+        facts=display_facts,
         tables=compact,
-        notes=report["notes"],
+        notes=notes,
         series=report["series"],
         table_format="rows每行的值与columns顺序一一对应；total是完整数量，offset为已跳过行数",
         rule_reference={

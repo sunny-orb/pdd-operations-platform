@@ -91,23 +91,33 @@
   height: 32px;
 }
 .assistant-scope {
-  margin: 0;
-  background: #f4f8fd;
-  padding: 12px 22px;
-  border-bottom: 1px solid #e1e9f2;
-  font-size: 13px;
-}
-.assistant-scope > div {
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-.assistant-scope svg {
-  color: #6685a7;
-}
-.assistant-object {
-  padding-top: 3px;
+  gap: 6px;
+  padding: 6px 18px;
+  background: #f4f8fd;
+  border-bottom: 1px solid #e1e9f2;
   color: var(--assistant-muted);
+  font-size: 12px;
+}
+.assistant-scope > span,
+.assistant-scope > button {
+  flex: none;
+}
+.assistant-scope strong {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  min-width: 0;
+  line-height: 1.5;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+.assistant-scope > button {
+  margin-left: auto;
+  min-height: 24px;
+  white-space: nowrap;
 }
 .assistant-scope button,
 .assistant-status button {
@@ -115,6 +125,37 @@
   color: var(--assistant-blue);
   border: 0;
   background: transparent;
+}
+.assistant-scope .assistant-follow-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  color: var(--assistant-muted);
+  cursor: pointer;
+}
+.assistant-follow-track {
+  position: relative;
+  width: 24px;
+  height: 14px;
+  border-radius: 8px;
+  background: #758497;
+}
+.assistant-follow-track::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  top: 2px;
+  left: 2px;
+  border-radius: 50%;
+  background: white;
+}
+.assistant-follow-mode[aria-checked="true"] .assistant-follow-track {
+  background: var(--assistant-blue);
+}
+.assistant-follow-mode[aria-checked="true"] .assistant-follow-track::after {
+  transform: translateX(10px);
 }
 .assistant-history {
   min-height: 0;
@@ -349,52 +390,7 @@
 .assistant-compose-tools {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-}
-.assistant-model {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  max-width: calc(100% - 52px);
-  color: #47627f;
-}
-.assistant-model > .anticon {
-  position: absolute;
-  left: 9px;
-  pointer-events: none;
-  font-size: 13px;
-}
-.assistant-model > .assistant-model-caret {
-  left: auto;
-  right: 8px;
-  font-size: 9px;
-}
-.assistant-model select {
-  appearance: none;
-  max-width: 100%;
-  min-height: 30px;
-  padding: 4px 24px 4px 28px;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  background: #f1f5fa;
-  color: inherit;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  cursor: pointer;
-}
-.assistant-model select:disabled {
-  cursor: default;
-  opacity: 1;
-}
-.assistant-model select:enabled:hover {
-  background: #e8f1fe;
-  color: var(--assistant-blue);
-}
-.assistant-model select:focus-visible {
-  outline: 2px solid #4381cc;
-  outline-offset: 2px;
+  justify-content: flex-end;
 }
 .assistant-compose button {
   min-width: 32px;
@@ -454,19 +450,6 @@
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-}
-.assistant-scope > small,
-.assistant-object small {
-  display: block;
-  color: var(--assistant-muted);
-  overflow-wrap: anywhere;
-}
-.assistant-scope > button {
-  display: block;
-  margin-top: 4px;
-}
-.assistant-object span {
-  overflow-wrap: anywhere;
 }
 .assistant-candidates {
   display: grid;

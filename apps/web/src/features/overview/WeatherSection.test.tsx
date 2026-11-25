@@ -124,7 +124,8 @@ it("天气首屏展示中文时间和缺项状态，完整预报与来源默认�
   fireEvent.click(within(records).getByText("来源与更新记录"));
   expect(records.open).toBe(true);
   expect(within(records).getByText("公报归档原文")).toBeTruthy();
-  expect(records.textContent).toMatch(/修订\s*2/);
+  expect(records.textContent).toContain("发布日 2026-11-02");
+  expect(records.textContent).not.toContain("修订");
 });
 
 it("今日长文可原样展开，切换发布后恢复摘要并更新上海时间", () => {

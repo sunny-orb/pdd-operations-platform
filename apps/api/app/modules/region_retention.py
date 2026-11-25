@@ -87,8 +87,9 @@ def rebuild_version(
     connection.execute(
         sa.text("SELECT id FROM public.dataset_versions WHERE id=:v FOR UPDATE"), {"v": version_id}
     ).one()
+    # 维护共享锁排斥回收，版本行锁串行化同版本恢复；同步账号只需读取存储状态。
     state = connection.scalar(
-        sa.text("SELECT state FROM public.dataset_storage WHERE version_id=:v FOR UPDATE"),
+        sa.text("SELECT state FROM public.dataset_storage WHERE version_id=:v"),
         {"v": version_id},
     )
     if state == "online":

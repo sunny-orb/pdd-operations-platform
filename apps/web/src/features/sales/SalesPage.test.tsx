@@ -79,6 +79,7 @@ it("销售助手采用已应用的店铺、目标月份、期间和已发布版�
   await waitFor(() =>
     expect(register).toHaveBeenLastCalledWith({
       page: "店铺销售",
+      selectionLabel: "户外店",
       subject: null,
       context: {
         domain: "sales",

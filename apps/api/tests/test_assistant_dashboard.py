@@ -580,7 +580,7 @@ def test_percentage_projection_formats_rates_above_one_without_losing_units():
         "columns": [{"key": "rate", "label": "总退款率", "unit": "percent"}],
         "rows": [{"rate": "1.4141"}],
     }]
-    result = dashboard.model_view(r, "哪款优先处理")
+    result = dashboard.model_view(r, "退款率是多少")
     assert result["facts"][0]["display"] == "141.41%"
     assert result["tables"][0]["rows"] == [["141.41%"]]
     assert r["tables"][0]["rows"] == [{"rate": "1.4141"}]

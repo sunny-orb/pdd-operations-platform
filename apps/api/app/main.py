@@ -1,8 +1,8 @@
 """API 应用工厂与统一错误处理。"""
 
-from collections import deque
 import asyncio
 import logging
+from collections import deque
 from collections.abc import AsyncIterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AsyncExitStack, asynccontextmanager

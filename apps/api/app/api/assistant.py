@@ -133,7 +133,14 @@ async def chat(request: Request, body: ChatInput):
         task.add_done_callback(lambda _: queue.put_nowait(None))
         try:
             yield 'data: {"type":"status","text":"正在理解问题…"}\n\n'
-            while (event := await queue.get()) is not None:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    break
                 yield "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
             result = task.result()
             if isinstance(result, JSONResponse):
@@ -188,6 +195,8 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
                 state.assistant_agent = await state.assistant_resources.enter_async_context(
                     build_agent(settings)
                 )
+        if body.generation in state.assistant_active:
+            return unavailable(409, "此问题正在回答，请等待或停止后重试")
         task = asyncio.create_task(
             answer_question(
                 state.assistant_agent,

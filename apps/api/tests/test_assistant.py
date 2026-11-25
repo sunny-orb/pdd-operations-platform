@@ -678,7 +678,10 @@ def test_production_assistant_requires_enablement_and_approved_same_origin():
     )
     with TestClient(create_app(settings), base_url="https://pdd-operations.kktree.cn") as client:
         assert client.get("/api/v1/assistant/models").json()["models"] == [DEEPSEEK]
-        assert client.get("/api/v1/assistant/models", headers={"Origin": "https://other.example"}).status_code == 403
+        denied = client.get(
+            "/api/v1/assistant/models", headers={"Origin": "https://other.example"}
+        )
+        assert denied.status_code == 403
     with TestClient(create_app(settings), base_url="https://other.example") as client:
         assert client.get("/api/v1/assistant/models").status_code == 403
 
@@ -694,3 +697,49 @@ def test_production_model_requests_are_rate_limited_before_calling_model(monkeyp
     with TestClient(create_app(settings), base_url="https://pdd-operations.kktree.cn") as client:
         assert client.post(URL, json=BODY).status_code == 502
         assert client.post(URL, json=BODY).status_code == 429
+
+
+def test_two_users_can_generate_and_stop_only_their_own_generation(monkeypatch):
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import AsyncExitStack
+    from threading import Event
+
+    from app.api import assistant
+
+    started = {name: Event() for name in ("one", "two")}
+    finish = Event()
+
+    async def generate(agent, question, page, history, deps):
+        started[question].set()
+        while not finish.is_set():
+            await asyncio.sleep(0.01)
+        return {
+            "answer": question, "status": "answered", "evidence": "", "reports": [],
+            "subject": None, "candidates": [],
+        }
+
+    monkeypatch.setattr(assistant, "build_agent", lambda _: AsyncExitStack())
+    monkeypatch.setattr(assistant, "answer_question", generate)
+    settings = Settings(
+        _env_file=None, assistant_max_concurrent=2,
+        assistant_business_data_enabled=True, assistant_business_providers=["bailian"],
+    )
+    second = "36b63ec7-14c0-424c-b3bc-9cd9b57c2490"
+    with TestClient(
+        create_app(settings), base_url="http://localhost", client=("127.0.0.1", 5000)
+    ) as client:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            one = pool.submit(client.post, URL, json={**BODY, "question": "one"})
+            two = pool.submit(
+                client.post, URL, json={**BODY, "generation": second, "question": "two"}
+            )
+            try:
+                assert started["one"].wait(3)
+                assert started["two"].wait(3)
+                client.post("/api/v1/assistant/stop", json={"generation": BODY["generation"]})
+                assert one.result(timeout=3).status_code == 499
+                assert not two.done()
+            finally:
+                finish.set()
+            assert two.result(timeout=3).json()["answer"] == "two"

@@ -145,6 +145,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
   const [following, setFollowing] = useState(true);
   const page = following ? currentScope : globalScope;
   const product = page.subject;
+  const pageReady = !following || Object.keys(currentScope.context).length > 0;
   const sameOrigin = !!origin && samePageFilters(origin, page);
   const summary = following ? scopeSummary(page) : "全局问答";
   const [businessEnabled, setBusinessEnabled] = useState<boolean | null>(null);
@@ -348,6 +349,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
     // 指向上文时取当次已确认的对象；“这款”和页面快捷问题使用界面当前选款。
     const recall =
       !chosen && /刚才|方才|上一问|上面(?:提到|说|那)|之前(?:说|聊|提到|那)/.test(value);
+    if (!pageReady && !recall && !chosen) return;
     const earlier = recall ? previous.slice().reverse() : [];
     const remembered =
       earlier.find((t) => t.resolved?.subject?.name && value.includes(t.resolved.subject.name)) ??
@@ -618,7 +620,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                     aria-label="建议问题"
                   >
                     {questions.map((q, i) => (
-                      <button key={q} onClick={() => send(q, page)}>
+                      <button key={q} disabled={!pageReady} onClick={() => send(q, page)}>
                         {!turns.length && questionIcons[i]}
                         <span>
                           {turns.length && product ? ["近期表现", "异常在哪", "再看推广"][i] : q}
@@ -676,7 +678,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
                       <button
                         type="submit"
                         aria-label="发送问题"
-                        disabled={!draft.trim() || businessEnabled === false}
+                        disabled={!draft.trim() || businessEnabled === false || !pageReady}
                       >
                         <ArrowUpOutlined />
                       </button>

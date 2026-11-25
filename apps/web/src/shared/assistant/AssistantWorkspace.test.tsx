@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { Link, MemoryRouter } from "react-router-dom";
+import { Link, MemoryRouter, useLocation } from "react-router-dom";
 import { AssistantPageContext, AnalyzeProduct } from "./AssistantContext";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { startPanelSession } from "../layouts/panelLayout";
@@ -42,15 +42,23 @@ const answer = {
   evidence: "已发布依据",
   model: "bailian:deepseek-v4.1-flash-1017",
 };
+function TestPageScope({ selected }: { selected: boolean }) {
+  const { pathname } = useLocation();
+  return pathname === "/products" ? (
+    <AssistantPageContext page="商品数据" subject={selected ? product : null} context={period} />
+  ) : (
+    <AssistantPageContext
+      page="推广分析"
+      subject={null}
+      context={{ ...period, domain: "promotion_store" }}
+    />
+  );
+}
 function renderAssistant(selected = true) {
   render(
     <MemoryRouter initialEntries={["/products"]}>
       <AssistantWorkspace>
-        <AssistantPageContext
-          page="商品数据"
-          subject={selected ? product : null}
-          context={period}
-        />
+        <TestPageScope selected={selected} />
         <AnalyzeProduct subject={other} context={period} />
         <AssistantEntry />
         <Link to="/promotion">推广页</Link>
@@ -1192,4 +1200,25 @@ it("生成中换款，首问固定甲款；这款取乙款，点名刚才的甲�
   ask("这款呢");
   await screen.findByText("答复4");
   expect(calls[3].context.listing_id).toBe("t/B");
+});
+
+it("页面筛选尚未就绪时保留输入并等待，关闭跟随后可以全局提问", () => {
+  render(
+    <MemoryRouter initialEntries={["/promotion"]}>
+      <AssistantWorkspace>
+        <AssistantPageContext page="推广分析" subject={null} context={{}} />
+        <AssistantEntry />
+      </AssistantWorkspace>
+    </MemoryRouter>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "AI助手" }));
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "当前期间推广怎么样" } });
+  expect((screen.getByRole("button", { name: "发送问题" }) as HTMLButtonElement).disabled).toBe(
+    true,
+  );
+  fireEvent.click(screen.getByRole("switch", { name: "跟随页面" }));
+  expect((screen.getByRole("button", { name: "发送问题" }) as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("当前期间推广怎么样");
 });

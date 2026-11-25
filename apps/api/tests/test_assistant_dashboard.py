@@ -568,3 +568,19 @@ def test_latest_size_action_gets_style_evidence_on_category_page(backend):
     assert result["status"] == "answered" and result["usage"]["requests"] == 1
     assert backend[0][0][0] == "aftersales_overview"
     assert backend[0][0][1]["view"] == "style" and backend[0][0][1]["focus"] == "size"
+
+
+def test_percentage_projection_formats_rates_above_one_without_losing_units():
+    r = report(
+        "aftersales", "aftersales_overview", "退款分析", "已发布报告", "version",
+        facts=[fact("rate", "退款率", "1.4141", "percent")],
+    )
+    r["tables"] = [{
+        "title": "单款风险排序", "total": 1, "offset": 0,
+        "columns": [{"key": "rate", "label": "总退款率", "unit": "percent"}],
+        "rows": [{"rate": "1.4141"}],
+    }]
+    result = dashboard.model_view(r, "哪款优先处理")
+    assert result["facts"][0]["display"] == "141.41%"
+    assert result["tables"][0]["rows"] == [["141.41%"]]
+    assert r["tables"][0]["rows"] == [{"rate": "1.4141"}]

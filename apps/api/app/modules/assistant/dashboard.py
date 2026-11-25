@@ -424,6 +424,8 @@ def model_view(report, question):
                 amount = Decimal(str(entry["value"]))
                 if abs(amount) >= 10000:
                     entry = {**entry, "display": f"{amount / 10000:,.2f} 万元"}
+            if entry["unit"] == "percent" and entry["value"] is not None:
+                entry = {**entry, "display": f"{Decimal(str(entry['value'])) * 100:.2f}%"}
             display_facts.append(entry)
     compact = []
     for table in tables:
@@ -447,7 +449,15 @@ def model_view(report, question):
                     dict(key=column["key"], label=column["label"], unit=column["unit"])
                     for column in columns
                 ],
-                rows=[[row.get(column["key"]) for column in columns] for row in table["rows"]],
+                rows=[
+                    [
+                        f"{Decimal(str(row[column['key']])) * 100:.2f}%"
+                        if column["unit"] == "percent" and row.get(column["key"]) is not None
+                        else row.get(column["key"])
+                        for column in columns
+                    ]
+                    for row in table["rows"]
+                ],
             )
         )
     scope = {key: value for key, value in report["scope"].items() if key != "rule_set_id"}

@@ -63,10 +63,7 @@ function WeatherRecords({ state }: { state: WeatherState }) {
     <details className="m6-weather-records" aria-label="天气来源与更新记录">
       <summary>来源与更新记录</summary>
       <div className="m6-weather-record-body">
-        <p>
-          发布日 {state.publication?.issue_date ?? "尚无发布"} · 修订{" "}
-          {state.publication?.revision_no ?? "—"}
-        </p>
+        <p>发布日 {state.publication?.issue_date ?? "尚无发布"}</p>
         <p>
           最近成功：{localTime(state.meta?.last_success_at)} · 最近尝试：
           {localTime(state.meta?.last_attempt_at)}（{state.meta?.last_attempt_status ?? "尚无记录"}
@@ -119,10 +116,12 @@ export function WeatherSection() {
             onChange={state.select}
             options={[
               { value: "latest", label: latest ? `${latest.issue_date}（最新）` : "跟随最新发布" },
-              ...state.options.map((p) => ({
-                value: p.id,
-                label: `${p.issue_date} · 修订 ${p.revision_no}`,
-              })),
+              ...state.options
+                .filter((p) => p.issue_date !== latest?.issue_date)
+                .map((p) => ({
+                  value: p.id,
+                  label: p.issue_date,
+                })),
             ]}
           />
           <Button
@@ -142,10 +141,7 @@ export function WeatherSection() {
             <>
               <span>{notices.join("；")}</span>
               {state.publication && (
-                <span>
-                  ；当前显示 {state.publication.issue_date} · 修订 {state.publication.revision_no}{" "}
-                  的发布内容
-                </span>
+                <span>；当前显示 {state.publication.issue_date} 的发布内容</span>
               )}
             </>
           }

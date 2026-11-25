@@ -35,6 +35,67 @@ def sources(day="28", extra=""):
     ]
 
 
+def compact_sources():
+    """新版公报章节样例，保留实况、当日与未来预报的分界。"""
+    from dataclasses import replace
+
+    values = sources()
+    values[0] = replace(
+        values[0],
+        text=values[0]
+        .text.replace("一、国内天气情况\n1.实况", "一、天气实况")
+        .replace("2.重点天气预报", "二、重点天气预报")
+        .replace("二、全球天气情况\n广东昨日有大雨。\n", "")
+        .replace("三、国内未来三天具体预报", "三、未来三天具体预报"),
+    )
+    return values
+
+
+def test_current_bulletin_headings_keep_rain_processes_and_temperature_boundaries():
+    from dataclasses import replace
+
+    from app.modules.weather.parser import build_document
+
+    values = compact_sources()
+    values[0] = replace(
+        values[0],
+        text=values[0].text.replace(
+            "预计，28日08时至29日08时，河北有5级大风。",
+            "28日至29日，河北气温下降6℃。30日至31日，辽宁气温下降10℃。",
+        ),
+    )
+    _, doc = build_document(values)
+    assert doc.today_rain.status == "parsed"
+    assert doc.today_rain.regions == ["江苏", "浙江"]
+    assert doc.today_temperature.status == "parsed"
+    assert doc.today_temperature.regions == ["河北"]
+    assert "6℃" in doc.today_temperature.detail
+    assert "8℃" not in doc.today_temperature.detail
+    assert "10℃" not in doc.today_temperature.detail
+    assert any(item.regions == ["江苏", "浙江", "河北"] for item in doc.next_7_days)
+
+
+def test_archived_unparsed_blocks_are_projected_from_their_own_sources():
+    from copy import deepcopy
+
+    from app.modules.weather.parser import build_document, presentation_document
+
+    _, doc = build_document(compact_sources())
+    raw = doc.model_dump()
+    raw["today_rain"] = dict(regions=[], detail="旧版未识别", status="unidentified")
+    raw["today_temperature"] = dict(regions=[], detail="旧版未识别", status="unidentified")
+    raw["next_7_days"] = []
+    before = deepcopy(raw)
+    result = presentation_document(raw)
+    assert result["issue_time"] == "2026-10-28T08:00:00+08:00"
+    assert result["today_rain"]["status"] == "parsed"
+    assert result["today_rain"]["regions"] == ["江苏", "浙江"]
+    assert result["today_temperature"]["status"] == "not_mentioned"
+    assert any(item["regions"] == ["江苏", "浙江", "河北"] for item in result["next_7_days"])
+    assert result["sources"] == before["sources"]
+    assert raw == before
+
+
 def test_domestic_forecast_excludes_wind_observation_and_global_weather():
     from app.modules.weather.parser import build_document
 
@@ -164,9 +225,7 @@ def test_temperature_missing_section_or_undated_sentence_remains_unidentified():
         ("28日至29日，河北有5级大风。河北气温下降6℃。", "parsed", "6℃"),
     ],
 )
-def test_temperature_keeps_each_explicit_period_with_its_own_sentences(
-    forecast, status, expected
-):
+def test_temperature_keeps_each_explicit_period_with_its_own_sentences(forecast, status, expected):
     from dataclasses import replace
 
     from app.modules.weather.parser import build_document

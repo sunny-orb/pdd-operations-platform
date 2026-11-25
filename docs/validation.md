@@ -4,6 +4,8 @@
 
 ## 验证记录索引
 
+[全部本地改动、AI助手正式接入与上线清理（2026-11-26）](validation/2026-11-26.md)。
+
 [浏览器刷新保留全局面板、关闭标签页后恢复默认（2026-11-25）](validation/2026-11-25.md#panel-session-refresh)。
 
 [月目标响应与真实运营决策题（2026-11-25）](validation/2026-11-25.md#operator-pilot-review)。

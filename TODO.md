@@ -4,7 +4,7 @@
 
 ## 当前任务与范围
 
-- [ ] 11/25天气章节兼容、历史只读解释和单日期选项已在本机验证，按授权单独发布main；不纳入其他开发改动。[验收](docs/validation/2026-11-25.md#weather-display-fix)。
+- [x] 11/25天气修复d9ddab4已单独合入main并经CI/CD上线，日期去重及三日历史原文验收通过，Worker恢复，退役镜像与临时备份清理完成；不包含AI助手。[验收](docs/validation/2026-11-25.md#weather-display-fix)。
 
 - [x] 11/24日报真实到数时效、每日缺口补收及地区复用权限修复已本地及独立发布代码验收，已推送待发布分支；GitHub Actions因计费/额度限制尚未启动，生产未切换；[验证](docs/validation/2026-11-24.md#daily-arrivals-gap-repair)。
 

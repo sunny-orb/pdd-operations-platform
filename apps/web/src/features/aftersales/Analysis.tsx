@@ -6,7 +6,7 @@ import type { AftersalesState } from "./data";
 import { views, type View } from "./state";
 import { formatValue, reportTypeLabels } from "./format";
 import { Explanation } from "./Explanation";
-import { StableContent } from "./StableContent";
+import { StableContent } from "../../shared/components/StableContent";
 export function Analysis({ state }: { state: AftersalesState }) {
   const data = state.analysis.data?.data;
   const scope = state.scope;

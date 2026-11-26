@@ -1,5 +1,6 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { Skeleton } from "antd";
+import "./stable-content.css";
 
 type ContentProps = { pending: boolean; children: ReactNode };
 
@@ -19,23 +20,36 @@ export function StableContent({
 }: ContentProps & { label: string; ready: boolean }) {
   const [hasShown, setHasShown] = useState(false);
   if (!pending && ready && !hasShown) setHasShown(true);
+  const [indicating, setIndicating] = useState(false);
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setTimeout(() => setIndicating(true), 160);
+    return () => {
+      window.clearTimeout(timer);
+      setIndicating(false);
+    };
+  }, [pending]);
   return (
-    <div className="m5-stable-content" data-retaining={(pending && hasShown) || undefined}>
+    <div
+      className="stable-content"
+      data-retaining={(pending && hasShown) || undefined}
+      data-indicating={(pending && indicating) || undefined}
+    >
       <div
-        className="m5-retained-content"
+        className="stable-content-body"
         aria-busy={pending}
         aria-hidden={pending || undefined}
         inert={pending || undefined}
       >
         <RetainedContent pending={pending}>{children}</RetainedContent>
       </div>
-      {pending && (
-        <div className="m5-loading-indicator" role="status">
+      {pending && indicating && (
+        <div className="stable-content-indicator" role="status">
           {hasShown ? (
             `${label}  上次结果`
           ) : (
             <>
-              <span className="m5-loading-label">{label}</span>
+              <span className="stable-content-label">{label}</span>
               <Skeleton active paragraph={{ rows: 3 }} />
             </>
           )}

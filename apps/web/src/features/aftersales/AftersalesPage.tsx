@@ -16,7 +16,7 @@ import { Brief } from "./Brief";
 import { Details } from "./Details";
 import { Charts } from "./Charts";
 import { Analysis } from "./Analysis";
-import { StableContent } from "./StableContent";
+import { StableContent } from "../../shared/components/StableContent";
 import "./aftersales.css";
 const sections = [
   { id: "aftersales-filters", title: "报告筛选", icon: <FilterOutlined /> },

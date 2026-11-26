@@ -32,7 +32,7 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, UserProm
 from pydantic_ai.usage import RunUsage
 from sqlalchemy.engine import Engine
 
-from app.core.config import DEEPSEEK_MODEL, Settings
+from app.core.config import DIRECT_DEEPSEEK_MODEL, Settings
 from app.core.database_diagnostics import request_database_metrics
 from app.modules.aftersales.read_cache import ReportRowsCache
 from app.modules.product_board.repository import BoardError
@@ -808,20 +808,29 @@ async def get_dashboard_data(
 
 
 def build_agent(settings: Settings) -> Agent:
-    """通过同一百炼业务空间创建所选模型；固定使用获准的模型。"""
+    """按已批准供应商配置构造单一模型，两种接入均显式关闭深度思考。"""
     from pydantic_ai.models.openai import OpenAIChatModel
     from pydantic_ai.providers.openai import OpenAIProvider
 
     name = settings.assistant_model
-    if name != DEEPSEEK_MODEL:
+    if name not in settings.assistant_models:
         raise ValueError("此问答模型未启用")
-    key = settings.bailian_api_key.get_secret_value()
+    direct = name == DIRECT_DEEPSEEK_MODEL
+    key = (settings.deepseek_api_key if direct else settings.bailian_api_key).get_secret_value()
     if not key:
-        raise ValueError("本机尚未配置百炼 API Key")
+        raise ValueError("尚未配置 DeepSeek 官方 API Key" if direct else "本机尚未配置百炼 API Key")
     model = OpenAIChatModel(
-        name.removeprefix("bailian:"),
-        provider=OpenAIProvider(base_url=settings.bailian_base_url, api_key=key),
-        settings={"extra_body": {"enable_thinking": False}, "temperature": 0.3},
+        name.partition(":")[2],
+        provider=OpenAIProvider(
+            base_url=settings.deepseek_base_url if direct else settings.bailian_base_url,
+            api_key=key,
+        ),
+        settings={
+            "extra_body": (
+                {"thinking": {"type": "disabled"}} if direct else {"enable_thinking": False}
+            ),
+            "temperature": 0.3,
+        },
     )
     return Agent(
         model,

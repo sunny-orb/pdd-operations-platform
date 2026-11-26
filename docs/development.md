@@ -32,25 +32,25 @@ PDD_DEV_API_TARGET=https://dashboard.example.com
 
 ### 本机 AI 问答配置
 
-本机问答固定使用公司百炼的 DeepSeek V4.1 Flash-1017。设置 `apps/api/.env` 后重启 API，右侧输入框可直接提问。[设置定义](../apps/api/app/core/config.py) · [无密钥样例](../apps/api/.env.example)
+本机和生产推荐使用 DeepSeek 官方快速模型，关闭深度思考。设置 `apps/api/.env` 后重启 API，右侧输入框可直接提问。[设置定义](../apps/api/app/core/config.py) · [无密钥样例](../apps/api/.env.example)
 
-| 环境变量                                                          | 默认值                                                | 用途                                             |
-| ----------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
-| `APP_ENV`、`CORS_ORIGINS`                                         | development，本机 localhost 和 127.0.0.1 的 5173 端口 | 本机开发访问。生产环境助手入口关闭               |
-| `ASSISTANT_MODEL`                                                 | `bailian:deepseek-v4.1-flash-1017`                    | 唯一支持的型号。显式留空或配置其他型号会关闭问答 |
-| `ASSISTANT_BUSINESS_DATA_ENABLED`、`ASSISTANT_BUSINESS_PROVIDERS` | false、`[]`                                           | 发送获准数据时分别设为 true 和 `["bailian"]`     |
-| `BAILIAN_API_KEY`、`BAILIAN_BASE_URL`                             | 空密钥，默认官方兼容入口                              | 公司百炼密钥与业务空间的兼容地址。仅由后端读取   |
-| `DATABASE_URL`                                                    | 空                                                    | 经营数据来自已初始化的应用 PostgreSQL            |
-| `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_CONNECT_TIMEOUT_SECONDS`   | 代码默认 8 / 4 / 5 秒，样例 4 / 0 / 5 秒              | 连接池、溢出连接和连接等待                       |
-| `CONTENT_REUSE_ENABLED`                                           | false                                                 | 独立的数据库试验开关，问答沿用关闭值             |
+| 环境变量                                                          | 默认值／推荐配置                                      | 用途                                                 |
+| ----------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| `APP_ENV`、`CORS_ORIGINS`                                         | development，本机 localhost 和 127.0.0.1 的 5173 端口 | 本机开发访问。生产环境助手入口关闭                   |
+| `ASSISTANT_MODEL`                                                 | `deepseek:deepseek-flash`（样例）                     | 官方快速型号。代码保留原百炼型号兼容，始终只启用一个 |
+| `ASSISTANT_BUSINESS_DATA_ENABLED`、`ASSISTANT_BUSINESS_PROVIDERS` | false、`[]`                                           | 发送获准数据时分别设为 true 和 `["deepseek"]`        |
+| `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`                           | 空密钥，`https://api.deepseek.com`                    | DeepSeek 官方密钥和入口，仅由后端读取                |
+| `DATABASE_URL`                                                    | 空                                                    | 经营数据来自已初始化的应用 PostgreSQL                |
+| `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_CONNECT_TIMEOUT_SECONDS`   | 代码默认 8 / 4 / 5 秒，样例 4 / 0 / 5 秒              | 连接池、溢出连接和连接等待                           |
+| `CONTENT_REUSE_ENABLED`                                           | false                                                 | 独立的数据库试验开关，问答沿用关闭值                 |
 
-在仓库根目录运行 `npm run dev`。用 `GET /api/v1/assistant/models` 核对 DeepSeek 和业务数据开关，再用一条获准的问题验证。百炼请求设 temperature=0.3、enable_thinking=false，沿用供应商的输出长度默认值。
+在仓库根目录运行 `npm run dev`。用 `GET /api/v1/assistant/models` 核对 DeepSeek 和业务数据开关，再用一条获准的问题验证。官方请求设 temperature=0.3、`thinking={"type":"disabled"}`，沿用供应商的输出长度默认值。兼容旧百炼配置时仍用 `BAILIAN_API_KEY` / `BAILIAN_BASE_URL`、供应商 `bailian` 和 `enable_thinking=false`，两家密钥不互相回退。切换后重启 API；旧密钥从运行配置移除。
 
 按响应头 `X-Request-ID` 在 Uvicorn 日志关联 `assistant_model`（每次模型往返耗时）、`assistant_tool`（已执行的工具名和耗时）与 `assistant_result`（本轮模型请求／工具调用、领域读取次数和耗时、SQL 累计耗时、首条正文增量及总耗时）。`first_delta_ms` 从后端开始执行问答计时，浏览器绘制另测；JSON 请求这一项为空。日志仅记摘要。
 
 每进程一个查询线程，数据库单语句期限 5 秒。生成预算和锁等待由代码设置，数值见[接口说明](api/ai-assistant.md)。Docker、HTTPS 和发布操作见[部署手册](implementation/deployment.md)。
 
-生产沿用网站匿名访问决定。启用 `ASSISTANT_PRODUCTION_ENABLED=true`、`ASSISTANT_BUSINESS_DATA_ENABLED=true` 与获准百炼供应商，在权限600的 `.env.runtime` 填入 `BAILIAN_API_KEY`。正式域名须在 `CORS_ORIGINS`。通过 `ASSISTANT_MAX_CONCURRENT=2`、`ASSISTANT_REQUESTS_PER_MINUTE=20` 限制请求；查询仍仅用一个后台线程，模型请求90秒超时。关闭生产开关即可停用模型问答。此方式适用现有公开访问范围，接入按账号区分的店铺权限需另行实施。
+生产沿用网站匿名访问决定。启用 `ASSISTANT_PRODUCTION_ENABLED=true`、`ASSISTANT_BUSINESS_DATA_ENABLED=true` 与获准供应商 `["deepseek"]`，在权限600的 `.env.runtime` 填入 `DEEPSEEK_API_KEY`。正式域名须在 `CORS_ORIGINS`。通过 `ASSISTANT_MAX_CONCURRENT=2`、`ASSISTANT_REQUESTS_PER_MINUTE=20` 限制请求；查询仍仅用一个后台线程，模型请求90秒超时。关闭生产开关即可停用模型问答。此方式适用现有公开访问范围，接入按账号区分的店铺权限需另行实施。
 
 ## 本地 PostgreSQL
 

@@ -171,7 +171,8 @@ def test_deepseek_is_the_only_server_model_and_default(monkeypatch):
         assert opened == [DEEPSEEK]
 
 
-def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch):
+@pytest.mark.parametrize("official", [False, True])
+def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, official):
     import json
     from functools import partial
     from threading import get_ident
@@ -237,9 +238,15 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch):
 
     def endpoint(request):
         payload = json.loads(request.content)
-        assert payload["model"] == DEEPSEEK.removeprefix("bailian:")
-        assert payload["enable_thinking"] is False
-        assert request.url.host == "bailian.test"
+        assert payload["model"] == (
+            "deepseek-flash" if official else DEEPSEEK.removeprefix("bailian:")
+        )
+        if official:
+            assert payload["thinking"] == {"type": "disabled"}
+            assert "enable_thinking" not in payload
+        else:
+            assert payload["enable_thinking"] is False
+        assert request.url.host == ("deepseek.test" if official else "bailian.test")
         assert request.headers["Authorization"] == "Bearer test-only"
         model_thread_ids.append(get_ident())
         messages = payload["messages"]
@@ -311,11 +318,13 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch):
     app = create_app(
         Settings(
             _env_file=None,
-            assistant_model=DEEPSEEK,
+            assistant_model="deepseek:deepseek-flash" if official else DEEPSEEK,
+            deepseek_api_key="test-only",
+            deepseek_base_url="https://deepseek.test",
             bailian_api_key="test-only",
             bailian_base_url="https://bailian.test/compatible-mode/v1",
             assistant_business_data_enabled=True,
-            assistant_business_providers=["bailian"],
+            assistant_business_providers=["deepseek" if official else "bailian"],
         )
     )
     scope = {"shop_id": "s1", "date_from": "2026-10-01", "date_to": "2026-10-07"}
@@ -762,3 +771,14 @@ def test_http_assistant_uses_the_page_report_input_cache(monkeypatch):
     monkeypatch.setattr(assistant, "answer_question", generate)
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
         assert client.post(URL, json=BODY).json()["answer"] == "已共享输入"
+
+
+def test_direct_deepseek_is_enabled_only_with_matching_business_approval():
+    model = "deepseek:deepseek-flash"
+    for providers, expected in [(["deepseek"], [model]), (["bailian"], [])]:
+        app = create_app(Settings(
+            _env_file=None, assistant_model=model, assistant_business_data_enabled=True,
+            assistant_business_providers=providers,
+        ))
+        with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
+            assert client.get("/api/v1/assistant/models").json()["models"] == expected

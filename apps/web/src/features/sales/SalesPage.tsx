@@ -216,6 +216,7 @@ export function SalesPage() {
             </div>
             <SalesPerformanceMetrics
               result={result}
+              pending={!result && !error}
               scope={scope}
               sources={filters?.data.sources}
               shopName={selectedName}

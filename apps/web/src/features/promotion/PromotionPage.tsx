@@ -10,6 +10,7 @@ import {
 import { DashboardLayout } from "../../shared/layouts/DashboardLayout";
 import type { DashboardSectionLink } from "../../shared/components/DashboardSections";
 import { usePromotion } from "./data";
+import { StableContent } from "../../shared/components/StableContent";
 import { Filters } from "./Filters";
 import { Details } from "./Details";
 import { Metrics, MissingDays, TopDates, Trends } from "./Overview";
@@ -216,64 +217,76 @@ export function PromotionPage() {
             </div>
           )}
           <Filters state={state} />
-          <section className="callout" aria-label={product ? "推广经营结论" : undefined}>
-            <div>
-              {product && <span>推广经营结论</span>}
-              <strong>
-                {!data
-                  ? state.meta.error || errors.length > 0
-                    ? "推广数据暂时无法加载"
-                    : "正在读取推广数据…"
-                  : data.current_record_count === "0"
-                    ? "所选期间暂无推广数据"
-                    : !product
-                      ? (data.coverage.missing_count ?? 0) > 0
-                        ? "部分日期暂无推广数据。"
-                        : "所选期间每天均有推广记录。"
-                      : "推广效率需结合周期变化与商品利润底线判断"}
-                {!product &&
-                  data &&
-                  data.current_record_count !== "0" &&
-                  (data.coverage.missing_count ?? 0) > 0 && (
-                    <>
-                      {" "}
-                      <a href="#promotion-missing-days" onClick={() => setMissingDatesOpen(true)}>
-                        查看日期
-                      </a>
-                    </>
-                  )}
-              </strong>
-              {!product && <p>查看单个商品，请切换「商品推广明细」。</p>}
-            </div>
-            {product && data && data.current_record_count !== "0" && (
-              <p>
-                当前范围 {formatValue(data.coverage.observed_days?.toString())} 天数据 ·{" "}
-                投产比（ROI） <b>{formatMetric(data.metrics.roi)}</b> · 近7天诊断与行动建议见下方
-                SOP 分析
-                {roiNote && <small className="m2-roi-note">{roiNote}</small>}
-              </p>
-            )}
-          </section>
-          <Metrics data={data} selected={selected} toggle={toggle} mode={state.mode} />
-          <Trends data={data} selected={selected} product={product} />
-          {product ? (
-            <>
-              <TopDates data={data} />
-              <Diagnosis state={state} />
-            </>
-          ) : (
-            <>
-              {!state.invalid && (
-                <StoreNet
-                  data={data}
-                  shop={state.scope.shop}
-                  channel={state.scope.channel}
-                  failed={!!state.overview.error || !!state.meta.error}
-                />
+          <StableContent
+            key={state.mode}
+            pending={
+              !state.invalid &&
+              !state.meta.error &&
+              !state.overview.error &&
+              (state.overview.isPending || state.overview.isFetching)
+            }
+            ready={!!data}
+            label="正在更新推广数据…"
+          >
+            <section className="callout" aria-label={product ? "推广经营结论" : undefined}>
+              <div>
+                {product && <span>推广经营结论</span>}
+                <strong>
+                  {!data
+                    ? state.meta.error || errors.length > 0
+                      ? "推广数据暂时无法加载"
+                      : "正在读取推广数据…"
+                    : data.current_record_count === "0"
+                      ? "所选期间暂无推广数据"
+                      : !product
+                        ? (data.coverage.missing_count ?? 0) > 0
+                          ? "部分日期暂无推广数据。"
+                          : "所选期间每天均有推广记录。"
+                        : "推广效率需结合周期变化与商品利润底线判断"}
+                  {!product &&
+                    data &&
+                    data.current_record_count !== "0" &&
+                    (data.coverage.missing_count ?? 0) > 0 && (
+                      <>
+                        {" "}
+                        <a href="#promotion-missing-days" onClick={() => setMissingDatesOpen(true)}>
+                          查看日期
+                        </a>
+                      </>
+                    )}
+                </strong>
+                {!product && <p>查看单个商品，请切换「商品推广明细」。</p>}
+              </div>
+              {product && data && data.current_record_count !== "0" && (
+                <p>
+                  当前范围 {formatValue(data.coverage.observed_days?.toString())} 天数据 ·{" "}
+                  投产比（ROI） <b>{formatMetric(data.metrics.roi)}</b> · 近7天诊断与行动建议见下方
+                  SOP 分析
+                  {roiNote && <small className="m2-roi-note">{roiNote}</small>}
+                </p>
               )}
-              <MissingDays data={data} open={missingDatesOpen} onToggle={setMissingDatesOpen} />
-            </>
-          )}
+            </section>
+            <Metrics data={data} selected={selected} toggle={toggle} mode={state.mode} />
+            <Trends data={data} selected={selected} product={product} />
+            {product ? (
+              <>
+                <TopDates data={data} />
+              </>
+            ) : (
+              <>
+                {!state.invalid && (
+                  <StoreNet
+                    data={data}
+                    shop={state.scope.shop}
+                    channel={state.scope.channel}
+                    failed={!!state.overview.error || !!state.meta.error}
+                  />
+                )}
+                <MissingDays data={data} open={missingDatesOpen} onToggle={setMissingDatesOpen} />
+              </>
+            )}
+          </StableContent>
+          {product && <Diagnosis state={state} />}
           <Details state={state} />
           {product && (
             <footer>

@@ -2,7 +2,7 @@
 
 from collections import OrderedDict
 from collections.abc import Callable, Hashable
-from threading import Lock
+from threading import Condition, Lock
 
 
 class DefaultOverviewCache:
@@ -15,6 +15,8 @@ class DefaultOverviewCache:
         max_total_bytes: int | None = None,
     ):
         self._lock = Lock()
+        self._condition = Condition(self._lock)
+        self._computing: set[Hashable] = set()
         self._entries: OrderedDict[Hashable, bytes] = OrderedDict()
         self._max_entries = max_entries
         self.max_bytes = max_bytes
@@ -46,13 +48,24 @@ class DefaultOverviewCache:
             self._put(key, data)
 
     def get_or_compute(self, version: Hashable, compute: Callable[[], bytes]) -> bytes:
-        """调用方等待时不占用数据库连接。异常或超限结果不会写入缓存。"""
-        with self._lock:
-            cached = self._get(version)
-            if cached is not None:
-                return cached
+        """同键合并计算，其他范围和热命中不等待；调用方等待时不占数据库连接。"""
+        with self._condition:
+            while True:
+                cached = self._get(version)
+                if cached is not None:
+                    return cached
+                if version not in self._computing:
+                    self._computing.add(version)
+                    break
+                self._condition.wait()
+        try:
             data = compute()
-            if self._max_entries == 1:
-                self._entries.clear()
-            self._put(version, data)
+            with self._condition:
+                if self._max_entries == 1:
+                    self._entries.clear()
+                self._put(version, data)
             return data
+        finally:
+            with self._condition:
+                self._computing.discard(version)
+                self._condition.notify_all()

@@ -91,7 +91,7 @@ def allowed_site(request: Request) -> bool:
 def approved_models(settings: Settings) -> list[str]:
     if (
         not settings.assistant_business_data_enabled
-        or "bailian" not in settings.assistant_business_providers
+        or settings.assistant_model.partition(":")[0] not in settings.assistant_business_providers
     ):
         return []
     return settings.assistant_models

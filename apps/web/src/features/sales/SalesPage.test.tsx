@@ -440,7 +440,11 @@ it("切换店铺后忽略已取消请求的晚到响应", async () => {
     }),
   );
   await waitFor(() => expect(screen.getByRole("button", { name: "显示全部店铺" })).toBeTruthy());
-  expect(within(screen.getByTestId("sales-kpis")).queryByText("¥31")).toBeNull();
+  // 切换期间保留原尺寸与带旧范围的数值，旧卡片不可操作；晚到响应仍不得覆盖新选择。
+  const retained = screen.getByTestId("sales-kpis").closest("[aria-busy]");
+  expect(retained?.getAttribute("aria-busy")).toBe("true");
+  expect(retained?.hasAttribute("inert")).toBe(true);
+  expect(within(screen.getByTestId("sales-kpis")).getByText("¥31")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "显示全部店铺" }));
   await waitFor(() =>
     expect(within(screen.getByTestId("sales-kpis")).getByText("¥31")).toBeTruthy(),

@@ -4,6 +4,8 @@
 
 ## 当前任务与范围
 
+- [ ] 11/26读取性能与加载稳定性修正、DeepSeek官方接入已完成本机核验，待正式CI/CD及生产复测。[专项验收](docs/validation/2026-11-26.md#performance-official-deepseek)。
+
 - [x] 11/26全部本地改动已合入main并以18c530d经正式CI/CD上线，DeepSeek、五页问答、筛选跟随、面板状态和同步已验收。保留一个回退版本，临时资源及无引用旧镜像已清理。[上线验收](docs/validation/2026-11-26.md)。
 
 - [x] 11/25 浏览器刷新保留左右全局面板开合与宽度，关闭标签页后重新打开恢复默认；五页与实际刷新／关闭重入已核验，仅本机未部署。[验收](docs/validation/2026-11-25.md#panel-session-refresh)。

@@ -19,7 +19,7 @@
 | `POST /chat`  | ChatInput，支持 JSON 与 SSE        | JSON 返回 ChatAnswer。请求头带 `Accept: text/event-stream` 时返回事件流   |
 | `POST /stop`  | `{"generation":"本次生成的 UUID"}` | `{"stopped":true}` 表示服务端已处理停止请求，即使任务已结束也可收到此响应 |
 
-启用后，`GET /models` 的型号数组只含 `bailian:deepseek-v4.1-flash-1017`。调用方可用它检查可用状态，提问时省略 `model`。使用 SSE 时把 Accept 改为 `text/event-stream`，并给 curl 加 `-N`。[配置及启动](../development.md#ai-runtime)
+启用后，`GET /models` 的型号数组只含 `deepseek:deepseek-flash`。调用方可用它检查可用状态，提问时省略 `model`。使用 SSE 时把 Accept 改为 `text/event-stream`，并给 curl 加 `-N`。[配置及启动](../development.md#ai-runtime)
 
 ```bash
 curl --noproxy '*' -sS http://127.0.0.1:8000/api/v1/assistant/chat \
@@ -162,7 +162,7 @@ curl --noproxy '*' -sS http://127.0.0.1:8000/api/v1/assistant/chat \
     "requests": 2,
     "tool_calls": 1
   },
-  "model": "bailian:deepseek-v4.1-flash-1017"
+  "model": "deepseek:deepseek-flash"
 }
 ```
 

@@ -71,7 +71,12 @@ def check_versions(run, report):
 
 async def metadata(run, domain):
     if domain not in run.metadata_cache:
-        run.metadata_cache[domain] = await run.query(catalog.describe, domain)
+        cache_options = (
+            {"rows_cache": run.aftersales_rows_cache}
+            if domain == "aftersales" and run.aftersales_rows_cache is not None
+            else {}
+        )
+        run.metadata_cache[domain] = await run.query(catalog.describe, domain, **cache_options)
     return run.metadata_cache[domain]
 
 

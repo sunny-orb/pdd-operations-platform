@@ -101,7 +101,7 @@ def catalog(domain="all"):
     ]
 
 
-def describe(engine, domain):
+def describe(engine, domain, *, rows_cache=None):
     if domain == "definitions":
         from .definitions import describe as read_metadata
 
@@ -117,7 +117,7 @@ def describe(engine, domain):
     if domain == "aftersales":
         from .aftersales_tools import describe as read_metadata
 
-        return read_metadata(engine)
+        return read_metadata(engine, rows_cache=rows_cache)
     from .sales_tools import describe as read_metadata
 
     return read_metadata(engine, domain=domain)

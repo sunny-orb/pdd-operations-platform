@@ -80,11 +80,11 @@ def _catalog(repo, q, *, limit=25, offset=0, keyword=""):
     )
 
 
-def describe(engine, domain="aftersales"):
+def describe(engine, domain="aftersales", *, rows_cache=None):
     """发现默认报告真实期间及最多25项报告/品类；更多目录通过options分页。"""
     if domain != "aftersales":
         raise BoardError("INVALID_SCOPE")
-    with snapshot(engine) as repo:
+    with snapshot(engine, rows_cache=rows_cache) as repo:
         return _catalog(repo, AfterQuery())
 
 

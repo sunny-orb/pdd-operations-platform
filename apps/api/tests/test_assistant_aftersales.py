@@ -320,5 +320,6 @@ def test_shared_report_input_cache_preserves_answers_and_reduces_sql(sales_pg):
         second = adapter().read(sales_pg, "aftersales_overview", {}, rows_cache=cache)
         assert first == second
         assert len(statements) < first_count
+        assert adapter().describe(sales_pg, rows_cache=cache) == adapter().describe(sales_pg)
     finally:
         event.remove(sales_pg, "after_cursor_execute", count)

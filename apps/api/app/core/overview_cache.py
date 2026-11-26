@@ -6,15 +6,19 @@ from threading import Lock
 
 
 class DefaultOverviewCache:
-    """按已校验发布版本复用结果。同一版本首次请求只计算一次。"""
+    """按已校验的版本与查询键复用结果；限制条数、单条及可选总字节预算。"""
 
     MAX_BYTES = 512 * 1024
 
-    def __init__(self, *, max_entries: int = 1, max_bytes: int = MAX_BYTES):
+    def __init__(
+        self, *, max_entries: int = 1, max_bytes: int = MAX_BYTES,
+        max_total_bytes: int | None = None,
+    ):
         self._lock = Lock()
         self._entries: OrderedDict[Hashable, bytes] = OrderedDict()
         self._max_entries = max_entries
         self.max_bytes = max_bytes
+        self._max_total_bytes = max_total_bytes
 
     def _get(self, key):
         if key in self._entries:
@@ -27,7 +31,10 @@ class DefaultOverviewCache:
             return
         self._entries[key] = data
         self._entries.move_to_end(key)
-        if len(self._entries) > self._max_entries:
+        while len(self._entries) > self._max_entries or (
+            self._max_total_bytes is not None
+            and sum(map(len, self._entries.values())) > self._max_total_bytes
+        ):
             self._entries.popitem(last=False)
 
     def get(self, key: Hashable) -> bytes | None:
@@ -38,7 +45,7 @@ class DefaultOverviewCache:
         with self._lock:
             self._put(key, data)
 
-    def get_or_compute(self, version: str, compute: Callable[[], bytes]) -> bytes:
+    def get_or_compute(self, version: Hashable, compute: Callable[[], bytes]) -> bytes:
         """调用方等待时不占用数据库连接。异常或超限结果不会写入缓存。"""
         with self._lock:
             cached = self._get(version)

@@ -300,3 +300,25 @@ def test_closed_target_bounds_and_directions_survive_display_rounding(sales_pg, 
         assert target["state"] == state
         for phrase in phrases:
             assert phrase in target.get("comparison", "")
+
+
+def test_shared_report_input_cache_preserves_answers_and_reduces_sql(sales_pg):
+    from sqlalchemy import event
+
+    from app.modules.aftersales.read_cache import ReportRowsCache
+
+    seed(sales_pg)
+    cache = ReportRowsCache()
+    statements = []
+    def count(connection, cursor, statement, parameters, context, executemany):
+        statements.append(1)
+    event.listen(sales_pg, "after_cursor_execute", count)
+    try:
+        first = adapter().read(sales_pg, "aftersales_overview", {}, rows_cache=cache)
+        first_count = len(statements)
+        statements.clear()
+        second = adapter().read(sales_pg, "aftersales_overview", {}, rows_cache=cache)
+        assert first == second
+        assert len(statements) < first_count
+    finally:
+        event.remove(sales_pg, "after_cursor_execute", count)

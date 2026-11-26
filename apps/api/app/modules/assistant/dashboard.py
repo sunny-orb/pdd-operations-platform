@@ -343,7 +343,12 @@ async def read(run, request):
         }
     key = ("dashboard", request.capability, json.dumps(params, sort_keys=True, default=str))
     if key not in run.report_cache:
-        result = await run.query(catalog.read, request.capability, params)
+        cache_options = (
+            {"rows_cache": run.aftersales_rows_cache}
+            if domain == "aftersales" and run.aftersales_rows_cache is not None
+            else {}
+        )
+        result = await run.query(catalog.read, request.capability, params, **cache_options)
         check_versions(run, result)
         run.report_cache[key] = result
     return run.report_cache[key]

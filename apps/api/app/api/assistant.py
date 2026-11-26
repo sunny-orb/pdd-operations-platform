@@ -210,6 +210,7 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
                     executor=state.assistant_query_executor,
                     emit=emit,
                     request_id=request.state.request_id,
+                    aftersales_rows_cache=state.aftersales_overview_cache.rows,
                 ),
             )
         )

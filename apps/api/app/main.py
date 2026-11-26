@@ -145,6 +145,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.assistant_requests = deque()
     application.state.engine = None
     application.state.product_overview_cache = DefaultOverviewCache()
+    application.state.product_scoped_overview_cache = DefaultOverviewCache(
+        max_entries=4, max_total_bytes=512 * 1024
+    )
     application.state.product_daily_overview_cache = DefaultOverviewCache()
     application.state.promotion_product_display_cache = DefaultOverviewCache()
     application.state.aftersales_overview_cache = AftersalesCache()

@@ -224,3 +224,37 @@ def test_real_pg_endpoints_decimal_ad_merge_and_stale_vector(sales_pg, tmp_path)
             client.get("/api/v1/products/days", params={**params, "page_size": 999}).status_code
             == 422
         )
+
+
+def test_nondefault_overview_reuses_exact_scope_and_rejects_old_versions(
+    sales_pg, tmp_path, monkeypatch
+):
+    store = ProductBoardStore(sales_pg, tmp_path)
+    store.run(lambda hb: candidate())
+    monkeypatch.setattr(main, "build_engine", lambda settings: sales_pg)
+    compute = product_board.filtered_overview
+    calls = []
+    def counted(repo, query):
+        calls.append(query)
+        return compute(repo, query)
+    monkeypatch.setattr(product_board, "filtered_overview", counted)
+    with TestClient(create_app(Settings(_env_file=None))) as client:
+        url = "/api/v1/products/overview"
+        params = {**default_params(client), "category": "不存在的品类"}
+        first = client.get(url, params=params)
+        second = client.get(url, params=params)
+        assert first.status_code == second.status_code == 200
+        assert first.json()["data"] == second.json()["data"]
+        assert len(calls) == 1
+        client.get(url, params={**params, "category": "另一品类"})
+        assert len(calls) == 2
+        store.run(lambda hb: candidate(amount="47.25"))
+        assert client.get(url, params=params).status_code == 409
+
+
+def test_scoped_cache_enforces_total_byte_budget():
+    cache = DefaultOverviewCache(max_entries=4, max_bytes=10, max_total_bytes=10)
+    cache.get_or_compute("a", lambda: b"123456")
+    cache.get_or_compute("b", lambda: b"123456")
+    assert cache.get("a") is None
+    assert cache.get("b") == b"123456"

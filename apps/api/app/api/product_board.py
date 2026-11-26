@@ -84,15 +84,20 @@ def daily_overview_query(repo):
     return BoardQuery(repo.end, repo.end)
 
 
-def cached_default_overview(engine, cache: DefaultOverviewCache, q: BoardQuery, version: str):
+def cached_overview(
+    engine, cache: DefaultOverviewCache, q: BoardQuery, version: str, *, scoped=False
+):
     """后台预热和请求共用一次版本校验后的计算。"""
 
     def compute():
         with snapshot(engine, version) as repo:
-            data = OverviewData.model_validate(wire(overview(repo, q)))
+            calculate = filtered_overview if any(
+                (q.shop, q.operator, q.category, q.level, q.products, q.keyword)
+            ) else overview
+            data = OverviewData.model_validate(wire(calculate(repo, q)))
             return data.model_dump_json().encode()
 
-    return cache.get_or_compute(version, compute)
+    return cache.get_or_compute((version, q) if scoped else version, compute)
 
 
 def prewarm_default_overview(
@@ -109,7 +114,7 @@ def prewarm_default_overview(
             if latest == q:
                 return version, None
             q = latest
-    return version, len(cached_default_overview(engine, cache, q, version))
+    return version, len(cached_overview(engine, cache, q, version))
 
 
 @router.get("/overview", response_model=Envelope[OverviewData])
@@ -125,13 +130,9 @@ def get_overview(
         elif q == daily_overview_query(repo):
             cache = request.app.state.product_daily_overview_cache
         else:
-            calculate = (
-                filtered_overview
-                if any((q.shop, q.operator, q.category, q.level, q.products, q.keyword))
-                else overview
-            )
-            return response(request, calculate(repo, q), repo)
-    payload = cached_default_overview(engine, cache, q, data_version)
+            cache = request.app.state.product_scoped_overview_cache
+        scoped = cache is request.app.state.product_scoped_overview_cache
+    payload = cached_overview(engine, cache, q, data_version, scoped=scoped)
     return dict(
         data=json.loads(payload),
         meta=dict(data_version=data_version, request_id=request.state.request_id),

@@ -286,12 +286,12 @@ def _overview(repo, q, limit, offset):
     return facts, tables, notes
 
 
-def read(engine, capability, params):
+def read(engine, capability, params, *, rows_cache=None):
     """读取报告/筛选内的完整汇总或有界分析；不读取上游、不写库、不重算业务规则。"""
     if capability not in CAPABILITIES:
         raise BoardError("INVALID_SCOPE")
     q, limit, offset = _parameters(params)
-    with snapshot(engine, q.report_id, params.get("data_version")) as repo:
+    with snapshot(engine, q.report_id, params.get("data_version"), rows_cache=rows_cache) as repo:
         chosen = public_report(repo.report)
         period = (
             dict(date_from=chosen["period_start"], date_to=chosen["period_end"])

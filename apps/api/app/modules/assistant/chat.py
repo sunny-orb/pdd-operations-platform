@@ -34,6 +34,7 @@ from sqlalchemy.engine import Engine
 
 from app.core.config import DEEPSEEK_MODEL, Settings
 from app.core.database_diagnostics import request_database_metrics
+from app.modules.aftersales.read_cache import ReportRowsCache
 from app.modules.product_board.repository import BoardError
 from app.modules.sales.contracts import SalesError
 
@@ -241,6 +242,7 @@ class QueryRun:
     capability_answer: str | None = None
     failure_reason: str | None = None
     request_id: str | None = None
+    aftersales_rows_cache: ReportRowsCache | None = None
     started_at: float = field(default_factory=monotonic)
     subject_cleared: bool = False
     query_count: int = 0

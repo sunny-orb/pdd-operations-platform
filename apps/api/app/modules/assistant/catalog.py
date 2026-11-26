@@ -123,7 +123,7 @@ def describe(engine, domain):
     return read_metadata(engine, domain=domain)
 
 
-def read(engine, capability, params):
+def read(engine, capability, params, *, rows_cache=None):
     if capability == "rule_definitions":
         from .rule_definitions import read as read_rules
 
@@ -135,6 +135,8 @@ def read(engine, capability, params):
         from .board_tools import read as read_data
     elif domain == "aftersales":
         from .aftersales_tools import read as read_data
+
+        return read_data(engine, capability, params, rows_cache=rows_cache)
     else:
         from .sales_tools import read as read_data
     return read_data(engine, capability, params)

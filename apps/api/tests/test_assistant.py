@@ -743,3 +743,22 @@ def test_two_users_can_generate_and_stop_only_their_own_generation(monkeypatch):
             finally:
                 finish.set()
             assert two.result(timeout=3).json()["answer"] == "two"
+
+
+def test_http_assistant_uses_the_page_report_input_cache(monkeypatch):
+    from contextlib import AsyncExitStack
+
+    from app.api import assistant
+
+    app = create_app(Settings(
+        _env_file=None, assistant_business_data_enabled=True,
+        assistant_business_providers=["bailian"],
+    ))
+    async def generate(agent, question, page, history, deps):
+        assert deps.aftersales_rows_cache is app.state.aftersales_overview_cache.rows
+        return {"answer": "已共享输入", "status": "answered", "evidence": "", "reports": [],
+                "subject": None, "candidates": []}
+    monkeypatch.setattr(assistant, "build_agent", lambda _: AsyncExitStack())
+    monkeypatch.setattr(assistant, "answer_question", generate)
+    with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
+        assert client.post(URL, json=BODY).json()["answer"] == "已共享输入"

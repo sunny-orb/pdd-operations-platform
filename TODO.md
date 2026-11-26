@@ -4,7 +4,7 @@
 
 ## 当前任务与范围
 
-- [ ] 11/26读取性能与加载稳定性修正、DeepSeek官方接入已完成本机核验，待正式CI/CD及生产复测。[专项验收](docs/validation/2026-11-26.md#performance-official-deepseek)。
+- [x] 11/26读取性能、筛选稳定展示及DeepSeek官方新Key已随1deb22b经CI/CD上线；前端575／后端1959项通过，五页问答、连续追问及旧标签页验收通过。商品同范围重复读取约0.19–0.23秒，首次约3.10秒；清理3份退役镜像，保留当前及一个回退版本。[专项验收](docs/validation/2026-11-26.md#performance-official-deepseek)。
 
 - [x] 11/26全部本地改动已合入main并以18c530d经正式CI/CD上线，DeepSeek、五页问答、筛选跟随、面板状态和同步已验收。保留一个回退版本，临时资源及无引用旧镜像已清理。[上线验收](docs/validation/2026-11-26.md)。
 

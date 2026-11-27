@@ -477,3 +477,99 @@ def test_targeted_repair_refuses_unproven_day_or_missing_baseline(sales_pg, tmp_
             == first.version_id
         )
         assert c.scalar(sa.text("SELECT count(*) FROM dataset_versions")) == 1
+
+
+@pytest.mark.parametrize("existing_change", ("rekey", "revision", "missing"))
+def test_gap_repair_preserves_existing_shop_day_when_other_shop_arrives(
+    sales_pg, tmp_path, existing_change
+):
+    """已有店的历史变动不得阻断同日缺店补收，也不得混入本轮补缺。"""
+    code = "shop_regions"
+    original = [row(code, "known", "2026-11-03", "7")]
+    first = publish(sales_pg, tmp_path, code, original)
+    original_raw = restore_candidate(tmp_path / first.version_id).raw_rows[0]
+    incoming = [
+        row(
+            code,
+            "arrived",
+            "2026-11-03",
+            "11",
+            shop_id="799193231",
+            shop_name=SHOPS["799193231"][1],
+        )
+    ]
+    if existing_change != "missing":
+        incoming.append(
+            row(
+                code,
+                "regenerated" if existing_change == "rekey" else "known",
+                "2026-11-03",
+                "7" if existing_change == "rekey" else "99",
+            )
+        )
+    store = store_for(sales_pg, tmp_path, code)
+    result = repair(store, incoming, (date(2026, 11, 3),), [])
+    assert values(sales_pg, code, result.version_id) == {
+        "known": Decimal("7"),
+        "arrived": Decimal("11"),
+    }
+    assert values(sales_pg, code, first.version_id) == {"known": Decimal("7")}
+    restored = restore_candidate(tmp_path / result.version_id)
+    assert next(r for r in restored.raw_rows if r["id"] == "known") == original_raw
+    before = archive_bytes(tmp_path)
+    assert repair(store, incoming, (date(2026, 11, 3),), []).version_id == result.version_id
+    assert archive_bytes(tmp_path) == before
+
+
+def test_gap_repair_rejects_old_id_reassigned_to_missing_shop(sales_pg, tmp_path):
+    code = "shop_regions"
+    first = publish(sales_pg, tmp_path, code, [row(code, "known", "2026-11-03", "7")])
+    moved = [
+        row(code, "known", "2026-11-03", "11", shop_id="799193231", shop_name=SHOPS["799193231"][1])
+    ]
+    with pytest.raises(SalesError, match="SOURCE_KEY_MOVED"):
+        repair(store_for(sales_pg, tmp_path, code), moved, (date(2026, 11, 3),), [])
+    assert values(sales_pg, code, first.version_id) == {"known": Decimal("7")}
+
+
+def test_gap_repair_keeps_missing_key_guard_for_ordinary_tail(sales_pg, tmp_path):
+    code = "shop_regions"
+    first = publish(sales_pg, tmp_path, code, [row(code, "latest", "2026-11-12", "7")])
+    incoming = [
+        row(code, "gap", "2026-11-03", "11"),
+        row(code, "changed-latest-id", "2026-11-12", "7"),
+    ]
+    with pytest.raises(SalesError, match="SOURCE_OLD_KEY_MISSING"):
+        repair(
+            store_for(sales_pg, tmp_path, code),
+            incoming,
+            (date(2026, 11, 3),),
+            [],
+            repair_only=False,
+        )
+    with sales_pg.connect() as c:
+        assert (
+            c.scalar(
+                sa.text("SELECT version_id FROM current_datasets WHERE dataset_code='shop_regions'")
+            )
+            == first.version_id
+        )
+    assert values(sales_pg, code, first.version_id) == {"latest": Decimal("7")}
+
+
+def test_product_region_gap_with_only_excluded_category_keeps_original_receipt(sales_pg, tmp_path):
+    """商品地区的包材不代表业务覆盖，店铺地区修复不得挡住后来到达的有效商品。"""
+    code = "product_regions"
+    packaging = row(code, "packaging", "2026-11-03", "7", product_category="包材")
+    publish(sales_pg, tmp_path, code, [packaging])
+    arrived = row(code, "business", "2026-11-03", "11")
+    result = repair(
+        store_for(sales_pg, tmp_path, code),
+        [packaging, arrived],
+        (date(2026, 11, 3),),
+        [],
+    )
+    assert values(sales_pg, code, result.version_id) == {
+        "packaging": Decimal("7"),
+        "business": Decimal("11"),
+    }

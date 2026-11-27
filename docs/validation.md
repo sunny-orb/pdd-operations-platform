@@ -1,8 +1,10 @@
 # 验证与交付证据
 
-更新日期：2026-11-14。本文维护验收要求与证据入口；执行记录按日期放在 `validation/`，当前进度只见 [TODO](../TODO.md)。范围见[需求](requirements.md)，数据边界见[数据契约](data-contract.md)，调查见[来源证据](source-evidence.md)。测试、样例交付、真实接入与生产上线分别验收。
+更新日期：2026-11-27。本文维护验收要求与证据入口；执行记录按日期放在 `validation/`，当前进度只见 [TODO](../TODO.md)。范围见[需求](requirements.md)，数据边界见[数据契约](data-contract.md)，调查见[来源证据](source-evidence.md)。测试、样例交付、真实接入与生产上线分别验收。
 
 ## 验证记录索引
+
+[店铺地区历史补缺受源ID重建阻断的排查与本地修复（2026-11-27）](validation/2026-11-27.md#shop-region-gap-repair)。
 
 [全部本地改动、AI助手正式接入与上线清理（2026-11-26）](validation/2026-11-26.md)。
 

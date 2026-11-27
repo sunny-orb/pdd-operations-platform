@@ -47,38 +47,60 @@ def normalize_sales_window(code, rows, window, heartbeat=lambda: None, *, allow_
 
 def _read_windows(approved, baseline_end, repair_dates, repair_only):
     """合并相邻业务日；普通接收保留最新日及停机续接，单独补缺仅加尚未读过的尾段。"""
-    days = set(repair_dates)
     start = max(approved.start, approved.end - timedelta(days=LOOKBACK_DAYS - 1))
     if repair_only:
         start = baseline_end + timedelta(days=1)
     else:
         start = min(start, baseline_end + timedelta(days=1))
-    days.update(start + timedelta(days=i) for i in range((approved.end - start).days + 1))
+    ordinary_days = {start + timedelta(days=i) for i in range((approved.end - start).days + 1)}
+    days = set(repair_dates) | ordinary_days
     spans = []
     for day in sorted(days):
         if spans and day == spans[-1][1] + timedelta(days=1):
             spans[-1] = (spans[-1][0], day)
         else:
             spans.append((day, day))
-    return days, [type(approved)(first, last, approved.shop_ids) for first, last in spans]
+    return (
+        days,
+        [type(approved)(first, last, approved.shop_ids) for first, last in spans],
+        set(repair_dates) - ordinary_days,
+    )
 
 
-def _merge_window_rows(store, baseline, read, windows, days, repair_dates, row_limit, heartbeat):
-    """仅替换稳定双读的日期。保留其他日期的原投影，缺键、跨日移键或补缺证据落空均拒绝。"""
+def _merge_window_rows(
+    store, baseline, read, windows, days, gap_days, repair_dates, row_limit, heartbeat
+):
+    """普通日期校验后替换；历史补缺只加缺失店铺日，已有店铺日原行保留。"""
     combined, new, observed = [], {}, set()
+    old_by_key = {row["source_row_key"]: row for row in baseline.rows}
+    existing_shop_days = {
+        (row["shop_id"], row[store.date_column])
+        for row in baseline.rows
+        if row[store.date_column] in gap_days
+    }
     for window in windows:
         heartbeat()
         incoming = read(window)
         if incoming.window != window:
             raise SalesError("PUBLICATION_SCOPE_MISMATCH")
-        for row in incoming.rows:
+        for row, raw in zip(incoming.rows, incoming.raw_rows, strict=True):
             key = row["source_row_key"]
             if key in new:
                 raise SalesError("SOURCE_KEY_MOVED")
+            old = old_by_key.get(key)
+            if old is not None and (
+                (old["shop_id"], old[store.date_column]) != (row["shop_id"], row[store.date_column])
+                or (
+                    store.code == "shop_regions"
+                    and old["source_region_name"] != row["source_region_name"]
+                )
+            ):
+                raise SalesError("SOURCE_KEY_MOVED")
             new[key] = row
             observed.add(row[store.date_column])
-        combined.extend(incoming.raw_rows)
-        if len(combined) > row_limit:
+            if (row["shop_id"], row[store.date_column]) not in existing_shop_days:
+                combined.append(raw)
+        if len(new) > row_limit:
             raise SalesError("SOURCE_ROW_LIMIT")
     if not repair_dates <= observed:
         raise SalesError("SOURCE_REPAIR_DATE_NO_RECORDS", 503)
@@ -86,22 +108,14 @@ def _merge_window_rows(store, baseline, read, windows, days, repair_dates, row_l
         if index % 1000 == 0:
             heartbeat()
         key = old["source_row_key"]
-        if old[store.date_column] not in days:
+        if old[store.date_column] in gap_days:
+            combined.append(raw)
+        elif old[store.date_column] not in days:
             if key in new:
                 raise SalesError("SOURCE_KEY_MOVED")
             combined.append(raw)
         elif key not in new:
             raise SalesError("SOURCE_OLD_KEY_MISSING")
-        elif (old["shop_id"], old[store.date_column]) != (
-            new[key]["shop_id"],
-            new[key][store.date_column],
-        ):
-            raise SalesError("SOURCE_KEY_MOVED")
-        elif (
-            store.code == "shop_regions"
-            and old["source_region_name"] != new[key]["source_region_name"]
-        ):
-            raise SalesError("SOURCE_KEY_MOVED")
     if len(combined) > row_limit:
         raise SalesError("SOURCE_ROW_LIMIT")
     return combined
@@ -172,9 +186,14 @@ def receive_sales_window(
             or baseline.window.end > approved.end
         ):
             raise SalesError("INCREMENTAL_BASELINE_SCOPE_MISMATCH")
-        days, windows = _read_windows(approved, baseline.window.end, repair_dates, repair_only)
+        days, windows, gap_days = _read_windows(
+            approved, baseline.window.end, repair_dates, repair_only
+        )
+        # 本轮仅修复店铺地区；其他来源的覆盖粒度与分类边界沿原策略。
+        if store.code != "shop_regions":
+            gap_days = set()
         combined = _merge_window_rows(
-            store, baseline, read, windows, days, repair_dates, row_limit, heartbeat
+            store, baseline, read, windows, days, gap_days, repair_dates, row_limit, heartbeat
         )
         del baseline
         incoming = normalize_sales_window(store.code, combined, approved, heartbeat)

@@ -1,7 +1,7 @@
 import { App as AntApp, ConfigProvider } from "antd";
 import { AppstoreOutlined } from "@ant-design/icons";
 import { Link } from "react-router-dom";
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { DashboardSections, type DashboardSectionLink } from "../components/DashboardSections";
 import { CalendarIcon } from "../components/CalendarIcon";
 import { dashboardPages, type DashboardPageId } from "./dashboardNavigation";
@@ -26,6 +26,15 @@ export function DashboardLayout({
   context?: ReactNode;
   children: ReactNode;
 }) {
+  const pageTitle = dashboardPages.find((page) => page.id === currentPage)!.tabTitle;
+  useEffect(() => {
+    const previousTitle = document.title;
+    document.title = pageTitle;
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [pageTitle]);
+
   const header = (
     <header className="dashboard-topbar" aria-label="看板导航">
       <Link className="dashboard-brand" to="/" aria-label="返回运营看板中心">

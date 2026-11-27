@@ -4,6 +4,8 @@
 
 ## 验证记录索引
 
+[浏览器图标与当前看板标题（2026-11-27）](validation/2026-11-27.md#browser-tab-identity)。
+
 [店铺地区历史补缺受源ID重建阻断的排查与本地修复（2026-11-27）](validation/2026-11-27.md#shop-region-gap-repair)。
 
 [全部本地改动、AI助手正式接入与上线清理（2026-11-26）](validation/2026-11-26.md)。

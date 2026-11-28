@@ -8,6 +8,8 @@
 
 [右侧助手开放提问、跨页销售与 DeepSeek 深度思考上线](validation/2026-11-28.md#assistant-production-release)（2026-11-28）。
 
+[公共飞书 SOP、F01 日报与六店 GMV 预测上线](validation/2026-11-28.md#assistant-full-production)（2026-11-28）。
+
 [口语问能力、开放回答与按需取数](validation/2026-11-28.md#assistant-semantic-replies) · [预测后换题与两种范围的浏览器验收](validation/2026-11-28.md#assistant-open-conversation)（2026-11-28，本地）。
 
 [按提问选文、飞书改稿即时核验与同批预测](validation/2026-11-28.md#on-demand-sop) · [此前的定时试验与经营建议](validation/2026-11-28.md#previous-scheduled-pilot)（2026-11-28，本地）。

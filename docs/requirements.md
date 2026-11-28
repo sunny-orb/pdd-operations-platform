@@ -62,7 +62,7 @@
 
 五页右侧共用同一个助手。跟随页面自动带入当前筛选，关闭后由问题指定范围。两种模式均可跨业务提问。用日常说法问“你能帮什么”时，直接举出能做的事。问方法、写文案或按给定数字算例时直接回答。要查具体实绩或公司规定时提供依据。运营可以随时换题，也可以把刚才的预测改成一句晨会用语。
 
-模型使用 DeepSeek 官方入口，只发送本题所需的数据。本地首篇公共 SOP 支持按自然月预测拼多多六店 GMV，正文提供数据截止日、中心值、情景和原文依据。助手按问题选用已登记的 SOP，问到时核对飞书原文。按 SOP 给建议时引用相关条款。正式预测遇到新稿先核验再计算，冲突时展示原句，自定权重的试算单列。公司共享及其他供应商另行确认范围。[五页用例](implementation/ai-assistance.md#use-cases) · [业务需求来源](source-evidence.md#xiangcao-ai-intent-20261123) · [SOP 原文核查](source-evidence.md#sop-ai-business-scope-20261116)
+模型使用 DeepSeek 官方入口，只发送本题所需的数据。首篇公共 SOP 已用于按自然月预测拼多多六店 GMV，正文提供数据截止日、中心值、情景和原文依据。助手按问题选用已登记的 SOP，问到时核对飞书原文。按 SOP 给建议时引用相关条款。正式预测遇到新稿先核验再计算，冲突时展示原句，自定权重的试算单列。公司共享及其他供应商另行确认范围。[五页用例](implementation/ai-assistance.md#use-cases) · [业务需求来源](source-evidence.md#xiangcao-ai-intent-20261123) · [SOP 原文核查](source-evidence.md#sop-ai-business-scope-20261116)
 
 ## 2. 通用展示与交互
 

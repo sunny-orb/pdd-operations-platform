@@ -9,8 +9,7 @@
 - [x] 11/28 助手口语问答、跨页销售口径修复及 DeepSeek 高强度思考随 `7c817fc` 上线，连续追问、五页和同步回接已验收。[上线记录](docs/validation/2026-11-28.md#assistant-production-release)
 
 - [x] 11/28 本机修复助手换题、口语询问能力和开放提问。全局与跟随使用相同的能力目录，支持直接交谈、写作、查经营依据和跨页追问。[本地验收](docs/validation/2026-11-28.md#assistant-semantic-replies)
-- [x] 11/28 本机五页共用公共 SOP 目录。提问时只核对所选飞书文档，普通查数不读飞书。六店正式预测在遇到新修订时解读和校验公式，按当次日报复算，自定权重单列试算。生产启用另行安排。[设计](docs/implementation/ai-assistance.md#sop-dynamic-plan) · [本地验收](docs/validation/2026-11-28.md#on-demand-sop)
-- [x] 11/27 单篇飞书月度 GMV 预测 SOP 已接入本机五页助手。真实日报预测、飞书副本改稿自动生效与重复提问一致性已验收。生产启用另行安排。[本地验收](docs/validation/2026-11-27.md#forecast-sop-local)。
+- [x] 11/28 五页共用的公共飞书 SOP 与六店月末 GMV 预测已上线，F01 日报已补齐用于预测的字段。新修订在提问时解读和校验，正式金额由当次日报复算。[设计](docs/implementation/ai-assistance.md#sop-dynamic-plan) · [生产验收](docs/validation/2026-11-28.md#assistant-full-production)
 
 - [x] 11/27浏览器标签复用参考中心站原始图标，标题统一为当前“××看板”；已随335f638正式上线，生产五页切换、前进后退、兼容路径及刷新通过，图标与原始资源字节一致，COMMON-ISS-16关闭。[验收](docs/validation/2026-11-27.md#browser-tab-identity)。
 

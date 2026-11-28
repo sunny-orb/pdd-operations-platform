@@ -19,6 +19,11 @@ TODAY = date(2026, 11, 27)
         ("预测一下11月的GMV", "forecast"),
         ("按SOP估一下本月成交额", "forecast"),
         ("照现在的情况，这个月能卖多少？", "forecast"),
+        ("用2026年11月25日的日报估计六家店11月月底GMV。", "forecast"),
+        ("月底六店的GMV大概会到什么水平？", "forecast"),
+        ("到这个月收官，六家店的成交额大致有多少？", "forecast"),
+        ("上个月收官时实际GMV是多少？", None),
+        ("月底各店当前累计成交额是多少？", None),
         ("本月的 GMV 预测怎么算？", "knowledge"),
         ("11月的GMV目标还差多少？", None),
         ("预测明天的天气", None),
@@ -42,6 +47,14 @@ def test_recognizes_monthly_forecast_without_intercepting_other_queries(question
 )
 def test_month_is_resolved_by_user_expression(question, selected, expected):
     assert forecast_period(question, selected, TODAY)[0] == expected
+
+
+def test_estimate_with_dated_source_preserves_the_historical_cutoff():
+    from app.modules.assistant.knowledge_answers import only_observed_facts
+
+    question = "用2026年11月25日的日报估计六家店11月月底GMV。"
+    assert forecast_period(question, None, TODAY) == (date(2026, 11, 1), date(2026, 11, 25))
+    assert not only_observed_facts(question)
 
 
 @pytest.mark.parametrize(

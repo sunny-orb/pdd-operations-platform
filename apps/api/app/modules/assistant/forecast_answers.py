@@ -14,16 +14,19 @@ from app.modules.sales.source_policy import SHOPS
 from . import catalog
 
 _AMOUNT = re.compile(r"gmv|成交金?额|交易金?额|销售[收金额]|能卖|卖多少", re.I)
-_ESTIMATE = re.compile(
-    r"预测|预估|预计|估一?[下算]|推[演算]|大概能|有望|能卖|月底.{0,6}(?:能到|能达|多少)"
-)
+_ESTIMATE = re.compile(r"预测|预估|预计|估计|估一?[下算]|推[演算]|大概能|有望|能卖")
+_MONTH_END = re.compile(r"月[底末]|收官|(?:本月|这个月).{0,6}(?:最终|最后)")
+_MONTH_END_QUESTION = re.compile(r"多少|什么水平|什么量级|能到|能达|会到|大概|大致|大约")
+_OBSERVED_AMOUNT = re.compile(r"实际|实绩|已(?:经|完成|卖|成交)|当前累计|目前累计")
 _METHOD = re.compile(
     r"公式|权重|怎么算|怎么计算|如何计算|方法|口径|怎么预测|如何预测|"
     r"(?:用|采用|按).{0,6}(?:种|个|什么|啥)模型|SOP.{0,6}(?:写|说|要求|规定|内容)",
     re.I,
 )
 _MONTH = re.compile(r"(?:(?<!\d)(\d{4})\s*[-年/]\s*)?(?<!\d)(1[0-2]|0?[1-9])\s*月")
-_GLOBAL = re.compile(r"六店|全(?:部|平台|渠道|店铺)|整(?:个渠道|个平台|体)|全局")
+_GLOBAL = re.compile(
+    r"(?:六|(?<!\d)6)(?:家|个)?店|全(?:部|平台|渠道|店铺)|整(?:个渠道|个平台|体)|全局"
+)
 _SINGLE = re.compile(
     r"这家|该店|单店|每[家店]|分店|各店|这个款|这款|单品|该商品|本店|旗舰店|专卖店"
 )
@@ -133,6 +136,18 @@ async def prepare_guidance(run, *, needs_data=True):
     return source, "\n" + instruction + "\n只读资料：" + json.dumps(evidence, ensure_ascii=False)
 
 
+def asks_for_projection(question: str) -> bool:
+    """明确估算或询问未定的月末金额时才按预测取数。"""
+    if _ESTIMATE.search(question):
+        return True
+    return bool(
+        _MONTH_END.search(question)
+        and _MONTH_END_QUESTION.search(question)
+        and not _OBSERVED_AMOUNT.search(question)
+        and not re.search(r"上(?:个)?月|去年|去年同期|历史|前(?:一|个)月", question)
+    )
+
+
 def forecast_intent(question: str, prior: str = "", *, has_context=False) -> str | None:
     text = re.sub(r"\s+", "", question)
     if (
@@ -168,7 +183,7 @@ def forecast_intent(question: str, prior: str = "", *, has_context=False) -> str
     amount = _AMOUNT.search(text)
     if (_OTHER_TOPIC.search(text) or "推广" in text) and not amount:
         return None
-    if not (_ESTIMATE.search(text) and amount) and not (
+    if not (asks_for_projection(text) and amount) and not (
         "预测" in text and re.search(r"SOP|公式|权重|口径|方法|怎么算|怎么做|依据", text, re.I)
     ):
         return None

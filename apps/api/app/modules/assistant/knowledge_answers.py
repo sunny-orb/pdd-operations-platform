@@ -4,6 +4,7 @@ import json
 import re
 
 from .business import report
+from .forecast_answers import asks_for_projection
 
 _DOCUMENT = re.compile(r"SOP|知识库|手册|文档|原文章节|规程|业务规范", re.I)
 _GUIDANCE = re.compile(
@@ -37,7 +38,12 @@ def asks_general_method(question):
 
 def only_observed_facts(question):
     return bool(
-        _FACT.search(question) and not (wants_guidance(question) or _ANALYTICAL.search(question))
+        _FACT.search(question)
+        and not (
+            wants_guidance(question)
+            or _ANALYTICAL.search(question)
+            or asks_for_projection(question)
+        )
     )
 
 

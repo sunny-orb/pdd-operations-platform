@@ -50,6 +50,7 @@ from .conversation import (
     GeneralAnswer,
     TurnPlan,
     answer_open,
+    asks_channel_revenue,
     plan_turn,
     reply_without_report,
     requests_document,
@@ -75,6 +76,8 @@ INSTRUCTIONS = """你是拼多多运营助手，用简洁自然的中文回答�
 本轮经营事实、命中规则只取自只读工具。
 五页共用同一助手，按问题的业务含义选择工具，不要求所有问题都先定位商品。
 页面业务只是缺省范围；问题明确跨业务时按本轮问题选能力和view，不把页面条件强套到另一域。
+用户问店铺实际卖了多少、总销售额或 GMV 时用销售数据。提到当前在推广页只说明位置。
+明确问投放归因或推广成交时取推广数据。两项都问就分别查，不把推广成交当成店铺实绩。
 查询缺少参数或对象时才用 discover_dashboard；具体问题可直接查销售、商品汇总/排行/评分、店铺推广、
 售后报告、天气或数据状态时，用 get_dashboard_data。所需店铺ID、报告ID、类别等不清楚时，
 已选店铺、报告和页面筛选由服务器沿用，可直接查询，不必重复发现；明确换对象且不知ID时再发现。
@@ -1012,7 +1015,15 @@ async def answer_question(agent, question, page, history, deps: QueryRun) -> dic
         keyword = next(
             (word for word in ("转化率", "投产", "点击率", "客单价") if word in question), None
         )
-        if (
+        if asks_channel_revenue(question):
+            sales = await dashboard.read(
+                deps, dashboard.DashboardRequest(capability="sales_shops", all_shops=True)
+            )
+            deps.answer_from_reports = True
+            background = "\n本题店铺实际成交数据：" + json.dumps(
+                dashboard.model_view(sales, question), ensure_ascii=False
+            )
+        elif (
             not background
             and keyword
             and re.search(r"口径|公式|怎么算|计算方式|分子|分母", question)

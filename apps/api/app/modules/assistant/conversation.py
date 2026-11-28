@@ -161,6 +161,24 @@ def asks_general_method(question):
     return bool(_GENERAL_METHOD.search(question)) and not requests_document(question)
 
 
+def asks_channel_revenue(question: str) -> bool:
+    """识别明确的全店销售合计，页面名称只用于说明提问位置。"""
+    text = re.sub(r"(?:从|在)(?:推广(?:分析)?(?:这边|页面|页|模块))", "", question)
+    return bool(
+        re.search(r"六(?:家|个)?店|(?<!\d)6(?:家|个)?店|全部店铺|所有店铺|全平台", text)
+        and re.search(r"合计|累计|一共|总计|总额|汇总", text)
+        and re.search(
+            r"GMV|实际销售额|销售金额|销售额|成交[金总]?额|卖[了出].{0,5}多少", text, re.I
+        )
+        and not re.search(
+            r"推广|归因|投放|流量|转化|退款|售后|库存|访客|订单|天气|"
+            r"目标|预测|预估|趋势|同比|环比|对比|比较|异常|排名|SOP|规则",
+            text,
+            re.I,
+        )
+    )
+
+
 def _reply_mode(question: str, previous: str = "") -> ReplyMode:
     """明确取实绩或公司规则时留在查询流程；开放请求直接写，其他问题由同一 Agent 选择。"""
     text = re.sub(r"\s", "", question)

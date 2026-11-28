@@ -99,6 +99,46 @@ def test_unfiltered_sales_total_needs_no_confirmation_but_preserves_selected_sto
         query(run, "sales_performance", all_shops=True)
 
 
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("从推广这边帮我查查六家店11月到27日合计卖了多少钱，再写一句晨会用语。", True),
+        ("我在推广页，看看6家店本月累计GMV，顺便写一句简报。", True),
+        ("六家店推广成交金额合计多少？", False),
+        ("六家店本月实际销售额和推广投产分别是多少？", False),
+        ("六家店月末GMV预测有多少？", False),
+        ("六家店合计GMV和目标还差多少？", False),
+    ],
+)
+def test_sales_total_distinguishes_page_location_from_attributed_promotion(question, expected):
+    from app.modules.assistant.conversation import asks_channel_revenue
+
+    assert asks_channel_revenue(question) is expected
+
+
+def test_channel_revenue_briefs_use_sales_evidence_on_the_promotion_page(backend):
+    from types import SimpleNamespace
+
+    from pydantic_ai.usage import RunUsage
+
+    class Model:
+        async def run(self, prompt, *, deps, **kwargs):
+            assert deps.answer_from_reports
+            assert deps.reports[0]["capability"] == "sales_shops"
+            return SimpleNamespace(
+                output="六店实际成交额可用于晨会汇报。", usage=RunUsage(requests=1)
+            )
+
+    question = "在推广分析页，帮我算下六家店11月到27日合计卖了多少钱，再写一句简报。"
+    run = QueryRun(
+        None, ChatScope(domain="promotion_store", date_from=START, date_to=END), question
+    )
+    answer = asyncio.run(answer_question(Model(), question, "推广分析", [], run))
+    assert answer["status"] == "answered"
+    assert backend[0][0][0] == "sales_shops"
+    assert backend[0][0][1]["date_from"].day == 1 and backend[0][0][1]["date_to"].day == 27
+
+
 def test_multi_selected_product_dimensions_keep_original_intersections(backend):
     run = QueryRun(
         None,

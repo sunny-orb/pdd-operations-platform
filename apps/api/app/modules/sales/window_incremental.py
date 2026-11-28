@@ -8,6 +8,7 @@ import sqlalchemy as sa
 
 from app.modules.archive_store import require_archive
 from app.modules.database_residency import ensure_online
+from app.modules.source_read_policy import READ_WINDOW_DAYS
 
 from .archive_replay import restore_candidate
 from .contracts import SalesError, ShopDailyCandidate
@@ -83,6 +84,7 @@ def _merge_window_rows(
         incoming = read(window)
         if incoming.window != window:
             raise SalesError("PUBLICATION_SCOPE_MISMATCH")
+        _require_read_budget(store, incoming, row_limit)
         for row, raw in zip(incoming.rows, incoming.raw_rows, strict=True):
             key = row["source_row_key"]
             if key in new:
@@ -100,8 +102,6 @@ def _merge_window_rows(
             observed.add(row[store.date_column])
             if (row["shop_id"], row[store.date_column]) not in existing_shop_days:
                 combined.append(raw)
-        if len(new) > row_limit:
-            raise SalesError("SOURCE_ROW_LIMIT")
     if not repair_dates <= observed:
         raise SalesError("SOURCE_REPAIR_DATE_NO_RECORDS", 503)
     for index, (old, raw) in enumerate(zip(baseline.rows, baseline.raw_rows, strict=True)):
@@ -116,9 +116,17 @@ def _merge_window_rows(
             combined.append(raw)
         elif key not in new:
             raise SalesError("SOURCE_OLD_KEY_MISSING")
-    if len(combined) > row_limit:
-        raise SalesError("SOURCE_ROW_LIMIT")
     return combined
+
+
+def _require_read_budget(store, candidate, row_limit):
+    """校验本次读数中每个七日窗；不把未读取的已发布历史计入读取预算。"""
+    counts = {}
+    for row in candidate.rows:
+        bucket = (row[store.date_column] - candidate.window.start).days // READ_WINDOW_DAYS
+        counts[bucket] = counts.get(bucket, 0) + 1
+        if counts[bucket] > row_limit:
+            raise SalesError("SOURCE_ROW_LIMIT")
 
 
 def receive_sales_window(
@@ -202,10 +210,9 @@ def receive_sales_window(
         incoming = read(approved)
         if incoming.window != approved:
             raise SalesError("PUBLICATION_SCOPE_MISMATCH")
+        _require_read_budget(store, incoming, row_limit)
     if not incoming.rows:
         raise SalesError("SOURCE_NO_RECORDS")
-    if len(incoming.rows) > row_limit:
-        raise SalesError("SOURCE_ROW_LIMIT")
     metadata = {
         "incremental_baseline": str(head["id"]) if head else None,
         "receipt_mode": "full_reconciliation" if full else "lookback" if head else "bootstrap",

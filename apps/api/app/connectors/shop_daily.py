@@ -17,6 +17,7 @@ from app.modules.sales.source_policy import (
     validate_read_window,
 )
 from app.modules.sales.window_incremental import normalize_sales_window
+from app.modules.source_read_policy import read_spans
 
 
 class ShopDailyReader:
@@ -49,10 +50,10 @@ class ShopDailyReader:
 
     def _read(self, window):
         """JSON是来源原子容器，解析后立即只保留十键，不记录其他内容。"""
-        records, start = [], window.start
-        while start <= window.end:
-            end = min(start + timedelta(days=7), window.end + timedelta(days=1))
-            offset = 0
+        records = []
+        for start, last in read_spans(window.start, window.end):
+            end = last + timedelta(days=1)
+            offset, received = 0, 0
             while True:
                 self.heartbeat()
                 with self.connection.cursor() as cursor:
@@ -67,6 +68,9 @@ class ShopDailyReader:
                         self.heartbeat,
                     )
                     rows = cursor.fetchall()
+                received += len(rows)
+                if received > MAX_ROWS:
+                    raise SalesError("SOURCE_ROW_LIMIT")
                 for row in rows:
                     try:
                         metrics = json.loads(row.pop("json_data"), parse_float=Decimal)
@@ -76,12 +80,9 @@ class ShopDailyReader:
                         raise SalesError("SOURCE_JSON_INVALID") from exc
                     row["metrics"] = {key: metrics.get(key) for key in METRICS}
                     records.append(row)
-                if len(records) > MAX_ROWS:
-                    raise SalesError("SOURCE_ROW_LIMIT")
                 if len(rows) < PAGE_SIZE:
                     break
                 offset += PAGE_SIZE
-            start = end
         return records
 
     def read_stable(self, window, *, allow_empty=False):

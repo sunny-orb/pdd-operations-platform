@@ -567,6 +567,7 @@ def producer_sources():
     names = [
         "modules/fact_content.py",
         "modules/region_retention.py",
+        "modules/source_read_policy.py",
         "modules/sales/contracts.py",
         "modules/sales/product_regions_incremental.py",
         "modules/sales/window_incremental.py",

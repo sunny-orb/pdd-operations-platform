@@ -163,8 +163,6 @@ def _merge(code, oldrows, incoming, periods, end, repair_days=()):
     if any(r[field] not in received for r in incoming):
         raise ValueError("SOURCE_DATE_SCOPE_INVALID")
     combined = sorted([*retained, *incoming], key=lambda row: row["source_row_key"])
-    if len(combined) > 300000:
-        raise ValueError("SOURCE_ROW_LIMIT")
     if code == "product_daily" and len(
         {(r["source_shop_id"], r["source_product_id"], r[field]) for r in combined}
     ) != len(combined):

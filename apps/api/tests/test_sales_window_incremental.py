@@ -1,5 +1,6 @@
 """销售五来源窗口接收等价、历史与空间验证；合成来源、真实 PostgreSQL。"""
 
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -104,6 +105,78 @@ def values(engine, code, version):
 
 def archive_bytes(root):
     return {str(p.relative_to(root)): p.stat().st_size for p in root.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("code", (*CODES, "product_regions"))
+@pytest.mark.parametrize("shared", [False, True])
+def test_growth_past_read_budget_preserves_history_and_full_replay(
+    sales_pg, tmp_path, monkeypatch, code, shared
+):
+    from app.modules.sales.window_incremental import receive_sales_window
+
+    monkeypatch.setenv("CONTENT_REUSE_ENABLED", str(shared).lower())
+    old = [row(code, "old", "2026-08-24"), row(code, "recent", "2026-11-11")]
+    first = publish(sales_pg, tmp_path, code, old, "2026-11-11")
+    archived = json.loads((tmp_path / first.version_id / "producer-source.json").read_text())
+    assert "modules/source_read_policy.py" in archived
+    new = row(code, "new", "2026-11-12", "3")
+    store = store_for(sales_pg, tmp_path, code)
+    calls = []
+
+    def read(window):
+        calls.append(window)
+        return normalize(
+            code,
+            [r for r in [*old, new] if window.start <= date.fromisoformat(r["dt"]) <= window.end],
+            window,
+        )
+
+    def run(full=False):
+        return store.run(
+            lambda hb: receive_sales_window(store, read, heartbeat=hb, full=full, row_limit=2)
+        )
+
+    grown = run()
+    assert calls[-1].start == calls[-1].end == date(2026, 11, 12)
+    assert values(sales_pg, code, grown.version_id) == {
+        "old": Decimal("1"),
+        "recent": Decimal("1"),
+        "new": Decimal("3"),
+    }
+    assert len(values(sales_pg, code, first.version_id)) == 2
+    assert run().version_id == grown.version_id
+    assert run(full=True).version_id == grown.version_id
+    assert calls[-1] == scope(code)
+
+
+@pytest.mark.parametrize("code", (*CODES, "product_regions"))
+def test_separate_gap_windows_do_not_share_one_read_budget(sales_pg, tmp_path, code):
+    from app.modules.sales.window_incremental import receive_sales_window
+
+    old = [row(code, "old", "2026-08-24")]
+    first = publish(sales_pg, tmp_path, code, old, "2026-11-11")
+    repairs = [row(code, "gap-a", "2026-09-01"), row(code, "gap-b", "2026-10-01")]
+    incoming = [*repairs, row(code, "latest", "2026-11-12")]
+    store = store_for(sales_pg, tmp_path, code)
+
+    def read(window):
+        return normalize(
+            code,
+            [r for r in incoming if window.start <= date.fromisoformat(r["dt"]) <= window.end],
+            window,
+        )
+
+    result = store.run(
+        lambda hb: receive_sales_window(
+            store,
+            read,
+            heartbeat=hb,
+            row_limit=1,
+            repair_dates=(date(2026, 9, 1), date(2026, 10, 1)),
+        )
+    )
+    assert len(values(sales_pg, code, result.version_id)) == 4
+    assert len(values(sales_pg, code, first.version_id)) == 1
 
 
 @pytest.mark.parametrize("code", CODES)

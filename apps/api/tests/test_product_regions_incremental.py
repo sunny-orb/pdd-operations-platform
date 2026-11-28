@@ -292,17 +292,19 @@ def test_source_failure_and_corrupt_baseline_leave_history(sales_pg, tmp_path):
     assert len(values(sales_pg, first.version_id)) == 2
 
 
-def test_merged_candidate_obeys_total_source_limit(sales_pg, tmp_path, monkeypatch):
+def test_read_budget_does_not_limit_retained_history(sales_pg, tmp_path, monkeypatch):
     from app.modules.sales import product_regions_incremental as incremental_module
 
     first = publish(sales_pg, tmp_path, [row("old", "2026-08-24"), row("recent", "2026-11-12")])
     monkeypatch.setattr(incremental_module, "PRODUCT_REGION_SOURCE_MAX_ROWS", 2, raising=False)
+    incoming = [row("recent", "2026-11-12"), row("new", "2026-11-12")]
+    result = incremental(sales_pg, tmp_path, incoming)
+    assert len(values(sales_pg, result.version_id)) == 3
+    assert len(values(sales_pg, first.version_id)) == 2
+    assert incremental(sales_pg, tmp_path, incoming).version_id == result.version_id
     with pytest.raises(SalesError, match="SOURCE_ROW_LIMIT"):
-        incremental(sales_pg, tmp_path, [row("recent", "2026-11-12"), row("new", "2026-11-12")])
-    assert (
-        incremental(sales_pg, tmp_path, [row("recent", "2026-11-12")]).version_id
-        == first.version_id
-    )
+        incremental(sales_pg, tmp_path, [*incoming, row("too-many", "2026-11-12")])
+    assert incremental(sales_pg, tmp_path, incoming).version_id == result.version_id
 
 
 def test_ordinary_status_continues_after_weekly_failure(sales_pg):

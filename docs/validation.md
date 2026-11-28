@@ -4,6 +4,8 @@
 
 ## 验证记录索引
 
+[商品地区历史总量触发行数限制的根因核实](validation/2026-11-28.md#product-region-row-limit)（2026-11-28，诊断完成，生产尚未修复）。
+
 [右侧助手开放提问、跨页销售与 DeepSeek 深度思考上线](validation/2026-11-28.md#assistant-production-release)（2026-11-28）。
 
 [口语问能力、开放回答与按需取数](validation/2026-11-28.md#assistant-semantic-replies) · [预测后换题与两种范围的浏览器验收](validation/2026-11-28.md#assistant-open-conversation)（2026-11-28，本地）。

@@ -16,6 +16,10 @@ from app.modules.product_board.source import (
     windows,
 )
 from app.modules.sales.source_policy import SHOPS
+from app.modules.source_read_policy import read_spans
+
+SOURCE_READ_MAX_ROWS = 300_000
+PROFILE_MAX_ROWS = 300_000
 
 
 class ProductBoardReader:
@@ -75,10 +79,14 @@ class ProductBoardReader:
         periods = (
             (None,)
             if code == "profile_records"
-            else (windows(end, code) if periods is None else periods)
+            else tuple(
+                span
+                for first, last in (windows(end, code) if periods is None else periods)
+                for span in read_spans(first, last)
+            )
         )
         for period in periods:
-            offset = 0
+            offset, received = 0, 0
             while True:
                 self.heartbeat()
                 clause = (
@@ -106,9 +114,10 @@ class ProductBoardReader:
                         source=code,
                     )
                     batch = c.fetchall()
-                result.extend(batch)
-                if len(result) > 300000:
+                received += len(batch)
+                if received > (PROFILE_MAX_ROWS if period is None else SOURCE_READ_MAX_ROWS):
                     raise ValueError("SOURCE_ROW_LIMIT")
+                result.extend(batch)
                 if len(batch) < 1000:
                     break
                 offset += 1000

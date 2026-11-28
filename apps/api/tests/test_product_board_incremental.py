@@ -457,7 +457,11 @@ def test_bounded_reader_double_reads_only_requested_days():
     assert {r["business_date"].year for r in rows["product_daily"]} == {2025, 2026}
     assert [(params[-4], params[-3]) for _, params in queries] == [
         (date(2025, 11, 12), date(2025, 11, 13)),
-        (date(2026, 10, 14), date(2026, 11, 13)),
+        (date(2026, 10, 14), date(2026, 10, 21)),
+        (date(2026, 10, 21), date(2026, 10, 28)),
+        (date(2026, 10, 28), date(2026, 11, 4)),
+        (date(2026, 11, 4), date(2026, 11, 11)),
+        (date(2026, 11, 11), date(2026, 11, 13)),
     ] * 2
     assert all("AND dt>=%s AND dt<%s" in sql for sql, _ in queries)
     with pytest.raises(ValueError, match="SOURCE_DATE_SCOPE_INVALID"):

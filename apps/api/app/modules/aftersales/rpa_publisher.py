@@ -15,6 +15,7 @@ from app.modules.archive_payload import open_payload
 from app.modules.archive_store import require_archive, write_archive_stream
 from app.modules.streaming_json import canonical_chunks, fingerprint, fingerprint_rows
 
+from . import rpa_ingestion
 from .classification import rule_parameters
 from .publisher import canonical, private, reflect, source_chunks
 from .rpa_ingestion import REVISION, normalize
@@ -79,7 +80,7 @@ def legacy_input_matches(old, group):
             for line in source:
                 consume(len(line))
                 count += 1
-                if count > 300000:
+                if count > rpa_ingestion.MAX_GROUP_ROWS:
                     raise ValueError("RPA_ARCHIVE_ROW_LIMIT")
                 try:
                     row = json.loads(line)

@@ -18,6 +18,7 @@ from app.modules.sales.datasets import (
 )
 from app.modules.sales.source_policy import MAX_ATTEMPTS, validate_read_window
 from app.modules.sales.window_incremental import normalize_sales_window
+from app.modules.source_read_policy import read_spans
 
 
 class SalesSourceReader:
@@ -55,10 +56,10 @@ class SalesSourceReader:
         max_rows = (
             PRODUCT_REGION_SOURCE_MAX_ROWS if spec.code == "product_regions" else SOURCE_MAX_ROWS
         )
-        rows, start = [], window.start
-        while start <= window.end:
-            stop = min(start + timedelta(days=7), window.end + timedelta(days=1))
-            offset = 0
+        rows = []
+        for start, last in read_spans(window.start, window.end):
+            stop = last + timedelta(days=1)
+            offset, received = 0, 0
             while True:
                 self.heartbeat()
                 with self.connection.cursor() as cursor:
@@ -73,6 +74,9 @@ class SalesSourceReader:
                         self.heartbeat,
                     )
                     page = cursor.fetchall()
+                received += len(page)
+                if received > max_rows:
+                    raise SalesError("SOURCE_ROW_LIMIT")
                 for row in page:
                     if "json_data" in row:
                         try:
@@ -83,12 +87,9 @@ class SalesSourceReader:
                             raise SalesError("SOURCE_JSON_INVALID") from exc
                         row["metrics"] = {key: data.get(key) for key in PROMOTION_METRICS}
                     rows.append(row)
-                if len(rows) > max_rows:
-                    raise SalesError("SOURCE_ROW_LIMIT")
                 if len(page) < SOURCE_PAGE_SIZE:
                     break
                 offset += SOURCE_PAGE_SIZE
-            start = stop
         return rows
 
     def read_stable(self, code, window, *, allow_empty=False):

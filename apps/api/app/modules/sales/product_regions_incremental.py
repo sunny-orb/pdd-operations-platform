@@ -1,4 +1,4 @@
-"""商品地区兼容入口；共享销售窗口接收与原40万行预算。"""
+"""商品地区兼容入口；原40万行预算仅保护每个七日读取窗口。"""
 
 from .contracts import SalesError
 from .datasets import PRODUCT_REGION_SOURCE_MAX_ROWS

@@ -6,6 +6,8 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation, localcontext
 
 REVISION = "m5-rpa-period-v1"
+# 每个报告类型×起止日期×来源类别一份交付；历史新增期间不消耗其他组预算。
+MAX_GROUP_ROWS = 300000
 SPECS = {
     "按退货原因": ("rpa_returns", "return_records", "j1_returns", "实退数量", "实际入库金额"),
     "销售已发货": (
@@ -81,7 +83,7 @@ def number(row, field):
 
 def normalize(raw):
     """缺整个交付、非法值、重键或不相容身份阻断；不把缺源补成零。"""
-    if not raw or len(raw) > 300000:
+    if not raw:
         raise ValueError("RPA_EMPTY_OR_LIMIT")
     batches = defaultdict(list)
     seen = set()
@@ -106,7 +108,10 @@ def normalize(raw):
             or (kind == "monthly" and (start.day != 1 or end != month_end))
         ):
             raise ValueError("RPA_PERIOD")
-        batches[(kind, start, end, cl)].append(item)
+        group = batches[(kind, start, end, cl)]
+        group.append(item)
+        if len(group) > MAX_GROUP_ROWS:
+            raise ValueError("RPA_GROUP_ROW_LIMIT")
     periods = {k[:3] for k in batches}
     if any({k[3] for k in batches if k[:3] == period} != set(SPECS) for period in periods):
         raise ValueError("RPA_MISSING_ROLE")

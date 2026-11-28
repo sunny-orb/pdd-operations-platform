@@ -82,6 +82,23 @@ def test_selected_store_overall_and_all_products_do_not_expand_to_all_stores(bac
     assert backend[0][-1][1]["shop_id"] == ""
 
 
+@pytest.mark.parametrize("words", ["六店", "六个店铺", "6家店"])
+def test_actual_sales_in_all_six_shops_uses_the_published_sales_scope(backend, words):
+    q = f"这个月{words}实际已经卖了多少？"
+    run = QueryRun(None, ChatScope(domain="sales", shop_id="spigf"), q)
+    query(run, "sales_performance", all_shops=True)
+    assert backend[0][-1][1]["shop_id"] == ""
+
+
+def test_unfiltered_sales_total_needs_no_confirmation_but_preserves_selected_store(backend):
+    q = "这个月已经卖了多少？"
+    query(QueryRun(None, ChatScope(domain="sales"), q), "sales_performance", all_shops=True)
+    assert backend[0][-1][1]["shop_id"] == ""
+    run = QueryRun(None, ChatScope(domain="sales", shop_id="spigf"), q)
+    with pytest.raises(Exception, match="当前店铺"):
+        query(run, "sales_performance", all_shops=True)
+
+
 def test_multi_selected_product_dimensions_keep_original_intersections(backend):
     run = QueryRun(
         None,
@@ -208,7 +225,12 @@ def test_aftersales_uses_report_without_operating_scope_and_lazy_product_lookup(
 def test_catalog_lists_every_implemented_capability_and_curated_formula():
     from typing import get_args
 
-    from app.modules.assistant import aftersales_tools, board_tools, definitions, sales_tools
+    from app.modules.assistant import (
+        aftersales_tools,
+        board_tools,
+        definitions,
+        sales_tools,
+    )
 
     implemented = (
         set(aftersales_tools.CAPABILITIES)
@@ -259,10 +281,15 @@ def test_tool_budget_reserves_final_response():
 
     prepare = AnswerPolicy().prepare_tools
     tools = [object()]
-    available = SimpleNamespace(usage=SimpleNamespace(requests=4, tool_calls=4), messages=[])
-    reserve = SimpleNamespace(usage=SimpleNamespace(requests=5, tool_calls=4))
+    deps = QueryRun(None, ChatScope(), "推广表现如何")
+    available = SimpleNamespace(
+        usage=SimpleNamespace(requests=4, tool_calls=4), messages=[], deps=deps
+    )
+    reserve = SimpleNamespace(usage=SimpleNamespace(requests=5, tool_calls=4), deps=deps)
     assert asyncio.run(prepare(available, tools)) == tools
     assert asyncio.run(prepare(reserve, tools)) == []
+    deps.answer_from_reports = True
+    assert asyncio.run(prepare(available, tools)) == []
 
 
 def test_scalar_and_all_scope_replace_old_multiselect_on_followup(backend):
@@ -572,14 +599,22 @@ def test_latest_size_action_gets_style_evidence_on_category_page(backend):
 
 def test_percentage_projection_formats_rates_above_one_without_losing_units():
     r = report(
-        "aftersales", "aftersales_overview", "退款分析", "已发布报告", "version",
+        "aftersales",
+        "aftersales_overview",
+        "退款分析",
+        "已发布报告",
+        "version",
         facts=[fact("rate", "退款率", "1.4141", "percent")],
     )
-    r["tables"] = [{
-        "title": "单款风险排序", "total": 1, "offset": 0,
-        "columns": [{"key": "rate", "label": "总退款率", "unit": "percent"}],
-        "rows": [{"rate": "1.4141"}],
-    }]
+    r["tables"] = [
+        {
+            "title": "单款风险排序",
+            "total": 1,
+            "offset": 0,
+            "columns": [{"key": "rate", "label": "总退款率", "unit": "percent"}],
+            "rows": [{"rate": "1.4141"}],
+        }
+    ]
     result = dashboard.model_view(r, "退款率是多少")
     assert result["facts"][0]["display"] == "141.41%"
     assert result["tables"][0]["rows"] == [["141.41%"]]

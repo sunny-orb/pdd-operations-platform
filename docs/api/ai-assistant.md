@@ -58,6 +58,8 @@ curl --noproxy '*' -sS http://127.0.0.1:8000/api/v1/assistant/chat \
 
 普通确认和条件性解释可以返回 `answered` 和空 `reports`。此时直接展示正文并保留已选对象；收到 `subject_cleared:true` 或新的待选列表时清除旧选择。
 
+能力介绍、讲解、写作和按用户给定数字计算可直接返回 `answered`，此时 `reports` 可为空。客户端展示正文并保留选中的对象。询问型号直接读取服务配置，模型调用次数为 0。
+
 `kind=dashboard` 的报告用 domain、capability、title、source 标明来源，period、scope、versions、data_version 描述实际范围。facts 返回带单位、状态及原因的指标，tables 返回表头、行、总数与偏移，series 返回带日期的点，notes 说明限制。金额和比率使用十进制字符串，例如 percent 的 `"0.03"` 表示 3%。保留 null 和真实零的区别。
 
 单款报告 `product_performance`、`product_promotion` 另含商品、前后期日期、两期指标与变化、各自覆盖、逐日值及规则依据。客户端按 kind 解析，完整结构见[报告契约](../../apps/web/src/shared/assistant/contracts.ts)。

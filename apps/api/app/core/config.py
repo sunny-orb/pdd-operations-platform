@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     assistant_business_providers: list[str] = Field(default_factory=list)
     deepseek_api_key: SecretStr = SecretStr("")
     deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_thinking_enabled: bool = True
     bailian_api_key: SecretStr = SecretStr("")
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     database_url: SecretStr = SecretStr("")

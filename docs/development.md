@@ -32,19 +32,20 @@ PDD_DEV_API_TARGET=https://dashboard.example.com
 
 ### 本机 AI 问答配置
 
-本机和生产推荐使用 DeepSeek 官方快速模型，关闭深度思考。设置 `apps/api/.env` 后重启 API，右侧输入框可直接提问。[设置定义](../apps/api/app/core/config.py) · [无密钥样例](../apps/api/.env.example)
+本机和生产使用 DeepSeek 官方快速模型。官方模型默认开启高强度深度思考，可按环境关闭。修改设置后重启 API 即生效。[设置定义](../apps/api/app/core/config.py) · [无密钥样例](../apps/api/.env.example)
 
-| 环境变量                                                          | 默认值／推荐配置                                      | 用途                                                 |
-| ----------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
-| `APP_ENV`、`CORS_ORIGINS`                                         | development，本机 localhost 和 127.0.0.1 的 5173 端口 | 本机开发访问。生产环境助手入口关闭                   |
-| `ASSISTANT_MODEL`                                                 | `deepseek:deepseek-flash`（样例）                     | 官方快速型号。代码保留原百炼型号兼容，始终只启用一个 |
-| `ASSISTANT_BUSINESS_DATA_ENABLED`、`ASSISTANT_BUSINESS_PROVIDERS` | false、`[]`                                           | 发送获准数据时分别设为 true 和 `["deepseek"]`        |
-| `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`                           | 空密钥，`https://api.deepseek.com`                    | DeepSeek 官方密钥和入口，仅由后端读取                |
-| `DATABASE_URL`                                                    | 空                                                    | 经营数据来自已初始化的应用 PostgreSQL                |
-| `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_CONNECT_TIMEOUT_SECONDS`   | 代码默认 8 / 4 / 5 秒，样例 4 / 0 / 5 秒              | 连接池、溢出连接和连接等待                           |
-| `CONTENT_REUSE_ENABLED`                                           | false                                                 | 独立的数据库试验开关，问答沿用关闭值                 |
+| 环境变量                                                          | 默认值／推荐配置                                      | 用途                                                  |
+| ----------------------------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------- |
+| `APP_ENV`、`CORS_ORIGINS`                                         | development，本机 localhost 和 127.0.0.1 的 5173 端口 | 本机开发访问。生产环境助手入口关闭                    |
+| `ASSISTANT_MODEL`                                                 | `deepseek:deepseek-flash`（样例）                     | 官方快速型号。代码保留原百炼型号兼容，始终只启用一个  |
+| `ASSISTANT_BUSINESS_DATA_ENABLED`、`ASSISTANT_BUSINESS_PROVIDERS` | false、`[]`                                           | 发送获准数据时分别设为 true 和 `["deepseek"]`         |
+| `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`                           | 空密钥，`https://api.deepseek.com`                    | DeepSeek 官方密钥和入口，仅由后端读取                 |
+| `DEEPSEEK_THINKING_ENABLED`                                       | true                                                  | 发送给官方模型的请求启用高强度思考，设为 false 可关闭 |
+| `DATABASE_URL`                                                    | 空                                                    | 经营数据来自已初始化的应用 PostgreSQL                 |
+| `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_CONNECT_TIMEOUT_SECONDS`   | 代码默认 8 / 4 / 5 秒，样例 4 / 0 / 5 秒              | 连接池、溢出连接和连接等待                            |
+| `CONTENT_REUSE_ENABLED`                                           | false                                                 | 独立的数据库试验开关，问答沿用关闭值                  |
 
-在仓库根目录运行 `npm run dev`。用 `GET /api/v1/assistant/models` 核对 DeepSeek 和业务数据开关，再用一条获准的问题验证。官方请求设 temperature=0.3、`thinking={"type":"disabled"}`，沿用供应商的输出长度默认值。兼容旧百炼配置时仍用 `BAILIAN_API_KEY` / `BAILIAN_BASE_URL`、供应商 `bailian` 和 `enable_thinking=false`，两家密钥不互相回退。切换后重启 API；旧密钥从运行配置移除。
+在仓库根目录运行 `npm run dev`。用 `GET /api/v1/assistant/models` 核对 DeepSeek 和业务数据开关，再用一条获准的问题验证。思考中间内容仅随同一轮工具调用传回模型，页面展示回答正文和查询依据。兼容旧百炼配置时使用 `BAILIAN_API_KEY`、`BAILIAN_BASE_URL` 及 `enable_thinking=false`。
 
 按响应头 `X-Request-ID` 在 Uvicorn 日志关联 `assistant_model`（每次模型往返耗时）、`assistant_tool`（已执行的工具名和耗时）与 `assistant_result`（本轮模型请求／工具调用、领域读取次数和耗时、SQL 累计耗时、首条正文增量及总耗时）。`first_delta_ms` 从后端开始执行问答计时，浏览器绘制另测；JSON 请求这一项为空。日志仅记摘要。
 

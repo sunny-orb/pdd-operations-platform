@@ -171,14 +171,14 @@ def test_deepseek_is_the_only_server_model_and_default(monkeypatch):
         assert opened == [DEEPSEEK]
 
 
-@pytest.mark.parametrize("official", [False, True])
-def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, official):
+@pytest.mark.parametrize("official,thinking", [(False, False), (True, False), (True, True)])
+def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, official, thinking):
     import json
     from functools import partial
     from threading import get_ident
 
     import httpx2
-    from pydantic_ai.providers import openai
+    from pydantic_ai.providers import deepseek, openai
 
     from app.modules.assistant import chat
 
@@ -242,20 +242,28 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, of
             "deepseek-flash" if official else DEEPSEEK.removeprefix("bailian:")
         )
         if official:
-            assert payload["thinking"] == {"type": "disabled"}
+            assert payload["thinking"] == {"type": "enabled" if thinking else "disabled"}
             assert "enable_thinking" not in payload
+            if thinking:
+                assert payload["reasoning_effort"] == "high"
+                assert "temperature" not in payload
         else:
             assert payload["enable_thinking"] is False
         assert request.url.host == ("deepseek.test" if official else "bailian.test")
         assert request.headers["Authorization"] == "Bearer test-only"
         model_thread_ids.append(get_ident())
         messages = payload["messages"]
+        if thinking:
+            for message in messages:
+                if previous_tools := message.get("tool_calls"):
+                    expected = f"internal-test-{previous_tools[0]['id']}"
+                    assert message.get("reasoning_content") == expected
         calls.append(messages)
         names = {t["function"]["name"] for t in payload["tools"]}
         assert ("explain_observation" in names) == (
             not any(m.get("tool_call_id") == "facts" for m in messages)
         )
-        assert names - {"explain_observation"} == {
+        assert names - {"explain_observation", "answer_general", "describe_assistant"} == {
             "find_product",
             "get_product_performance",
             "get_product_promotion",
@@ -290,6 +298,9 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, of
                 assert "40.00" in str(messages[-1]["content"])
                 assert "local-42" not in str(messages[-1]["content"])
             content = {"content": "本期成交额40.00元。"}
+        if thinking:
+            tag = content["tool_calls"][0]["id"] if content.get("tool_calls") else "answer"
+            content["reasoning_content"] = f"internal-test-{tag}"
         return httpx2.Response(
             200,
             json={
@@ -313,6 +324,11 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, of
         "OpenAIProvider",
         partial(openai.OpenAIProvider, http_client=client_transport),
     )
+    monkeypatch.setattr(
+        deepseek,
+        "DeepSeekProvider",
+        partial(deepseek.DeepSeekProvider, http_client=client_transport),
+    )
     monkeypatch.setattr(chat, "search_products", search)
     monkeypatch.setattr(chat, "product_performance", performance)
     app = create_app(
@@ -321,6 +337,7 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, of
             assistant_model="deepseek:deepseek-flash" if official else DEEPSEEK,
             deepseek_api_key="test-only",
             deepseek_base_url="https://deepseek.test",
+            deepseek_thinking_enabled=thinking,
             bailian_api_key="test-only",
             bailian_base_url="https://bailian.test/compatible-mode/v1",
             assistant_business_data_enabled=True,
@@ -348,6 +365,7 @@ def test_readonly_tools_pin_identity_and_publish_server_evidence(monkeypatch, of
         assert result["subject"] == product and result["candidates"] == []
         assert "local-42" in result["evidence"] and "2026-10-07" in result["evidence"]
         assert result["answer"] == "本期成交额40.00元。"
+        assert "internal-test-" not in answer.text
         assert reads[0][:3] == ("link-1", "2026-10-01", "2026-10-07")
         assert lookups[0][:2] == ("帽子", "s1")
         assert any(m.get("content") == "上一轮回答" for m in calls[0])
@@ -585,12 +603,32 @@ def test_anchored_rolling_window_and_mixed_date_requests():
             run.dates("default", None, None)
 
 
+def test_calendar_month_ranges_come_from_the_question_not_the_model():
+    from datetime import date
+
+    from app.modules.assistant.chat import ChatScope, Clarify, QueryRun
+
+    for question, start, end in [
+        ("算下2026年11月到27日合计成交额", date(2026, 11, 1), date(2026, 11, 27)),
+        ("看2024年2月8号至29号的店铺销售", date(2024, 2, 8), date(2024, 2, 29)),
+    ]:
+        run = QueryRun(None, ChatScope(), question)
+        assert run.dates("default", date(2020, 5, 5), date(2020, 5, 12))[:2] == (start, end)
+    for question in [
+        "2026年2月到29日成交额",
+        "2026年11月9日到8日成交额",
+        "2026年11月到15日和上月怎么比",
+    ]:
+        with pytest.raises(Clarify):
+            QueryRun(None, ChatScope(), question).dates("default", None, None)
+
+
 def test_stream_runs_tools_before_text_and_keeps_final_evidence(monkeypatch):
     import json
     from contextlib import asynccontextmanager
 
     from pydantic_ai import Agent
-    from pydantic_ai.models.function import DeltaToolCall, FunctionModel
+    from pydantic_ai.models.function import DeltaThinkingPart, DeltaToolCall, FunctionModel
 
     from app.api import assistant
     from app.modules.assistant import chat
@@ -617,6 +655,7 @@ def test_stream_runs_tools_before_text_and_keeps_final_evidence(monkeypatch):
         if messages[-1].kind == "request" and any(
             getattr(part, "part_kind", None) == "tool-return" for part in messages[-1].parts
         ):
+            yield {0: DeltaThinkingPart(content="internal-stream-test")}
             yield "访客"
             yield "减少，先看推广。"
         else:
@@ -648,6 +687,7 @@ def test_stream_runs_tools_before_text_and_keeps_final_evidence(monkeypatch):
             json={**BODY, "context": {"listing_id": "link"}},
         )
         assert response.is_success
+        assert "internal-stream-test" not in response.text
         events = [
             json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")
         ]
@@ -681,15 +721,16 @@ def test_bailian_requires_its_own_key(monkeypatch):
 
 def test_production_assistant_requires_enablement_and_approved_same_origin():
     settings = Settings(
-        _env_file=None, app_env="production", assistant_production_enabled=True,
-        assistant_business_data_enabled=True, assistant_business_providers=["bailian"],
+        _env_file=None,
+        app_env="production",
+        assistant_production_enabled=True,
+        assistant_business_data_enabled=True,
+        assistant_business_providers=["bailian"],
         cors_origins=["https://pdd-operations.kktree.cn"],
     )
     with TestClient(create_app(settings), base_url="https://pdd-operations.kktree.cn") as client:
         assert client.get("/api/v1/assistant/models").json()["models"] == [DEEPSEEK]
-        denied = client.get(
-            "/api/v1/assistant/models", headers={"Origin": "https://other.example"}
-        )
+        denied = client.get("/api/v1/assistant/models", headers={"Origin": "https://other.example"})
         assert denied.status_code == 403
     with TestClient(create_app(settings), base_url="https://other.example") as client:
         assert client.get("/api/v1/assistant/models").status_code == 403
@@ -697,11 +738,16 @@ def test_production_assistant_requires_enablement_and_approved_same_origin():
 
 def test_production_model_requests_are_rate_limited_before_calling_model(monkeypatch):
     from app.api import assistant
+
     monkeypatch.setattr(assistant, "build_agent", lambda _: (_ for _ in ()).throw(RuntimeError()))
     settings = Settings(
-        _env_file=None, app_env="production", assistant_production_enabled=True,
-        assistant_business_data_enabled=True, assistant_business_providers=["bailian"],
-        assistant_requests_per_minute=1, cors_origins=["https://pdd-operations.kktree.cn"],
+        _env_file=None,
+        app_env="production",
+        assistant_production_enabled=True,
+        assistant_business_data_enabled=True,
+        assistant_business_providers=["bailian"],
+        assistant_requests_per_minute=1,
+        cors_origins=["https://pdd-operations.kktree.cn"],
     )
     with TestClient(create_app(settings), base_url="https://pdd-operations.kktree.cn") as client:
         assert client.post(URL, json=BODY).status_code == 502
@@ -724,15 +770,21 @@ def test_two_users_can_generate_and_stop_only_their_own_generation(monkeypatch):
         while not finish.is_set():
             await asyncio.sleep(0.01)
         return {
-            "answer": question, "status": "answered", "evidence": "", "reports": [],
-            "subject": None, "candidates": [],
+            "answer": question,
+            "status": "answered",
+            "evidence": "",
+            "reports": [],
+            "subject": None,
+            "candidates": [],
         }
 
     monkeypatch.setattr(assistant, "build_agent", lambda _: AsyncExitStack())
     monkeypatch.setattr(assistant, "answer_question", generate)
     settings = Settings(
-        _env_file=None, assistant_max_concurrent=2,
-        assistant_business_data_enabled=True, assistant_business_providers=["bailian"],
+        _env_file=None,
+        assistant_max_concurrent=2,
+        assistant_business_data_enabled=True,
+        assistant_business_providers=["bailian"],
     )
     second = "36b63ec7-14c0-424c-b3bc-9cd9b57c2490"
     with TestClient(
@@ -759,14 +811,25 @@ def test_http_assistant_uses_the_page_report_input_cache(monkeypatch):
 
     from app.api import assistant
 
-    app = create_app(Settings(
-        _env_file=None, assistant_business_data_enabled=True,
-        assistant_business_providers=["bailian"],
-    ))
+    app = create_app(
+        Settings(
+            _env_file=None,
+            assistant_business_data_enabled=True,
+            assistant_business_providers=["bailian"],
+        )
+    )
+
     async def generate(agent, question, page, history, deps):
         assert deps.aftersales_rows_cache is app.state.aftersales_overview_cache.rows
-        return {"answer": "已共享输入", "status": "answered", "evidence": "", "reports": [],
-                "subject": None, "candidates": []}
+        return {
+            "answer": "已共享输入",
+            "status": "answered",
+            "evidence": "",
+            "reports": [],
+            "subject": None,
+            "candidates": [],
+        }
+
     monkeypatch.setattr(assistant, "build_agent", lambda _: AsyncExitStack())
     monkeypatch.setattr(assistant, "answer_question", generate)
     with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
@@ -776,9 +839,13 @@ def test_http_assistant_uses_the_page_report_input_cache(monkeypatch):
 def test_direct_deepseek_is_enabled_only_with_matching_business_approval():
     model = "deepseek:deepseek-flash"
     for providers, expected in [(["deepseek"], [model]), (["bailian"], [])]:
-        app = create_app(Settings(
-            _env_file=None, assistant_model=model, assistant_business_data_enabled=True,
-            assistant_business_providers=providers,
-        ))
+        app = create_app(
+            Settings(
+                _env_file=None,
+                assistant_model=model,
+                assistant_business_data_enabled=True,
+                assistant_business_providers=providers,
+            )
+        )
         with TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000)) as client:
             assert client.get("/api/v1/assistant/models").json()["models"] == expected

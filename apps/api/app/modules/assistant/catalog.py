@@ -61,11 +61,15 @@ CAPABILITIES = {
     "sales_regions": ("sales", "店铺地区成交分布"),
     "sales_product_regions": ("sales", "产品地区实发实退，独立于成交口径"),
     "sales_product_options": ("sales", "地区查询可选产品编码"),
-    "aftersales_overview": ("aftersales", "售后报告三率、原因与规则建议"),
-    "aftersales_analysis": ("aftersales", "品类/款式/环比/同比/品质/历史分析"),
+    "aftersales_overview": ("aftersales", "售后报告中的退款率、退货原因及优先核查的款式"),
+    "aftersales_analysis": ("aftersales", "按品类或款式拆分的退货分析，以及环比、同比和品质问题"),
     "aftersales_options": ("aftersales", "可选报告、品类与款式目录"),
     "weather": ("weather", "已发布全国天气及预警"),
     "data_status": ("data_status", "本地数据覆盖、最近更新和失败状态"),
+}
+DATA_BOUNDARIES = {
+    "inventory": "看板还没接入库存和实时可售数量。",
+    "listing_aftersales": "售后报告按品类或款号统计，目前还不能对应到某家店的商品链接。",
 }
 
 

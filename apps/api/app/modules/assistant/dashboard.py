@@ -85,7 +85,7 @@ async def discover(run, domain):
     data = dict(capabilities=catalog.catalog(domain))
     if domain != "all":
         data["scope"] = await metadata(run, domain)
-    data["boundaries"] = ["库存尚无本地查询入口", "售后报告未建立到店铺商品链接的已验证映射"]
+    data["boundaries"] = list(catalog.DATA_BOUNDARIES.values())
     return data
 
 
@@ -212,13 +212,29 @@ async def read(run, request):
             run.question,
         )
     )
-    if request.capability == "sales_targets" and re.search(r"六店|渠道", run.question):
+    if domain == "sales" and re.search(r"(?:六|(?<!\d)6)\s*(?:个|家)?\s*店", run.question):
         explicitly_all = True
-    if request.all_shops and not explicitly_all:
-        raise Clarify("请确认要查看全部店铺还是当前店铺。")
-    all_shops = explicitly_all or (request.capability == "sales_shops" and not request.shop_id)
-    all_products = all_shops or bool(re.search(r"所有商品|全部商品|全店商品", run.question))
+    if request.capability == "sales_targets" and "渠道" in run.question:
+        explicitly_all = True
     page_shop = run.scope.filter_shop_id or run.scope.shop_id
+    if (
+        request.all_shops
+        and not explicitly_all
+        and (
+            page_shop
+            or run.scope.shop_ids
+            or run.scope.listing_id
+            or run.scope.listing_ids
+            or run.scope.risk_reference
+        )
+    ):
+        raise Clarify("请确认要查看全部店铺还是当前店铺。")
+    all_shops = (
+        explicitly_all
+        or request.all_shops
+        or (request.capability == "sales_shops" and not request.shop_id)
+    )
+    all_products = all_shops or bool(re.search(r"所有商品|全部商品|全店商品", run.question))
     if domain not in ("aftersales", "weather", "data_status", "definitions"):
         params["shop_id"] = "" if all_shops else _shop(request.shop_id or page_shop, meta)
         if not request.shop_id and not all_shops and run.scope.shop_ids:
@@ -266,7 +282,10 @@ async def read(run, request):
         calendar_month = today.strftime("%Y-%m")
     elif re.search(r"上个月|上月", run.question):
         calendar_month = (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
-    if calendar_month:
+    if request.capability != "sales_targets":
+        # 普通经营指标按起止日取数。模型附带的可选月份不能覆盖实际期间。
+        params.pop("month", None)
+    elif calendar_month:
         params["month"] = calendar_month
     elif request.month:
         if request.month not in run.question and request.month != run.scope.month:

@@ -272,16 +272,22 @@ def main():
                 print(json.dumps({"stage": "region_retention", "status": "failed",
                                   "code": "REGION_RETENTION_FAILED"}), flush=True)
             request = ROOT / "var/project-sync/forecast-sop-request.json"
-            if os.environ.get("APP_ENV") != "production" and request.is_file():
+            if request.is_file():
                 from app.jobs.forecast_sop import save_requested_snapshots
-                from app.modules.knowledge.forecast_access import local_forecast_database
+                from app.modules.knowledge.forecast_access import (
+                    company_forecast_database,
+                    local_forecast_database,
+                )
+                from app.modules.knowledge.sop_transport import worker_token
 
                 try:
-                    if local_forecast_database(engine, "pdd_ingest"):
+                    if local_forecast_database(engine, "pdd_ingest") or (
+                        worker_token() and company_forecast_database(engine)
+                    ):
                         forecast = save_requested_snapshots(engine, request)
                         if forecast["saved"]:
                             print(json.dumps(dict(stage="forecast_snapshots", **forecast)), flush=True)
-                except Exception as exc:  # 本地预测快照独立于经营数据发布
+                except Exception as exc:  # 预测快照独立于经营数据发布
                     print(json.dumps(dict(stage="forecast_snapshots", status="failed",
                                           error=type(exc).__name__)), flush=True)
         return int(result["status"] == "failed" or monitor_failed)

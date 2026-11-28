@@ -55,7 +55,7 @@ PDD_DEV_API_TARGET=https://dashboard.example.com
 
 <a id="forecast-sop-local"></a>
 
-### 本机公共 SOP 与正式预测
+### 公共 SOP 与正式预测
 
 普通 SOP 取自[已授权短目录](../apps/api/app/modules/knowledge/public_sops.toml)。首次登记做法类文档时填写短标识、标题、适用场景和飞书文档 ID，再重启本地 API。随后香草只需改飞书原文，下次有人询问时核对修订。普通查数和列目录都在本地完成。
 
@@ -63,7 +63,7 @@ PDD_DEV_API_TARGET=https://dashboard.example.com
 
 正式预测要求应用库已升到 `20261128_23`、F01 已发布六店日报，且已配置官方 DeepSeek。提问触发固定的独立核验命令。问答保留只读身份；写入规则版本由本地任务身份完成。新版本每次解读最多调用一次模型，输出上限 2,048 token，60 秒超时。临时失败在下次相关提问时重试。手动诊断仍可运行 `npm run sync:forecast`。
 
-定时器仅在当日正式规则经提问核验后，才使用本地数据留预测快照。无需开启五分钟飞书轮询。公司部署须另行核验稳定只读身份与文档权限。
+生产通过已有同步容器的飞书机器人核对原文。API 和 Worker 共用运行文件中的 `PDD_SOP_WORKER_TOKEN`，网络地址固定为项目内部的 Worker。发布时确认机器人能读已登记文章。公司应用库按 20→23 显式增量升级，然后接收现有 F01 的新投影。定时任务只为当天已核验的预测保留快照。 [迁移及回退](database-schema/forecast-sop.md#生产发布)
 
 ## 本地 PostgreSQL
 

@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps/api"))
 
+from app.jobs.forecast_worker import start_worker_api
 from app.jobs.process_guard import log_event, read_policy, run_child
 
 
@@ -25,6 +26,7 @@ def oom_kills():
 
 def main():
     stop = threading.Event()
+    sop_api = start_worker_api()
 
     def shutdown(*_):
         stop.set()
@@ -55,6 +57,8 @@ def main():
         )
         # 下一轮先持锁恢复中断状态，再由来源检查点等待300秒；不叠加第二层5分钟。
         stop.wait(60)
+    if sop_api:
+        sop_api.should_exit = True
 
 
 if __name__ == "__main__":

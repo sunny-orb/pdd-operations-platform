@@ -1,6 +1,6 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
 -- 迁移范围：base → 20261128_23；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：561f69b95206f08c517ef8b5ef1ae8e4d46f9c884993211c92d2ada64fb32c00
+-- 迁移、冻结实现及生成器SHA-256：dc2d8d0fcbb38bba12deb18d82653158329b67e3ce561a04427ba292af21607d
 -- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。
 -- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。

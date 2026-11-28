@@ -406,7 +406,7 @@ class Runtime:
                 )
         return result
 
-    def preflight(self, manifest):
+    def preflight(self, manifest, *, schema_manifest=None):
         self.use(manifest)
         require(not self.services("worker", all_containers=False), "WORKER_RUNNING")
         # 名称、ID与IPAM同时固定，不能同名替换或隐式扩网。
@@ -418,8 +418,9 @@ class Runtime:
         )
         self.docker(["pull", manifest["api"]])
         self.docker(["pull", manifest["web"]])
+        schema_manifest = schema_manifest or manifest
         status = self.compose(
-            manifest, "blue", manifest["web"], ["run", "--rm", "--no-deps", "database"]
+            schema_manifest, "blue", schema_manifest["web"], ["run", "--rm", "--no-deps", "database"]
         )
         require(
             json.loads(status) == {"status": "already_initialized"},
@@ -1087,12 +1088,16 @@ class Handoff:
         )
         return value
 
-    def release(self, manifest, compose):
+    def release(self, manifest, compose, *, rollback=False):
         state = self.state()
         require(state["phase"] == "idle", "HANDOFF_PENDING_RECONCILE_OR_ROLLBACK")
         if manifest == state["active"]["manifest"]:
             return
-        self.runtime.preflight(manifest)
+        if rollback:
+            # 加法迁移保留在库中，由认识当前目录的镜像核验，再预热上一版读路径。
+            self.runtime.preflight(manifest, schema_manifest=state["active"]["manifest"])
+        else:
+            self.runtime.preflight(manifest)
         candidate = {
             "manifest": manifest,
             "slot": "green" if state["active"]["slot"] == "blue" else "blue",
@@ -1203,5 +1208,5 @@ class Handoff:
         target = state["previous"]
         require(target is not None, "NO_PREVIOUS_HANDOFF_RELEASE")
         self.release(
-            target["manifest"], base64.b64decode(target["compose"], validate=True)
+            target["manifest"], base64.b64decode(target["compose"], validate=True), rollback=True
         )

@@ -397,3 +397,20 @@ def test_region_upgrade_preserves_readers_and_company_objects(deployed12, start)
         after_acl = upgrade.application_acl(raw, has_rpa=True)
         assert all(after_acl[key] == value for key, value in before_acl.items())
         assert upgrade.upgrade(raw, apply=True) == "already_upgraded"
+
+
+def test_company_forecast_upgrade_preserves_existing_objects(deployed12):
+    upgrade = load_script("forecast_company_upgrade", "upgrade-deployment-db.py")
+    with deployed12.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.exec_driver_sql("SET ROLE pdd_app")
+        raw = connection.connection.driver_connection
+        assert upgrade.upgrade(raw, apply=True) == "upgraded"
+        before = data_snapshot(connection)
+        assert upgrade.upgrade(raw, forecast=True) == "ready"
+        assert upgrade.upgrade(raw, forecast=True, apply=True) == "upgraded"
+        assert data_snapshot(connection) == before
+        assert upgrade.upgrade(raw, forecast=True, apply=True) == "already_upgraded"
+        assert (
+            connection.exec_driver_sql("SELECT count(*) FROM public.read_forecast_sop").scalar_one()
+            == 0
+        )

@@ -16,6 +16,7 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 from app.core.config import Settings
 from app.modules.assistant.chat import ChatScope, Product, QueryRun, answer_question, build_agent
 from app.modules.assistant.conversation import plan_turn
+from app.modules.knowledge.sop_transport import worker_token
 from app.modules.product_board.repository import BoardError
 
 router = APIRouter(prefix="/api/v1/assistant")
@@ -216,7 +217,10 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
                     body.question,
                     executor=state.assistant_query_executor,
                     sop_executor=state.assistant_sop_executor,
-                    public_sops_enabled=settings.app_env == "development",
+                    public_sops_enabled=(
+                        settings.app_env == "development"
+                        or (settings.app_env == "production" and bool(worker_token()))
+                    ),
                     model_id=name,
                     plan=plan,
                     emit=emit,

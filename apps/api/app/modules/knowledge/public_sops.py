@@ -17,6 +17,7 @@ from app.connectors.forecast_sop import (
 )
 
 from .public_sop_passages import relevant_passages
+from .sop_transport import WorkerSopReader, worker_token
 
 # 每个进程最多保留八篇近期使用的原文，大文仍可按次读取和摘句。
 _CACHE_DOCUMENTS = 8
@@ -140,24 +141,29 @@ def _empty_result(state, **fields):
     }
 
 
-def _local_reader(entry):
-    if os.environ.get("APP_ENV", "development") != "development":
-        raise ForecastSourceError("temporary")
+def _reader(entry):
+    if os.environ.get("APP_ENV") == "production":
+        return WorkerSopReader(entry.key)
     return FeishuSopReader(entry.document_id, identity="user")
 
 
-_library = PublicSopLibrary(_registered_entries(), _local_reader)
+_entries = _registered_entries()
+_library = PublicSopLibrary(_entries, _reader)
+
+
+def registered_entry(key: str | None) -> PublicSopEntry | None:
+    return next((entry for entry in _entries if entry.key == key), None)
 
 
 def catalog_entries() -> list[dict]:
     """仅返回服务端已登记的短标题和适用范围，发现资料不请求飞书。"""
-    if os.environ.get("APP_ENV") == "production":
+    if os.environ.get("APP_ENV") == "production" and not worker_token():
         return []
     return _library.catalog_entries()
 
 
 def read_public_sop(key: str, query: str, *, session: PublicSopSession | None = None) -> dict:
     """本机读取本次选中的授权 SOP；身份、飞书地址及文档 ID 均由服务端决定。"""
-    if os.environ.get("APP_ENV") == "production":
+    if os.environ.get("APP_ENV") == "production" and not worker_token():
         return _empty_result("unavailable", reason="disabled")
     return _library.read_public_sop(key, query, session=session)

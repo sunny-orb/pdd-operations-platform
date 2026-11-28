@@ -673,12 +673,19 @@ def test_local_forecast_migrations_preserve_the_three_archived_facts_and_company
         for rev in ("20261127_21", "20261127_22", "20261128_23"):
             command.upgrade(cfg, rev)
             assert validate_schema(c) == archive_schema
-            with pytest.raises(ValueError, match="DEPLOY_REVISION_MISMATCH"):
-                initializer.initialize(
+
+            def check_deployment():
+                return initializer.initialize(
                     c.connection.driver_connection,
                     database=sales_pg.url.database,
                     account="pdd_admin",
                 )
+
+            if rev == "20261128_23":
+                assert check_deployment() == "already_initialized"
+            else:
+                with pytest.raises(ValueError, match="DEPLOY_REVISION_MISMATCH"):
+                    check_deployment()
 
 
 def test_writer_with_old_repeatable_read_cannot_lose_intervening_month_snapshot(sales_pg):

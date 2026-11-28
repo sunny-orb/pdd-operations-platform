@@ -22,6 +22,7 @@ DEPLOY_OUTPUT = ROOT / "docs/database-schema/schema-songbing.sql"
 from migrations_v2.company_db_objects import (
     COMPATIBLE_RUNTIME_REVISIONS,
     EXTENSION_MEMBERS,
+    FORECAST_TARGET_REVISION,
     START_REVISION,
     TARGET_REVISION,
 )
@@ -44,6 +45,9 @@ REGION_GRANTS = (
     "GRANT EXECUTE ON FUNCTION public.pdd_region_rebuild_finish(text) TO pdd_ingest;\n",
     "GRANT EXECUTE ON FUNCTION public.pdd_region_gc_block(integer) TO pdd_ingest;\n",
 )
+FORECAST_UPGRADE_SHA256 = (
+    "0c616890d564fb403d88c11ad1efc6fb3d691a40799bb3a7c1ae3ab65bfe299a"
+)
 
 
 def strip_region_grants(body: str) -> str:
@@ -61,6 +65,22 @@ def has_local_role_dependency(body: str) -> bool:
         "session_user IN ('pdd_admin','pdd_ingest')", "session_user IS NOT NULL"
     )
     return re.search(r"\bpdd_(?:app|ingest)\b", body) is not None
+
+
+def render_forecast_upgrade_sql(start_revision: str) -> str:
+    """核对固定的20→23增量；公司单账号沿用对象所有权。"""
+    if start_revision != TARGET_REVISION:
+        raise RuntimeError("DEPLOY_MIGRATION_START_INVALID")
+    output = io.StringIO()
+    config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
+    command.upgrade(config, f"{start_revision}:{FORECAST_TARGET_REVISION}", sql=True)
+    body = transaction_body(output.getvalue().strip())
+    if hashlib.sha256(body.encode()).hexdigest() != FORECAST_UPGRADE_SHA256:
+        raise RuntimeError("DEPLOY_MIGRATION_SQL_CHANGED")
+    body, count = re.subn(r"(?m)^GRANT [^;]+ TO pdd_(?:app|ingest);\n", "", body)
+    if count != 7 or has_local_role_dependency(body):
+        raise RuntimeError("DEPLOY_MIGRATION_PERMISSIONS_CHANGED")
+    return body
 
 
 def transaction_body(sql: str) -> str:

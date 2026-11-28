@@ -159,7 +159,7 @@ class FakeRuntime:
         self.fail_warm = False
         self.fail_drain = False
 
-    def preflight(self, _):
+    def preflight(self, _, *, schema_manifest=None):
         self.events.append("preflight")
 
     def prepare(self, candidate, _):

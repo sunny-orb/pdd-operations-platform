@@ -5,9 +5,15 @@ import json
 
 START_REVISION = "20261104_12"
 TARGET_REVISION = "20261118_20"
-COMPATIBLE_RUNTIME_REVISIONS = ("20261114_18", "20261116_19", TARGET_REVISION)
+FORECAST_TARGET_REVISION = "20261128_23"
+COMPATIBLE_RUNTIME_REVISIONS = (
+    "20261114_18",
+    "20261116_19",
+    TARGET_REVISION,
+    FORECAST_TARGET_REVISION,
+)
 # 隔离 PG 证明的本机目录，独立于公司初始化和升级目标。
-F01_GMV_REVISIONS = ("20261127_22", "20261128_23")
+F01_GMV_REVISIONS = ("20261127_22", FORECAST_TARGET_REVISION)
 LOCAL_FORECAST_REVISIONS = ("20261127_21", *F01_GMV_REVISIONS)
 UPGRADE_STARTS = (START_REVISION, "20261111_16", "20261113_17", "20261114_18", "20261116_19")
 RPA_TABLE = "aftersales_reports_rpa"
@@ -356,7 +362,10 @@ def verify_application(connection, revision, *, has_rpa, expected_owner=None):
     if connection.execute("SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_event_trigger)").fetchone()[0]:
         raise ValueError("DEPLOY_EVENT_TRIGGER_MISMATCH")
     if revision in (
-        "20261111_16", "20261113_17", *COMPATIBLE_RUNTIME_REVISIONS, *LOCAL_FORECAST_REVISIONS,
+        "20261111_16",
+        "20261113_17",
+        *COMPATIBLE_RUNTIME_REVISIONS,
+        *LOCAL_FORECAST_REVISIONS,
     ):
         state = connection.execute(
             "SELECT indisvalid,indisready FROM pg_index WHERE indexrelid="
@@ -365,7 +374,9 @@ def verify_application(connection, revision, *, has_rpa, expected_owner=None):
         if state != (True, True):
             raise ValueError("DEPLOY_SCHEMA_MISMATCH:index_state")
     actual = application_signature(
-        connection, has_rpa=has_rpa, expected_owner=expected_owner,
+        connection,
+        has_rpa=has_rpa,
+        expected_owner=expected_owner,
         forecast_columns=revision in F01_GMV_REVISIONS,
     )
     expected = SCHEMA_SIGNATURES[revision]

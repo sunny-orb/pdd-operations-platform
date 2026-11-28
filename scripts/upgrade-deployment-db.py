@@ -20,6 +20,7 @@ renderer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(renderer)
 
 from migrations_v2.company_db_objects import (
+    FORECAST_TARGET_REVISION,
     TARGET_REVISION,
     UPGRADE_STARTS,
     application_acl,
@@ -87,7 +88,7 @@ def prepare_transaction(connection, *, read_only):
     connection.execute("SET LOCAL TimeZone='UTC'")
 
 
-def check_revision(connection):
+def check_revision(connection, *, forecast=False):
     if not connection.execute(
         "SELECT to_regclass('public.alembic_version_v2')"
     ).fetchone()[0]:
@@ -95,7 +96,12 @@ def check_revision(connection):
     versions = connection.execute(
         "SELECT version_num FROM public.alembic_version_v2"
     ).fetchall()
-    if len(versions) != 1 or versions[0][0] not in (*UPGRADE_STARTS, TARGET_REVISION):
+    supported = (
+        (TARGET_REVISION, FORECAST_TARGET_REVISION)
+        if forecast
+        else (*UPGRADE_STARTS, TARGET_REVISION)
+    )
+    if len(versions) != 1 or versions[0][0] not in supported:
         raise ValueError("DEPLOY_REVISION_MISMATCH")
     return versions[0][0]
 
@@ -151,30 +157,35 @@ def publication_snapshot(connection):
         """).fetchone()
 
 
-def upgrade(connection, *, apply=False) -> str:
+def upgrade(connection, *, apply=False, forecast=False) -> str:
     """在专用空闲连接先只读验证；写入时在同一事务重验、迁移、复核。"""
     if (
         not connection.autocommit
         or connection.info.transaction_status != TransactionStatus.IDLE
     ):
         raise ValueError("DEPLOY_CONNECTION_NOT_IDLE")
+    target = FORECAST_TARGET_REVISION if forecast else TARGET_REVISION
     with connection.transaction():
         prepare_transaction(connection, read_only=True)
         owner = target_rpa_owner(connection)
-        revision = check_revision(connection)
+        revision = check_revision(connection, forecast=forecast)
         verify_objects(connection, revision, owner)
-        if revision == TARGET_REVISION:
+        if revision == target:
             return "already_upgraded"
         require_idle_tasks(connection)
     if not apply:
         return "ready"
-    sql = renderer.render_upgrade_sql(revision)
+    sql = (
+        renderer.render_forecast_upgrade_sql
+        if forecast
+        else renderer.render_upgrade_sql
+    )(revision)
     with connection.transaction():
         prepare_transaction(connection, read_only=False)
         if target_rpa_owner(connection) != owner:
             raise ValueError("DEPLOY_TARGET_MISMATCH")
         acquire_locks(connection)
-        if check_revision(connection) != revision:
+        if check_revision(connection, forecast=forecast) != revision:
             raise ValueError("DEPLOY_REVISION_MISMATCH")
         before_rpa = verify_objects(connection, revision, owner)
         connection.execute("""
@@ -188,9 +199,9 @@ def upgrade(connection, *, apply=False) -> str:
         before_protected = protected_catalog(connection)
         before_publications = publication_snapshot(connection)
         connection.execute(sql, prepare=False)
-        if check_revision(connection) != TARGET_REVISION:
+        if check_revision(connection, forecast=forecast) != target:
             raise ValueError("DEPLOY_REVISION_MISMATCH")
-        if verify_objects(connection, TARGET_REVISION, owner) != before_rpa:
+        if verify_objects(connection, target, owner) != before_rpa:
             raise ValueError("DEPLOY_RPA_CHANGED")
         if protected_catalog(connection) != before_protected:
             raise ValueError("DEPLOY_COMPANY_OBJECTS_CHANGED")
@@ -208,14 +219,18 @@ def upgrade(connection, *, apply=False) -> str:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument(
+        "--forecast", action="store_true", help="从20运行21至23的预测增量"
+    )
     args = parser.parse_args()
     try:
         if any(key in os.environ for key in ("PGHOSTADDR", "PGSERVICE", "PGOPTIONS")):
             raise ValueError("DEPLOY_CONNECTION_INVALID")
         params = connection_parameters(os.environ["DATABASE_URL"])
         with psycopg.connect(**params, autocommit=True) as connection:
-            status = upgrade(connection, apply=args.apply)
-        print(json.dumps({"status": status, "target": TARGET_REVISION}))
+            status = upgrade(connection, apply=args.apply, forecast=args.forecast)
+        target = FORECAST_TARGET_REVISION if args.forecast else TARGET_REVISION
+        print(json.dumps({"status": status, "target": target}))
         return 0
     except Exception as exc:  # noqa: BLE001 - 只记录受控错误码，不输出连接或数据库异常正文
         error = (

@@ -1,6 +1,6 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
 -- 迁移范围：base → 20261118_20；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：561f69b95206f08c517ef8b5ef1ae8e4d46f9c884993211c92d2ada64fb32c00
+-- 迁移、冻结实现及生成器SHA-256：dc2d8d0fcbb38bba12deb18d82653158329b67e3ce561a04427ba292af21607d
 -- 公司单账号：songbing/pdd_dashboard；应用结构须空；保留monitor及登记的扩展成员。
 -- 不创建角色、不修改数据库或monitor权限；应用对象由执行账号拥有。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。

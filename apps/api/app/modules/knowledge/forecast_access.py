@@ -9,10 +9,11 @@ from pathlib import Path
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.connectors.forecast_sop import DOCUMENT_ID
+from app.connectors.forecast_sop import DOCUMENT_ID, ForecastSourceError
 
 from .forecast_store import read_forecast_sop, withheld_forecast_sop
 from .interpretation import effective_forecast_sop
+from .sop_transport import request_worker, worker_token
 
 _API_DIR = Path(__file__).resolve().parents[3]
 _USAGE_KEYS = ("requests", "input_tokens", "output_tokens")
@@ -33,6 +34,8 @@ def local_forecast_database(engine, role):
 
 
 def _request_refresh():
+    if os.environ.get("APP_ENV") == "production":
+        return request_worker("forecast")
     # 唯一参数为固定问答模式；同步身份和来源只在子进程内解析。
     process = subprocess.run(
         [sys.executable, "-m", "app.jobs.forecast_sop", "--for-question"],
@@ -46,9 +49,26 @@ def _request_refresh():
     return json.loads(process.stdout)
 
 
+def company_forecast_database(engine):
+    """只接受固定生产应用库及项目已有TLS身份。"""
+    if os.environ.get("APP_ENV") != "production" or engine is None:
+        return False
+    url = engine.url
+    return (url.drivername, url.host, url.port or 5432, url.database, url.username) == (
+        "postgresql+psycopg",
+        "pg.kktree.cn",
+        5432,
+        "pdd_dashboard",
+        "songbing",
+    ) and dict(url.query) == {"sslmode": "require"}
+
+
 def ensure_forecast_current(engine, *, refresh=None) -> dict:
     """取本题核过的修订和本次解读用量。在调用者打开经营 RR 事务之前通过独立连接读取。"""
-    if refresh is None and not local_forecast_database(engine, "pdd_app"):
+    if refresh is None and not (
+        local_forecast_database(engine, "pdd_app")
+        or (worker_token() and company_forecast_database(engine))
+    ):
         return {
             **withheld_forecast_sop(state="unavailable", reason="local_only"),
             "review_usage": dict.fromkeys(_USAGE_KEYS, 0),
@@ -90,7 +110,15 @@ def ensure_forecast_current(engine, *, refresh=None) -> dict:
                     hidden = withheld_forecast_sop(
                         doc=doc, state=source["state"], reason=source["reason"]
                     )
-    except (OSError, subprocess.SubprocessError, SQLAlchemyError, ValueError, TypeError, KeyError):
+    except (
+        OSError,
+        subprocess.SubprocessError,
+        SQLAlchemyError,
+        ValueError,
+        TypeError,
+        KeyError,
+        ForecastSourceError,
+    ):
         # 子进程中断、无回执或视图无法读取时均不能借用此前的成功公式。
         pass
     return {**hidden, "review_usage": usage}

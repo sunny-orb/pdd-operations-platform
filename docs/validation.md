@@ -4,7 +4,7 @@
 
 ## 验证记录索引
 
-[商品地区历史总量触发行数限制的根因核实](validation/2026-11-28.md#product-region-row-limit)（2026-11-28，诊断完成，生产尚未修复）。
+[商品地区历史增长的根因、14 来源检查与测试](validation/2026-11-28.md#product-region-row-limit) · [正式上线、补收及连续同步验收](validation/2026-11-28.md#product-region-growth-production)（2026-11-28，已上线，M3-ISS-12 关闭）。
 
 [右侧助手开放提问、跨页销售与 DeepSeek 深度思考上线](validation/2026-11-28.md#assistant-production-release)（2026-11-28）。
 

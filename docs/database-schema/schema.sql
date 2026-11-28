@@ -1,6 +1,6 @@
 -- 现行v2完整空库初始化文件；由scripts/render-db-schema.py生成，请勿手改。
--- 迁移范围：base → 20261118_20；包含Alembic版本表。
--- 迁移、冻结实现及生成器SHA-256：b7bf0fd99fd0f6a240b2edb8354f193b18f54ed8276290de30a6aff467f07693
+-- 迁移范围：base → 20261128_23；包含Alembic版本表。
+-- 迁移、冻结实现及生成器SHA-256：561f69b95206f08c517ef8b5ef1ae8e4d46f9c884993211c92d2ada64fb32c00
 -- 仅用于PostgreSQL17空库；先准备pdd_app/pdd_ingest角色和目标库。
 -- 使用数据库所有者执行；不含凭据/业务数据；已有库禁止重放。
 -- 使用方式和后续升级见docs/database-schema/migration-plan.md。
@@ -4921,6 +4921,235 @@ REVOKE ALL ON FUNCTION public.pdd_region_gc_block(integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.pdd_region_gc_block(integer) TO pdd_ingest;
 
 UPDATE public.alembic_version_v2 SET version_num='20261118_20' WHERE public.alembic_version_v2.version_num = '20261116_19';
+
+-- Running upgrade 20261118_20 -> 20261127_21
+
+CREATE TABLE public.forecast_sop_source (
+      document_id text PRIMARY KEY CHECK(document_id ~ '^[A-Za-z0-9]{20,64}$'
+        AND (document_id='H3svdLyEYoxsK3xgeBOceOxfnMc'
+          OR current_database() ~ '^pdd_operations_v2_test_[0-9a-f]{12}$')),
+      source_url text NOT NULL CHECK(source_url='https://kocotree.feishu.cn/docx/'||document_id),
+      revision bigint CHECK(revision>0),
+      version_revision bigint,
+      state text NOT NULL CHECK(state IN ('pending','ready','stale','unavailable')),
+      reason text CHECK(reason IN ('updating','forbidden','not_found','deleted','temporary',
+        'revision_changed','revision_regressed','compiler_failed','unsupported_rule')),
+      checked_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+      verified_at timestamptz,
+      CHECK(version_revision IS NULL OR (revision IS NOT NULL AND version_revision=revision)),
+      CHECK((state IN ('ready','stale'))=(version_revision IS NOT NULL)),
+      CHECK(version_revision IS NULL OR verified_at IS NOT NULL));
+
+CREATE UNIQUE INDEX uq_forecast_single_source ON public.forecast_sop_source((true));
+
+CREATE TABLE public.forecast_sop_versions (
+      document_id text NOT NULL
+        REFERENCES public.forecast_sop_source(document_id) ON DELETE RESTRICT,
+      revision bigint NOT NULL CHECK(revision>0),
+      content text NOT NULL,
+      content_sha256 text NOT NULL
+        CHECK(content_sha256=encode(sha256(convert_to(content,'UTF8')),'hex')),
+      rule jsonb CHECK(jsonb_typeof(rule)='object'),
+      synced_at timestamptz NOT NULL DEFAULT statement_timestamp(),
+      PRIMARY KEY(document_id,revision));
+
+ALTER TABLE public.forecast_sop_source
+      ADD FOREIGN KEY(document_id,version_revision)
+      REFERENCES public.forecast_sop_versions(document_id,revision) ON DELETE RESTRICT;
+
+CREATE TABLE public.forecast_monthly_snapshots (
+      month date NOT NULL CHECK(extract(day FROM month)=1),
+      input_version text NOT NULL CHECK(btrim(input_version)<>''),
+      cutoff date NOT NULL CHECK(date_trunc('month',cutoff)::date=month),
+      document_id text NOT NULL,
+      rule_revision bigint NOT NULL,
+      previous_input_version text CHECK(previous_input_version<>input_version),
+      payload jsonb NOT NULL CHECK(jsonb_typeof(payload)='object'
+        AND payload ? 'cutoff' AND jsonb_typeof(payload->'cutoff')='string'
+        AND (payload->>'cutoff')::date=cutoff
+        AND payload ? 'rule_revision' AND jsonb_typeof(payload->'rule_revision')='number'
+        AND (payload->>'rule_revision')::bigint=rule_revision),
+      created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+      PRIMARY KEY(month,input_version),
+      FOREIGN KEY(document_id,rule_revision)
+        REFERENCES public.forecast_sop_versions(document_id,revision) ON DELETE RESTRICT,
+      FOREIGN KEY(month,previous_input_version)
+        REFERENCES public.forecast_monthly_snapshots(month,input_version) ON DELETE RESTRICT);
+
+CREATE INDEX ix_forecast_monthly_previous
+      ON public.forecast_monthly_snapshots(month,cutoff DESC,created_at DESC,input_version);
+
+CREATE VIEW public.read_forecast_sop WITH (security_barrier=true) AS
+      WITH current_source AS (
+        SELECT s.document_id,s.source_url,s.revision,s.reason,s.checked_at,s.verified_at,
+          v.content,v.rule,v.synced_at,
+          CASE WHEN s.version_revision IS NULL THEN s.state
+               WHEN s.verified_at+interval '24 hours'<=statement_timestamp() THEN 'expired'
+               WHEN v.rule IS NULL THEN 'unsupported'
+               WHEN s.state='ready' THEN 'active' ELSE s.state END AS state
+        FROM public.forecast_sop_source s
+        LEFT JOIN public.forecast_sop_versions v
+          ON (s.document_id,s.version_revision)=(v.document_id,v.revision))
+      SELECT document_id,source_url,revision,state,
+        CASE WHEN state='expired' THEN 'verification_expired'
+             WHEN state='unsupported' THEN 'unsupported_rule' ELSE reason END AS reason,
+        CASE WHEN state IN ('active','stale','unsupported') THEN content END AS content,
+        CASE WHEN state IN ('active','stale') THEN rule END AS rule,checked_at,verified_at,synced_at
+      FROM current_source;
+
+GRANT SELECT ON public.read_forecast_sop TO pdd_app;
+
+GRANT SELECT ON public.read_forecast_sop TO pdd_ingest;
+
+GRANT SELECT ON public.forecast_monthly_snapshots TO pdd_app;
+
+GRANT SELECT,INSERT ON public.forecast_monthly_snapshots TO pdd_ingest;
+
+GRANT SELECT,INSERT ON public.forecast_sop_versions TO pdd_ingest;
+
+GRANT SELECT,INSERT ON public.forecast_sop_source TO pdd_ingest;
+
+GRANT UPDATE(revision,version_revision,state,reason,checked_at,verified_at)
+      ON public.forecast_sop_source TO pdd_ingest;
+
+COMMENT ON TABLE public.forecast_sop_source IS '单篇预测 SOP 的检查状态与已核对修订';
+
+COMMENT ON COLUMN public.forecast_sop_source.document_id IS '固定飞书文档标识；隔离验收可指定测试副本';
+
+COMMENT ON COLUMN public.forecast_sop_source.source_url IS '飞书原文地址';
+
+COMMENT ON COLUMN public.forecast_sop_source.revision IS '最近已知最高飞书修订号';
+
+COMMENT ON COLUMN public.forecast_sop_source.version_revision IS '当前可供读取的同一修订';
+
+COMMENT ON COLUMN public.forecast_sop_source.state IS '本地检查和发布状态';
+
+COMMENT ON COLUMN public.forecast_sop_source.reason IS '最近状态的固定原因码';
+
+COMMENT ON COLUMN public.forecast_sop_source.checked_at IS '最近尝试检查的时刻';
+
+COMMENT ON COLUMN public.forecast_sop_source.verified_at IS '最近成功核对所用修订的时刻';
+
+COMMENT ON TABLE public.forecast_sop_versions IS '按飞书修订冻结的预测原文与同版规则';
+
+COMMENT ON COLUMN public.forecast_sop_versions.document_id IS '所属飞书文档标识';
+
+COMMENT ON COLUMN public.forecast_sop_versions.revision IS '原文修订号';
+
+COMMENT ON COLUMN public.forecast_sop_versions.content IS '完整原文 Markdown 含原生表格';
+
+COMMENT ON COLUMN public.forecast_sop_versions.content_sha256 IS 'UTF-8 原文摘要';
+
+COMMENT ON COLUMN public.forecast_sop_versions.rule IS '已核对原文的受控计算模板及参数；空表示该修订暂不可执行';
+
+COMMENT ON COLUMN public.forecast_sop_versions.synced_at IS '本地首次接收此修订的时刻';
+
+COMMENT ON TABLE public.forecast_monthly_snapshots IS '同月真实预测运行及其前次比较版本';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.month IS '预测月份的第一日';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.input_version IS '固定经营输入、范围和规则的运行指纹';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.cutoff IS '本次预测经营截止日';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.document_id IS '计算所依据的 SOP 文档标识';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.rule_revision IS '本次计算的 SOP 修订号';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.payload IS '本次预测输出及聚合依据';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.previous_input_version IS '首次记录时相容的同月前次运行指纹，可空';
+
+COMMENT ON COLUMN public.forecast_monthly_snapshots.created_at IS '本次输入首次记录的时刻';
+
+COMMENT ON VIEW public.read_forecast_sop IS '当前可引用的预测 SOP、同版规则和状态';
+
+COMMENT ON COLUMN public.read_forecast_sop.document_id IS '所属飞书文档标识';
+
+COMMENT ON COLUMN public.read_forecast_sop.source_url IS '飞书原文地址';
+
+COMMENT ON COLUMN public.read_forecast_sop.revision IS '原文修订号';
+
+COMMENT ON COLUMN public.read_forecast_sop.state IS '供问答使用的当前有效、暂时未核、不可执行、过期、待同步或已撤下状态';
+
+COMMENT ON COLUMN public.read_forecast_sop.reason IS '最近状态的固定原因码';
+
+COMMENT ON COLUMN public.read_forecast_sop.content IS '完整原文 Markdown 含原生表格';
+
+COMMENT ON COLUMN public.read_forecast_sop.rule IS '已核对原文的受控计算模板及参数；空表示该修订暂不可执行';
+
+COMMENT ON COLUMN public.read_forecast_sop.checked_at IS '最近尝试检查的时刻';
+
+COMMENT ON COLUMN public.read_forecast_sop.verified_at IS '最近成功核对所用修订的时刻';
+
+COMMENT ON COLUMN public.read_forecast_sop.synced_at IS '本地首次接收此修订的时刻';
+
+UPDATE public.alembic_version_v2 SET version_num='20261127_21' WHERE public.alembic_version_v2.version_num = '20261118_20';
+
+-- Running upgrade 20261127_21 -> 20261127_22
+
+DO $$ BEGIN
+      IF NOT pg_try_advisory_xact_lock(hashtext('project-source-sync'))
+         OR NOT pg_try_advisory_xact_lock(hashtext('m3-shop_refunds'))
+         OR NOT pg_try_advisory_xact_lock(hashtext('pdd-database-maintenance')) THEN
+        RAISE EXCEPTION 'F01_GMV_MIGRATION_BUSY';
+      END IF;
+    END $$;
+
+ALTER TABLE public.shop_refund_records
+      ADD COLUMN source_reported_gmv numeric,
+      ADD COLUMN source_adjustment_amount numeric,
+      ADD CONSTRAINT ck_shop_refund_records_source_reported_gmv_finite
+        CHECK (source_reported_gmv NOT IN
+          ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric)),
+      ADD CONSTRAINT ck_shop_refund_records_source_adjustment_amount_finite
+        CHECK (source_adjustment_amount NOT IN
+          ('NaN'::numeric,'Infinity'::numeric,'-Infinity'::numeric));
+
+COMMENT ON COLUMN public.shop_refund_records.source_reported_gmv
+      IS 'F01销售收入（GMV）源公式原值，元；基础金额空时不计入预测';
+
+COMMENT ON COLUMN public.shop_refund_records.source_adjustment_amount
+      IS 'F01做单金额来源原值，元；空值保留，不从来源GMV再次扣减';
+
+UPDATE public.alembic_version_v2 SET version_num='20261127_22' WHERE public.alembic_version_v2.version_num = '20261127_21';
+
+-- Running upgrade 20261127_22 -> 20261128_23
+
+DO $$ BEGIN
+      IF NOT pg_try_advisory_xact_lock(726411,20261127) THEN
+        RAISE EXCEPTION 'FORECAST_INTERPRETATION_BUSY';
+      END IF;
+    END $$;
+
+CREATE OR REPLACE VIEW public.read_forecast_sop WITH (security_barrier=true) AS
+      WITH current_source AS (
+        SELECT s.document_id,s.source_url,s.revision,s.reason,s.checked_at,s.verified_at,
+          v.content,v.rule,v.synced_at,
+          CASE WHEN s.version_revision IS NULL THEN s.state
+               WHEN s.verified_at+interval '24 hours'<=statement_timestamp() THEN 'expired'
+               WHEN v.rule IS NULL OR v.rule->>'status'='rejected' THEN 'unsupported'
+               WHEN s.state='ready' THEN 'active' ELSE s.state END AS state
+        FROM public.forecast_sop_source s
+        LEFT JOIN public.forecast_sop_versions v
+          ON (s.document_id,s.version_revision)=(v.document_id,v.revision))
+      SELECT document_id,source_url,revision,state,
+        CASE WHEN state='expired' THEN 'verification_expired'
+             WHEN state='unsupported' AND rule->>'status'='rejected' THEN 'interpretation_rejected'
+             WHEN state='unsupported' THEN 'unsupported_rule' ELSE reason END AS reason,
+        CASE WHEN state IN ('active','stale','unsupported') THEN content END AS content,
+        CASE WHEN state IN ('active','stale') THEN rule END AS rule,checked_at,verified_at,synced_at
+        ,CASE WHEN state='unsupported' AND rule->>'status'='rejected'
+                 THEN rule->'issues' ELSE '[]'::jsonb END AS issues
+      FROM current_source;
+
+COMMENT ON COLUMN public.forecast_sop_versions.rule
+      IS '同版已核验的规则与解读来源，或拒绝原因与引文；历史空值表示当时无法编译';
+
+COMMENT ON COLUMN public.read_forecast_sop.issues
+      IS '当前获准读取修订的拒绝原因、章节和摘句，其他状态为空数组';
+
+UPDATE public.alembic_version_v2 SET version_num='20261128_23' WHERE public.alembic_version_v2.version_num = '20261127_22';
 
 DO $permissions$ BEGIN
   EXECUTE format('REVOKE ALL ON DATABASE %I FROM PUBLIC', current_database());

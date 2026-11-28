@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { BusinessReportView } from "./BusinessReport";
+import { BusinessReportChart, BusinessReportView } from "./BusinessReport";
 import type { BusinessReport } from "./contracts";
 
 afterEach(() => {
@@ -81,8 +81,8 @@ const report: BusinessReport = {
 };
 
 it("保留评分、pp与微小数的小数位，真实零与NULL分别显示", () => {
-  render(<BusinessReportView report={report} showChart={false} />);
-  fireEvent.click(screen.getByText("查看指标与数据依据"));
+  render(<BusinessReportView report={report} question="店铺评分" />);
+  fireEvent.click(screen.getByRole("button", { name: "查看明细" }));
   const facts = screen.getAllByRole("table")[0];
   for (const [label, expected] of [
     ["评分", "95.5"],
@@ -98,8 +98,8 @@ it("保留评分、pp与微小数的小数位，真实零与NULL分别显示", (
 });
 
 it("分页明细只报告已返回范围与总体条数，隐藏内部链接键", () => {
-  render(<BusinessReportView report={report} showChart={false} />);
-  fireEvent.click(screen.getByText("查看指标与数据依据"));
+  render(<BusinessReportView report={report} question="店铺评分" />);
+  fireEvent.click(screen.getByRole("button", { name: "查看明细" }));
   expect(screen.getByText("显示第21—22条，共53条")).toBeTruthy();
   const table = screen.getByRole("table", { name: "店铺明细" });
   expect(within(table).getAllByRole("row")).toHaveLength(3);
@@ -109,7 +109,7 @@ it("分页明细只报告已返回范围与总体条数，隐藏内部链接键"
   expect(screen.queryByRole("img", { name: "评分趋势" })).toBeNull();
 });
 
-it("空分页不补零或展示伪造行，来源及版本仍可查看", () => {
+it("空分页不补零或展示伪造行，来源直接可见", () => {
   render(
     <BusinessReportView
       report={{
@@ -117,15 +117,13 @@ it("空分页不补零或展示伪造行，来源及版本仍可查看", () => {
         facts: [],
         tables: [{ ...report.tables[0], rows: [], offset: 0, total: 0 }],
       }}
-      showChart={false}
+      question="店铺明细"
     />,
   );
-  fireEvent.click(screen.getByText("查看指标与数据依据"));
   expect(screen.getByText("当前没有匹配记录，共0条")).toBeTruthy();
   expect(screen.getByRole("table").querySelectorAll("tbody tr")).toHaveLength(0);
-  fireEvent.click(screen.getByText("来源与口径"));
   expect(screen.getByText("已发布评分")).toBeTruthy();
-  expect(screen.getByText("数据版本 v1")).toBeTruthy();
+  expect(screen.queryByText("数据版本 v1")).toBeNull();
 });
 
 it("按需展示分组趋势并能切换指标", () => {
@@ -137,7 +135,7 @@ it("按需展示分组趋势并能切换指标", () => {
     },
   );
   render(
-    <BusinessReportView
+    <BusinessReportChart
       report={{
         ...report,
         series: [
@@ -154,7 +152,7 @@ it("按需展示分组趋势并能切换指标", () => {
           },
         ],
       }}
-      showChart
+      question="评分趋势"
     />,
   );
   expect(screen.getByRole("img", { name: "评分趋势" })).toBeTruthy();

@@ -15,12 +15,14 @@ const riskReference = z.object({
   date_from: z.string(),
   date_to: z.string(),
 });
+const forecastContext = z.object({ month: z.string(), cutoff: z.string().nullable() });
 const explanationContext = z.object({
   view: z.enum(["all", "products", "promotion_store", "promotion_product", "sales", "aftersales"]),
   report_id: z.string().nullable().optional(),
 });
 export type PageContext = {
   explanation?: z.infer<typeof explanationContext> | null;
+  forecast?: z.infer<typeof forecastContext> | null;
   risk_reference?: z.infer<typeof riskReference> | null;
   domain?:
     | "all"
@@ -201,6 +203,7 @@ export const chatAnswer = z.object({
         ])
         .optional(),
       explanation: explanationContext.nullish(),
+      forecast: forecastContext.nullish(),
       risk_reference: riskReference.nullish(),
       versions: z.record(z.string(), z.string()),
       date_from: z.string().optional(),
@@ -228,6 +231,8 @@ export const chatAnswer = z.object({
       output_tokens: z.number().optional(),
       requests: z.number().optional(),
       tool_calls: z.number().optional(),
+      sop_review_requests: z.number().nullish(),
+      sop_review_usage_complete: z.boolean().optional(),
     })
     .optional(),
 });

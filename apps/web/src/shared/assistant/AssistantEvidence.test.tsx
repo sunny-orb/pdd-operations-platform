@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AssistantEntry, AssistantWorkspace } from "./AssistantWorkspace";
 import { AssistantPageContext } from "./AssistantContext";
 import { startPanelSession } from "../layouts/panelLayout";
-import type { BusinessReport } from "./contracts";
+import type { AssistantReport, BusinessReport, PageContext } from "./contracts";
 
 let endSession: () => void;
 beforeEach(() => {
@@ -90,7 +91,12 @@ const definitions: BusinessReport = {
     },
   ],
 };
-async function showAnswer(question: string, reports: BusinessReport[], evidence = "本次查询依据") {
+async function showAnswer(
+  question: string,
+  reports: (AssistantReport | BusinessReport)[],
+  evidence = "本次查询依据",
+  page = { path: "/", title: "运营看板中心", domain: "all" as PageContext["domain"] },
+) {
   vi.stubGlobal("fetch", (url: string) =>
     Promise.resolve({
       ok: true,
@@ -109,9 +115,9 @@ async function showAnswer(question: string, reports: BusinessReport[], evidence 
     }),
   );
   render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[page.path]}>
       <AssistantWorkspace>
-        <AssistantPageContext page="运营看板中心" subject={null} context={{ domain: "all" }} />
+        <AssistantPageContext page={page.title} subject={null} context={{ domain: page.domain }} />
         <AssistantEntry />
       </AssistantWorkspace>
     </MemoryRouter>,
@@ -136,11 +142,31 @@ it("阈值解释把多份规则及经营报告放入一个默认收起的依据�
   expect(screen.queryAllByRole("img", { name: /趋势/ })).toHaveLength(0);
   fireEvent.click(summary);
   expect(details.open).toBe(true);
+  await within(details).findByText("已发布销售");
   expect(details.querySelectorAll("details")).toHaveLength(0);
   expect(within(details).getAllByText("ROI低于2，且点击至少100次")).toHaveLength(2);
   expect(within(details).getByText("¥9,007,199,254,740,993.01")).toBeTruthy();
   expect(within(details).getByText("已发布销售")).toBeTruthy();
   expect(within(details).getByText("2026-11-20 至 2026-11-23")).toBeTruthy();
+});
+
+it("不同 SOP 即使修订号相同也各自保留版本和可点击的原文", async () => {
+  const documents = ["refunds", "quality"].map((key) => ({
+    ...definitions,
+    capability: "business_knowledge",
+    title: key,
+    source: "原文 " + key,
+    scope: { document_key: key, document_url: "https://kocotree.feishu.cn/docx/" + key },
+    versions: { ["sop_" + key]: "7" },
+    data_version: "7",
+  }));
+  await showAnswer("这两篇 SOP 各怎么要求？", documents);
+  fireEvent.click(await screen.findByText("数据与规则依据"));
+  for (const key of ["refunds", "quality"]) {
+    const link = await screen.findByRole("link", { name: "原文 " + key });
+    expect(link.getAttribute("href")).toBe("https://kocotree.feishu.cn/docx/" + key);
+  }
+  expect(screen.getAllByText(/飞书修订号.*7/)).toHaveLength(2);
 });
 
 it.each(["成交额是多少？", "数据哪天截止？", "这项指标怎么算？", "你能查什么？"])(
@@ -171,6 +197,7 @@ it("自然下滑追问用一个主图辅助，多域依据只去重完全相同�
   expect(screen.getAllByRole("combobox", { name: "趋势指标" })).toHaveLength(1);
   fireEvent.click(summary);
   const details = summary.closest("details")!;
+  await within(details).findByText("推广分析");
   expect(details.querySelectorAll(".assistant-evidence-report")).toHaveLength(3);
   expect(within(details).getByText("推广分析")).toBeTruthy();
   expect(within(details).getAllByText("店铺销售")).toHaveLength(2);
@@ -283,6 +310,205 @@ it("没有报告和来源时不显示空依据", async () => {
   await showAnswer("你好", [], "");
   expect(screen.queryByText("数据与规则依据")).toBeNull();
   expect(document.querySelectorAll(".assistant-report")).toHaveLength(0);
+});
+
+const forecast: BusinessReport = {
+  ...sales,
+  capability: "sales_forecast",
+  title: "六店月末 GMV 预测",
+  source: "六店销售日报、渠道月目标",
+  data_version: "inputs-cd64a710",
+  versions: { forecast_sop: "125", forecast_inputs: "inputs-cd64a710" },
+  notes: [
+    "月末中心估计 = 累计 GMV + 剩余天数 × 加权日均。",
+    "加权日均 = 近 2 日销售日均 × 75% + 近 4 日销售日均 × 25%。",
+    "回算采用当前已发布的日报。",
+  ],
+};
+const knowledge: BusinessReport = {
+  ...definitions,
+  capability: "business_knowledge",
+  title: "公共预测 SOP",
+  source: "月度 GMV 预测方法",
+  data_version: "125",
+  versions: { forecast_sop: "125" },
+  tables: [],
+  notes: ["第三节 月末预测"],
+};
+
+it.each([
+  { page: { path: "/aftersales", title: "售后分析", domain: "aftersales" }, reports: [knowledge] },
+  { page: { path: "/sales", title: "店铺销售", domain: "sales" }, reports: [forecast, knowledge] },
+] as const)(
+  "在$page.title查看预测或规则时，首层保留来源和一份飞书修订号",
+  async ({ page, reports }) => {
+    await showAnswer(
+      "这个月的预测方法是什么？",
+      [
+        ...reports,
+        { ...definitions, versions: { sales: "unrelated", forecast_sop: "other-version" } },
+      ],
+      undefined,
+      page,
+    );
+    const summary = await screen.findByText("数据与规则依据");
+    expect(screen.queryByText("第三节 月末预测")).toBeNull();
+    fireEvent.click(summary);
+    const evidence = within(summary.closest("details")!);
+    await evidence.findByText("第三节 月末预测");
+    expect(evidence.getAllByText(/飞书修订号.*125/)).toHaveLength(1);
+    expect(evidence.queryByText(/other-version|inputs-cd64a710|数据版本/)).toBeNull();
+    const method = evidence.getByRole("region", { name: "公共预测 SOP数据" });
+    expect(within(method).getByText("月度 GMV 预测方法")).toBeTruthy();
+    expect(within(method).queryByRole("button")).toBeNull();
+    if (reports.includes(forecast)) {
+      expect(evidence.getByText("六店销售日报、渠道月目标")).toBeTruthy();
+      expect(evidence.getByText("2026-11-20 至 2026-11-23")).toBeTruthy();
+      expect(evidence.getByText(forecast.notes[0])).toBeTruthy();
+      expect(evidence.getByText(forecast.notes[1])).toBeTruthy();
+      expect(evidence.queryByText(forecast.notes[2])).toBeNull();
+    }
+  },
+);
+
+it("展开销售依据先看少量事实，键盘查看完整分页、单位和各自日期上的逐日数据", async () => {
+  const longNote = "各来源的覆盖说明。".repeat(30);
+  const rows = Array.from({ length: 14 }, (_, index) => ({ name: "店铺" + (index + 1) }));
+  const table = {
+    title: "店铺分页",
+    columns: [{ key: "name", label: "店铺", unit: "text" as const }],
+    rows,
+    offset: 20,
+    total: 56,
+  };
+  await showAnswer("销售汇总", [
+    {
+      ...sales,
+      scope: { category: ["女装", "童装"], shop_id: "甲店" },
+      facts: [
+        ...sales.facts,
+        ...["订单数", "访客", "店铺数", "尾项"].map((label, i) => ({
+          key: "metric" + i,
+          label,
+          value: String(i),
+          unit: "number" as const,
+          status: "observed",
+          reason: null,
+        })),
+      ],
+      tables: [table, { ...table, title: "另一分页" }],
+      notes: ["成交按支付日统计。", longNote],
+      series: [
+        ...sales.series,
+        {
+          key: "refund",
+          label: "退款率",
+          unit: "percent",
+          points: [
+            { date: "2026-11-21", value: "0.125" },
+            { date: "2026-11-22", value: null },
+          ],
+        },
+      ],
+    },
+  ]);
+  const summary = await screen.findByText("数据与规则依据");
+  expect(screen.queryAllByText("店铺14")).toHaveLength(0);
+  fireEvent.click(summary);
+  const evidence = within(summary.closest("details")!);
+  await evidence.findByText("已发布销售");
+  expect(evidence.getByText(/女装.*童装/)).toBeTruthy();
+  expect(evidence.getByText(/甲店/)).toBeTruthy();
+  expect(evidence.getByText("¥9,007,199,254,740,993.01")).toBeTruthy();
+  expect(evidence.queryByText("尾项")).toBeNull();
+  expect(evidence.queryByText("店铺14")).toBeNull();
+  expect(evidence.queryByText("退款率逐日明细")).toBeNull();
+  expect(evidence.queryByText(longNote)).toBeNull();
+  const button = evidence.getByRole("button", { name: "查看明细", expanded: false });
+  button.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(evidence.getAllByText("店铺14")).toHaveLength(2);
+  expect(evidence.getAllByText("显示第21—34条，共56条")).toHaveLength(2);
+  expect(evidence.getByText("尾项")).toBeTruthy();
+  expect(evidence.getByText(longNote)).toBeTruthy();
+  expect(evidence.getByText("12.50%").closest("tr")?.textContent).toContain("2026-11-21");
+  expect(evidence.getByText("2026-11-22").closest("tr")?.textContent).toContain("—");
+  expect(evidence.getByText("¥0.00").closest("tr")?.textContent).toContain("2026-11-23");
+  await userEvent.keyboard(" ");
+  expect(evidence.queryByText("店铺14")).toBeNull();
+});
+
+it("同名跨店单款的来源、日期和缺记录覆盖直接可见，详细表按报告独立展开", async () => {
+  const product: AssistantReport = {
+    kind: "product_performance",
+    product: { listing_id: "s/a", shop_id: "s", name: "春风", shop_name: "甲店" },
+    period: {
+      date_from: "2026-11-01",
+      date_to: "2026-11-03",
+      previous_from: "2026-10-29",
+      previous_to: "2026-10-31",
+    },
+    data_version: "product-hash",
+    evidence: {
+      source: "商品日经营",
+      rules: {
+        version: "rule-test",
+        status: "partial",
+        date_to: "2026-11-03",
+        findings: [{ label: "流量下滑", basis: "访客低于前期" }],
+        checks: [{ key: "roi", label: "投产", state: "unavailable", reason: "缺少投放记录" }],
+      },
+    },
+    coverage: {
+      current: { observed_days: 2, expected_days: 3, missing_dates: ["2026-11-02"] },
+      previous: { observed_days: 3, expected_days: 3, missing_dates: [] },
+      complete_through: "2026-11-01",
+    },
+    metrics: [
+      {
+        key: "revenue",
+        label: "成交额",
+        unit: "currency",
+        current: "0",
+        previous: null,
+        status: "partial",
+        reason: "只有两天有记录",
+      },
+    ],
+    series: [{ date: "2026-11-03", values: { revenue: "0" } }],
+  };
+  await showAnswer(
+    "这些商品的经营结果",
+    [
+      product,
+      {
+        ...product,
+        product: { ...product.product, listing_id: "t/a", shop_id: "t", shop_name: "乙店" },
+      },
+    ],
+    undefined,
+    { path: "/products", title: "商品数据", domain: "products" },
+  );
+  const summary = await screen.findByText("数据与规则依据");
+  fireEvent.click(summary);
+  const evidence = within(summary.closest("details")!);
+  const [shopA, shopB] = await evidence.findAllByRole("region", { name: "商品经营数据" });
+  expect(shopA.textContent).toContain("春风");
+  expect(shopA.textContent).toContain("甲店");
+  expect(shopB.textContent).toContain("乙店");
+  expect(shopA.textContent).toContain("商品日经营");
+  expect(shopA.textContent).toContain("2/3 天");
+  expect(shopA.textContent).toContain("完整截至日 2026-11-01");
+  expect(shopA.textContent).toContain("流量下滑");
+  expect(shopA.textContent).toContain("¥0.00");
+  expect(shopA.textContent).toContain("—");
+  expect(shopA.textContent).not.toContain("product-hash");
+  expect(within(shopA).queryByText("逐日明细")).toBeNull();
+  fireEvent.click(within(shopA).getByRole("button", { name: "查看明细" }));
+  expect(within(shopA).getByRole("table", { name: "逐日明细" })).toBeTruthy();
+  expect(shopA.textContent).toContain("缺少投放记录");
+  expect(shopA.textContent).toContain("本期无记录日期 2026-11-02");
+  expect(within(shopB).queryByText("逐日明细")).toBeNull();
 });
 
 it.each(["投产趋势怎么样？", "退款趋势怎么样？"])(

@@ -21,7 +21,7 @@
 
 来源更新监测追加对象“一个物理来源最近检查和接收标记”，按本流程的专用设计见[同步监测](implementation/project-sync-implementation.md#source-update-monitor)，字段与范式见[检查状态字典](database-schema/source-checkpoints.md)。经营事实、版本、报告关系不变。
 
-当前应用物理范围包括原30张经营表、天气发布、来源检查、保留维护、内容复用及[每周对账状态](database-schema/weekly-reconciliation.md)对象；完整数量与字段统一见[字段字典](database-schema/README.md)。`schema.sql`从base到当前head整体生成，已有库必须按Alembic升级，不能重放空库初始化SQL。新增内容复用对象关系、存储表示和事务约束见[专用设计](database-schema/content-reuse.md)，不改变经营对象和指标。
+当前应用物理范围包括原30张经营表、天气发布、来源检查、保留维护、内容复用、[每周对账状态](database-schema/weekly-reconciliation.md)与[预测知识和运行](database-schema/forecast-sop.md)对象；完整数量与字段统一见[字段字典](database-schema/README.md)。`schema.sql`从base到当前head整体生成，已有库必须按Alembic升级，不能重放空库初始化SQL。新增内容复用对象关系、存储表示和事务约束见[专用设计](database-schema/content-reuse.md)，不改变经营对象和指标。22 在既有 F01 日报原行增补两个来源金额，关联、回退限制与旧数据解释见[预测日报输入](database-schema/forecast-gmv-input.md)。23 复用同一批文档修订，在知识视图增加已核验拒绝原因与引文，事务、权限及回退见[预测知识与运行](database-schema/forecast-sop.md)。
 
 ## 19：数据库中文说明补齐（本地）
 

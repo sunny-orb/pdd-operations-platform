@@ -28,6 +28,8 @@ Capability = Literal[
     "sales_trend",
     "sales_shops",
     "sales_targets",
+    "sales_forecast",
+    "business_knowledge",
     "sales_ratings",
     "sales_regions",
     "sales_product_regions",
@@ -56,16 +58,25 @@ CAPABILITIES = {
     "sales_performance": ("sales", "店铺经营、流量、转化、退款与推广"),
     "sales_trend": ("sales", "店铺经营逐日趋势"),
     "sales_shops": ("sales", "全部店铺贡献和排名"),
+    "sales_forecast": ("sales", "按生效的公共SOP预测六店月末GMV、情景和目标进度"),
+    "business_knowledge": (
+        "definitions",
+        "公共 SOP 短目录，以及所选文档的当前原文与出处",
+    ),
     "sales_targets": ("sales", "月度GMV目标及达成"),
     "sales_ratings": ("sales", "店铺评级和评分"),
     "sales_regions": ("sales", "店铺地区成交分布"),
     "sales_product_regions": ("sales", "产品地区实发实退，独立于成交口径"),
     "sales_product_options": ("sales", "地区查询可选产品编码"),
-    "aftersales_overview": ("aftersales", "售后报告三率、原因与规则建议"),
-    "aftersales_analysis": ("aftersales", "品类/款式/环比/同比/品质/历史分析"),
+    "aftersales_overview": ("aftersales", "售后报告中的退款率、退货原因及优先核查的款式"),
+    "aftersales_analysis": ("aftersales", "按品类或款式拆分的退货分析，以及环比、同比和品质问题"),
     "aftersales_options": ("aftersales", "可选报告、品类与款式目录"),
     "weather": ("weather", "已发布全国天气及预警"),
     "data_status": ("data_status", "本地数据覆盖、最近更新和失败状态"),
+}
+DATA_BOUNDARIES = {
+    "inventory": "看板还没接入库存和实时可售数量。",
+    "listing_aftersales": "售后报告按品类或款号统计，目前还不能对应到某家店的商品链接。",
 }
 
 
@@ -74,8 +85,14 @@ def domain_for(capability, mode="product"):
     return f"promotion_{mode}" if domain == "promotion" else domain
 
 
-def catalog(domain="all"):
+def enabled(capability: Capability, public_sops_enabled: bool) -> bool:
+    return public_sops_enabled or capability not in {"sales_forecast", "business_knowledge"}
+
+
+def catalog(domain="all", *, public_sops_enabled=True):
     hints = {
+        "sales_forecast": "仅六店、一个自然月；截至日须在问题中明示",
+        "business_knowledge": "省略document_key看目录；传document_key及keyword读原文",
         "sales_trend": (
             "view选shop_revenue/shop_visitors/buyer_conversion/aov/"
             "promotion_spend/promotion_ctr/promotion_roi/refund_rate"
@@ -97,7 +114,8 @@ def catalog(domain="all"):
     return [
         dict(capability=key, description=label, parameters=hints.get(key, "沿用当前范围，可分页"))
         for key, (group, label) in CAPABILITIES.items()
-        if domain == "all" or group == domain or domain.startswith(group + "_")
+        if enabled(key, public_sops_enabled)
+        and (domain == "all" or group == domain or domain.startswith(group + "_"))
     ]
 
 
@@ -123,7 +141,15 @@ def describe(engine, domain, *, rows_cache=None):
     return read_metadata(engine, domain=domain)
 
 
-def read(engine, capability, params, *, rows_cache=None):
+def read(engine, capability, params, *, rows_cache=None, sop_session=None):
+    if capability == "business_knowledge" and "document_key" in params:
+        from .knowledge_answers import read_document
+
+        return read_document(params, session=sop_session)
+    if capability in {"sales_forecast", "business_knowledge"}:
+        from .forecast_reports import read as read_forecast
+
+        return read_forecast(engine, capability, params)
     if capability == "rule_definitions":
         from .rule_definitions import read as read_rules
 

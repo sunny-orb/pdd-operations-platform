@@ -32,7 +32,7 @@ PDD_DEV_API_TARGET=https://dashboard.example.com
 
 ### 本机 AI 问答配置
 
-本机和生产推荐使用 DeepSeek 官方快速模型，关闭深度思考。设置 `apps/api/.env` 后重启 API，右侧输入框可直接提问。[设置定义](../apps/api/app/core/config.py) · [无密钥样例](../apps/api/.env.example)
+本机和生产使用 DeepSeek 官方快速模型。思考模式由各环境独立配置，默认关闭。本机试用在 `apps/api/.env` 中设置，重启 API 后从右侧助手提问。[设置定义](../apps/api/app/core/config.py) · [无密钥样例](../apps/api/.env.example)
 
 | 环境变量                                                          | 默认值／推荐配置                                      | 用途                                                 |
 | ----------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
@@ -40,17 +40,30 @@ PDD_DEV_API_TARGET=https://dashboard.example.com
 | `ASSISTANT_MODEL`                                                 | `deepseek:deepseek-flash`（样例）                     | 官方快速型号。代码保留原百炼型号兼容，始终只启用一个 |
 | `ASSISTANT_BUSINESS_DATA_ENABLED`、`ASSISTANT_BUSINESS_PROVIDERS` | false、`[]`                                           | 发送获准数据时分别设为 true 和 `["deepseek"]`        |
 | `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL`                           | 空密钥，`https://api.deepseek.com`                    | DeepSeek 官方密钥和入口，仅由后端读取                |
+| `DEEPSEEK_THINKING_ENABLED`                                       | false，本机试用设为 true                              | 为实际调用官方模型的分析题开启高强度思考             |
 | `DATABASE_URL`                                                    | 空                                                    | 经营数据来自已初始化的应用 PostgreSQL                |
 | `DB_POOL_SIZE`、`DB_MAX_OVERFLOW`、`DB_CONNECT_TIMEOUT_SECONDS`   | 代码默认 8 / 4 / 5 秒，样例 4 / 0 / 5 秒              | 连接池、溢出连接和连接等待                           |
 | `CONTENT_REUSE_ENABLED`                                           | false                                                 | 独立的数据库试验开关，问答沿用关闭值                 |
 
-在仓库根目录运行 `npm run dev`。用 `GET /api/v1/assistant/models` 核对 DeepSeek 和业务数据开关，再用一条获准的问题验证。官方请求设 temperature=0.3、`thinking={"type":"disabled"}`，沿用供应商的输出长度默认值。兼容旧百炼配置时仍用 `BAILIAN_API_KEY` / `BAILIAN_BASE_URL`、供应商 `bailian` 和 `enable_thinking=false`，两家密钥不互相回退。切换后重启 API；旧密钥从运行配置移除。
+在仓库根目录运行 `npm run dev`。用 `GET /api/v1/assistant/models` 核对供应商和业务数据开关。要试思考效果，可问“店铺推广近期先排查哪项指标，依据是什么”。官方适配器负责接续工具调用，页面只展示回答和数据依据。正式预测先核对飞书修订，同版直接复算，新版的解读计入当次请求。旧百炼入口继续使用独立凭据及 `enable_thinking=false`。[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
 
 按响应头 `X-Request-ID` 在 Uvicorn 日志关联 `assistant_model`（每次模型往返耗时）、`assistant_tool`（已执行的工具名和耗时）与 `assistant_result`（本轮模型请求／工具调用、领域读取次数和耗时、SQL 累计耗时、首条正文增量及总耗时）。`first_delta_ms` 从后端开始执行问答计时，浏览器绘制另测；JSON 请求这一项为空。日志仅记摘要。
 
 每进程一个查询线程，数据库单语句期限 5 秒。生成预算和锁等待由代码设置，数值见[接口说明](api/ai-assistant.md)。Docker、HTTPS 和发布操作见[部署手册](implementation/deployment.md)。
 
 生产沿用网站匿名访问决定。启用 `ASSISTANT_PRODUCTION_ENABLED=true`、`ASSISTANT_BUSINESS_DATA_ENABLED=true` 与获准供应商 `["deepseek"]`，在权限600的 `.env.runtime` 填入 `DEEPSEEK_API_KEY`。正式域名须在 `CORS_ORIGINS`。通过 `ASSISTANT_MAX_CONCURRENT=2`、`ASSISTANT_REQUESTS_PER_MINUTE=20` 限制请求；查询仍仅用一个后台线程，模型请求90秒超时。关闭生产开关即可停用模型问答。此方式适用现有公开访问范围，接入按账号区分的店铺权限需另行实施。
+
+<a id="forecast-sop-local"></a>
+
+### 本机公共 SOP 与正式预测
+
+普通 SOP 取自[已授权短目录](../apps/api/app/modules/knowledge/public_sops.toml)。首次登记做法类文档时填写短标识、标题、适用场景和飞书文档 ID，再重启本地 API。随后香草只需改飞书原文，下次有人询问时核对修订。普通查数和列目录都在本地完成。
+
+飞书访问沿用本机已登录的 `lark-cli` 用户身份。若后台服务找不到命令，在 `apps/api/.env` 的 `LARK_CLI_BIN` 填本机原生可执行文件的绝对路径，再重启本地 API。从看板提问“预测 SOP 用的是哪一版”可验证服务实际读到了原文。
+
+正式预测要求应用库已升到 `20261128_23`、F01 已发布六店日报，且已配置官方 DeepSeek。提问触发固定的独立核验命令。问答保留只读身份；写入规则版本由本地任务身份完成。新版本每次解读最多调用一次模型，输出上限 2,048 token，60 秒超时。临时失败在下次相关提问时重试。手动诊断仍可运行 `npm run sync:forecast`。
+
+定时器仅在当日正式规则经提问核验后，才使用本地数据留预测快照。无需开启五分钟飞书轮询。公司部署须另行核验稳定只读身份与文档权限。
 
 ## 本地 PostgreSQL
 

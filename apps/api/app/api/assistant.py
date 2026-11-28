@@ -15,6 +15,7 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 
 from app.core.config import Settings
 from app.modules.assistant.chat import ChatScope, Product, QueryRun, answer_question, build_agent
+from app.modules.assistant.conversation import plan_turn
 from app.modules.product_board.repository import BoardError
 
 router = APIRouter(prefix="/api/v1/assistant")
@@ -190,11 +191,17 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
     except TimeoutError:
         return unavailable(429, "当前提问较多，请稍后再试")
     try:
-        async with state.assistant_agent_lock:
-            if state.assistant_agent is None:
-                state.assistant_agent = await state.assistant_resources.enter_async_context(
-                    build_agent(settings)
-                )
+        plan = plan_turn(
+            body.question,
+            body.history[-1].question if body.history else "",
+            has_forecast=bool(body.context.forecast),
+        )
+        if plan.needs_agent:
+            async with state.assistant_agent_lock:
+                if state.assistant_agent is None:
+                    state.assistant_agent = await state.assistant_resources.enter_async_context(
+                        build_agent(settings)
+                    )
         if body.generation in state.assistant_active:
             return unavailable(409, "此问题正在回答，请等待或停止后重试")
         task = asyncio.create_task(
@@ -208,6 +215,10 @@ async def chat_response(request: Request, body: ChatInput, emit=None):
                     body.context,
                     body.question,
                     executor=state.assistant_query_executor,
+                    sop_executor=state.assistant_sop_executor,
+                    public_sops_enabled=settings.app_env == "development",
+                    model_id=name,
+                    plan=plan,
                     emit=emit,
                     request_id=request.state.request_id,
                     aftersales_rows_cache=state.aftersales_overview_cache.rows,

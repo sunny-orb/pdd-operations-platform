@@ -4,8 +4,19 @@ import uuid
 
 import pytest
 import sqlalchemy as sa
+from alembic import command
+from alembic.config import Config
 
-from migrations_v2.local import local_url, migrate
+from migrations_v2.local import ROOT, local_url, migrate
+
+
+def downgrade_to(connection, revision):
+    """在本机随机库按真实起始 revision 回退，建立指定历史目录的兼容测试。"""
+    config = Config(str(ROOT / "apps/api/alembic-v2.ini"))
+    config.attributes.update(
+        connection=connection, v2_expected_database=connection.engine.url.database,
+    )
+    command.downgrade(config, revision)
 
 
 @pytest.fixture

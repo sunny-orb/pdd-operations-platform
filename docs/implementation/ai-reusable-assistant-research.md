@@ -1,6 +1,6 @@
 # 公司共用 AI 问答：选型与落地调研
 
-历史选型记录（2026-11-17 至 11-24）。保留当时的发布记录、实际案例和同题试验方案。现行方案见[开发设计](ai-assistance.md)。
+第 1–7 节为历史选型记录（2026-11-17 至 11-24），保留当时的发布记录、实际案例和同题试验方案；第 8 节为 2026-11-27 核对的知识检索专题。现行方案见[开发设计](ai-assistance.md)。
 
 ## 1. 推荐方向
 
@@ -82,7 +82,26 @@ DeepSeek 模型 API、PydanticAI 框架、DeepSeek Harness 是三个独立选项
 
 例如给现有经营查询新增一道“按款查推广”的题，Harness 可挂业务 MCP，PydanticAI 可注册 Python 函数；两条路都要验证同款、同期间和同指标。插件减少重复开发。自托管仍需运维外部入口并检查加载的插件，PydanticAI 升级仍需验证流式回答和工具调用。[Harness 部署](https://deepseek-harness.github.io/deepseek-harness/en/guide/public-deployments) · [Harness 官方状态说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/SAFETY.md) · [PydanticAI 工具](https://pydantic.dev/docs/ai/tools-toolsets/tools/) · [PydanticAI 兼容政策](https://pydantic.dev/docs/ai/project/version-policy/)
 
-**资料回流可以先用现有飞书 SOP。** 建议运营把有价值的案例或纠错提为候选，由业务负责人核对证据、适用系统、有效日期和可见范围，再更新对应 SOP 或指标口径并保留版本。涉及判断规则时，工程同步相应查询或规则及验证题。下一次问答读取生效版本，经营数字仍按当次对象、权限、期间重新查。两种运行方案都能采用这一流程；几十份资料先按场景索引。Harness 官方另有可选的第三方记忆服务接法，示例默认关闭，外部存储、数据迁移和服务托管各需有人负责。[Harness 记忆服务说明](https://deepseek-harness.github.io/deepseek-harness/en/guide/mcp-memory)
+**资料回流可以先用现有飞书 SOP。** 建议运营把有价值的案例或纠错提为候选，由业务负责人核对证据、适用系统、有效日期和可见范围，再更新对应 SOP 或指标口径并保留版本。做法类 SOP 沿用公共选文和查阅能力。新增计算方法或经营字段时，由工程补齐取数和验证题。下一次问答读取生效版本，经营数字仍按当次对象、权限、期间重新查。两种运行方案都能采用这一流程；几十份资料先按场景索引。Harness 官方另有可选的第三方记忆服务接法，示例默认关闭，外部存储、数据迁移和服务托管各需有人负责。[Harness 记忆服务说明](https://deepseek-harness.github.io/deepseek-harness/en/guide/mcp-memory)
+
+<a id="knowledge-retrieval"></a>
+
+## 8. 知识检索选型（2026-11-27）
+
+**接知识库不必先建完整向量管道，本轮一手资料也不支持“RAG 已经过时”。** 本节用广义 RAG 指“检索外部知识，再据此生成回答”，向量检索是其中一种实现；Agentic 检索改变的是如何规划和补充检索。Microsoft 当前文档仍把经典检索和 Agentic 检索都列为 RAG 路线。PydanticAI 可以注册普通 Python 函数获取信息，官方 pgvector 示例不意味着应用必须先配向量库。[Microsoft RAG 概览](https://learn.microsoft.com/en-us/azure/search/retrieval-augmented-generation-overview) · [PydanticAI 函数工具](https://pydantic.dev/docs/ai/tools-toolsets/tools/) · [向量检索示例](https://pydantic.dev/docs/ai/examples/data-analytics/rag/)
+
+| 路线                         | 能解决什么                                                                                                                                                                                                                 | 本项目的适用条件与取舍                                                                                                                                                                    |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 场景目录、元信息与关键词取证 | 先定位文档，再按需读取正文。Anthropic 的按需检索方案以轻量标识定位资料，不要求预先把全部内容嵌入向量索引。[上下文工程](https://www.anthropic.com/research/effective-context-engineering-for-ai-agents)                     | **少量至几十份、场景边界清楚的公共 SOP，先用这条基线。** 维护文档场景、标题和必要同义词；读取时保留适用前提、例外与来源。问法与文档用词差异很大时可能漏检。                               |
+| 向量或混合检索               | 向量匹配语义，BM25 等关键词匹配保留精确术语；可补充段落上下文并按需重排。[Contextual Retrieval](https://www.anthropic.com/research/contextual-retrieval)                                                                   | 真实问法反复漏掉正确条款、资料增长且目录难维护时再比较。需承担切片、嵌入、索引更新和检索回归；版本、适用范围过滤仍不可省。无需由此直接增加独立向量服务。                                  |
+| Agentic 检索                 | 模型拆分复杂问题、选择来源或补查；底层仍可用关键词、向量或混合查询。规划与补查可能增加调用与延迟，应实测。[Agentic retrieval](https://learn.microsoft.com/en-us/azure/search/agentic-retrieval-overview)                   | 适合跨 SOP、依赖追问或一次取证不够的问题。已知场景可先取适用资料，再允许有上限的补查；不让简单问题固定多走几轮。额外调用与 token 需纳入预算。                                             |
+| 长上下文直接读取（可配缓存） | 将适用资料全文放入上下文，省去段落召回；Anthropic 将小知识集直接入提示作为可选路线。[小知识集与提示缓存](https://www.anthropic.com/research/contextual-retrieval)                                                          | 适用全文实际 token 较少、可见范围一致且耗时可接受时，适合作为对照。几十份不等于内容短；预算还含会话和工具结果。缓存依实际模型的支持及命中情况验证，不能套用 Claude 的收益或解决资料过期。 |
+| Skills                       | 将操作步骤、参考资料和脚本按需加载，是组织流程知识的方式。[Agent Skills](https://www.anthropic.com/research/equipping-agents-for-the-real-world-with-agent-skills)                                                         | 适合“怎样做复盘、何时调用哪个工具”等稳定流程，可与检索配合。不能替代飞书原文的版本和引用，也不等于自动学习；是否采用完整 Skills 运行机制须另核实际宿主支持。                              |
+| GraphRAG                     | 从文档建立实体关系及社区摘要，支持具体实体查询和全库主题归纳；图索引和全局查询另有成本。[查询方式](https://microsoft.github.io/graphrag/query/overview/) · [索引方法](https://microsoft.github.io/graphrag/index/methods/) | 大量跨文档关系或全库主题问题成为主要需求时再试。当前 SOP 规模尚无采用依据；商品、店铺及数字的正式关联继续由已核对业务键和领域查询提供，不能用模型抽取的关系替代。                         |
+
+**本项目首版建议是“按场景取证，必要时受控补查”，保留更换底层检索的空间。** 飞书 SOP 提供操作依据，经营数字读取已发布的数据。已支持算法的权重可随原文自动更新，新增算法或数据源需先具备可验证的计算能力。资料维护、自动生效流程及个人知识的阶段边界统一见[现行 SOP 设计](ai-assistance.md#sop-dynamic-plan)。这项推荐依据目前的规模和维护边界推导，不同检索路线的效果仍需用同一批业务问题比较。
+
+**选型边界：** EMNLP 2024 的 RAG／长上下文比较展示了准确度和成本取舍；ICML 2025 的 LaRA 进一步指出，结果受模型能力、任务、上下文长度和检索特征共同影响。这些公开基准不能证明当前项目使用的 DeepSeek 在本项目 SOP 上哪条路线最好。比较时应固定实际模型、同版本资料和同批真实问题，核对正确条款及例外是否被找到、旧版和无依据问题是否被正确处理、引用能否回查，再比较总 token、完整回答耗时、调用数和维护工作。仅在出现可复现的漏检或预算问题时升级，不以“更先进”作为换路线的理由。[EMNLP 2024 论文](https://aclanthology.org/2024.emnlp-industry.66/) · [LaRA 正式论文页](https://proceedings.mlr.press/v267/li25dv.html)
 
 <a id="maturity-record"></a>
 

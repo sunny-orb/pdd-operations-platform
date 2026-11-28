@@ -1,5 +1,7 @@
 """集中读取公开配置与私密环境变量。"""
 
+import os
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
@@ -7,12 +9,26 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEEPSEEK_MODEL = "bailian:deepseek-v4.1-flash-1017"
 DIRECT_DEEPSEEK_MODEL = "deepseek:deepseek-flash"
+API_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
-class Settings(BaseSettings):
-    """应用设置；环境变量为输入，字段校验后的设置供服务使用。"""
+class LarkCliSettings(BaseSettings):
+    """独立 SOP 子进程只需解析服务端的 CLI 命令配置。"""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    lark_cli_bin: str = "lark-cli"
+
+
+def lark_cli_executable() -> str:
+    """服务环境覆盖 API 配置文件；从仓库根目录启动的后台任务也读取同一项配置。"""
+    return (
+        os.environ.get("LARK_CLI_BIN")
+        or LarkCliSettings(_env_file=API_ENV_FILE, _env_ignore_empty=True).lark_cli_bin
+    )
+
+
+class Settings(LarkCliSettings):
+    """应用设置；环境变量为输入，字段校验后的设置供服务使用。"""
 
     app_env: Literal["development", "test", "production"] = "development"
     assistant_production_enabled: bool = False
@@ -23,6 +39,7 @@ class Settings(BaseSettings):
     assistant_business_providers: list[str] = Field(default_factory=list)
     deepseek_api_key: SecretStr = SecretStr("")
     deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_thinking_enabled: bool = False
     bailian_api_key: SecretStr = SecretStr("")
     bailian_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     database_url: SecretStr = SecretStr("")

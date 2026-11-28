@@ -197,11 +197,11 @@ def render_sql(
     database: str = "pdd_operations",
 ) -> str:
     """完整迁移有序渲染；head或单账号明确历史目标均附空库保护。"""
-    if runtime_account is not None and target not in (
-        "head",
-        *COMPATIBLE_RUNTIME_REVISIONS,
-    ):
-        raise ValueError("单账号交付只允许base到head或已批准公司目标初始化")
+    if runtime_account is not None:
+        if target == "head":
+            target = TARGET_REVISION
+        if target not in COMPATIBLE_RUNTIME_REVISIONS:
+            raise ValueError("单账号交付只允许初始化已批准的公司目录版本")
     output = io.StringIO()
     config = Config(str(API / "alembic-v2.ini"), output_buffer=output)
     scripts = ScriptDirectory.from_config(config)

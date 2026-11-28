@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { AssistantReportView } from "./AssistantReport";
+import { AssistantReportView, ProductReportChart } from "./AssistantReport";
 import type { AssistantReport } from "./contracts";
 
 afterEach(() => {
@@ -68,11 +68,17 @@ it("图表可切换指标，明细保留缺值、真实零和百分比单位", (
     disconnect() {}
   }
   vi.stubGlobal("ResizeObserver", Observer);
-  render(<AssistantReportView report={report} question="看成交趋势" />);
+  render(
+    <>
+      <ProductReportChart report={report} question="看成交趋势" />
+      <AssistantReportView report={report} question="看成交趋势" />
+    </>,
+  );
   expect(screen.getAllByText("¥0.00")[0]).toBeTruthy();
   expect(screen.getByText("部分日期缺少成交字段")).toBeTruthy();
-  expect(screen.getByText("同店所选期成交额前20%")).toBeTruthy();
   expect(screen.getByText("成交下滑")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "查看明细" }));
+  expect(screen.getByText("同店所选期成交额前20%")).toBeTruthy();
   expect(screen.getByText(/2026-10-27 至 2026-11-02/)).toBeTruthy();
   fireEvent.change(screen.getByRole("combobox", { name: "趋势指标" }), {
     target: { value: "conversion" },

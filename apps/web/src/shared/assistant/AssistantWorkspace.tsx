@@ -317,6 +317,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
         delete nextContext.date_to;
       }
       const mergedContext = { ...nextContext, ...result.query_context };
+      if (mergedContext.forecast === null) delete mergedContext.forecast;
       if (mergedContext.explanation === null) delete mergedContext.explanation;
       if (mergedContext.risk_reference === null) delete mergedContext.risk_reference;
       const resolved = { ...turn.scope, subject, context: mergedContext };
@@ -407,6 +408,7 @@ export function AssistantWorkspace({ children }: { children: ReactNode }) {
         ? { listing_id: target.subject.listing_id, shop_id: target.subject.shop_id }
         : {}),
     };
+    if (context.forecast === null) delete context.forecast;
     if (context.explanation === null) delete context.explanation;
     if (context.risk_reference === null) delete context.risk_reference;
     if (!keepDraft) setDraft("");

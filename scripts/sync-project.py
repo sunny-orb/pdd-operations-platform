@@ -271,6 +271,19 @@ def main():
             except Exception:  # noqa: BLE001 - 回收异常不改变来源的同步成功/失败
                 print(json.dumps({"stage": "region_retention", "status": "failed",
                                   "code": "REGION_RETENTION_FAILED"}), flush=True)
+            request = ROOT / "var/project-sync/forecast-sop-request.json"
+            if os.environ.get("APP_ENV") != "production" and request.is_file():
+                from app.jobs.forecast_sop import save_requested_snapshots
+                from app.modules.knowledge.forecast_access import local_forecast_database
+
+                try:
+                    if local_forecast_database(engine, "pdd_ingest"):
+                        forecast = save_requested_snapshots(engine, request)
+                        if forecast["saved"]:
+                            print(json.dumps(dict(stage="forecast_snapshots", **forecast)), flush=True)
+                except Exception as exc:  # 本地预测快照独立于经营数据发布
+                    print(json.dumps(dict(stage="forecast_snapshots", status="failed",
+                                          error=type(exc).__name__)), flush=True)
         return int(result["status"] == "failed" or monitor_failed)
     except Exception as exc:  # noqa: BLE001 - CLI边界只输出异常类型，避免凭据泄漏
         print(json.dumps({"status": "failed", "error": type(exc).__name__}), flush=True)

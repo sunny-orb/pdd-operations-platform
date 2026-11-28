@@ -1,10 +1,10 @@
-import { memo } from "react";
-import { AssistantReportView } from "./AssistantReport";
-import { BusinessReportView } from "./BusinessReport";
+import { memo, useMemo, useState } from "react";
+import { AssistantReportView, ProductReportChart } from "./AssistantReport";
+import { BusinessReportChart, BusinessReportView } from "./BusinessReport";
 import { trendReport, uniqueReports } from "./reportPresentation";
 import type { ChatAnswer } from "./contracts";
 
-/** 一轮回答只提供一个来源入口；取数报告不直接等同于需要展示的卡片。 */
+/** 一轮回答共用一个依据入口；同一份飞书修订在第一份引用它的报告旁标明。 */
 export const AssistantEvidence = memo(function AssistantEvidence({
   result,
   question,
@@ -12,35 +12,53 @@ export const AssistantEvidence = memo(function AssistantEvidence({
   result: ChatAnswer;
   question: string;
 }) {
-  const reports = uniqueReports(result.reports);
-  const chart = result.status === "answered" ? trendReport(reports, question) : undefined;
+  const [open, setOpen] = useState(false);
+  const reports = useMemo(() => uniqueReports(result.reports), [result.reports]);
+  const chart = useMemo(
+    () => (result.status === "answered" ? trendReport(reports, question) : undefined),
+    [reports, question, result.status],
+  );
+  const shownRevisions = new Set<string>();
   if (!reports.length && !result.evidence.trim()) return null;
   return (
     <>
       {chart &&
         (chart.kind === "dashboard" ? (
-          <BusinessReportView report={chart} showChart mode="chart" question={question} />
+          <BusinessReportChart report={chart} question={question} />
         ) : (
-          <AssistantReportView report={chart} question={question} mode="chart" />
+          <ProductReportChart report={chart} question={question} />
         ))}
-      <details className="assistant-evidence">
+      <details
+        className="assistant-evidence"
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
         <summary>数据与规则依据</summary>
-        <div className="assistant-evidence-content">
-          {reports.map((report, index) =>
-            report.kind === "dashboard" ? (
-              <BusinessReportView key={index} report={report} showChart={false} mode="evidence" />
-            ) : (
-              <AssistantReportView
-                key={index}
-                report={report}
-                question={question}
-                showChart={false}
-                mode="evidence"
-              />
-            ),
-          )}
-          {!reports.length && <p>{result.evidence}</p>}
-        </div>
+        {open && (
+          <div className="assistant-evidence-content">
+            {reports.map((report, index) => {
+              if (report.kind !== "dashboard")
+                return <AssistantReportView key={index} report={report} question={question} />;
+              const isKnowledge = report.capability === "business_knowledge";
+              const revision = isKnowledge
+                ? report.data_version?.trim()
+                : report.capability === "sales_forecast"
+                  ? report.versions.forecast_sop?.trim()
+                  : undefined;
+              const identity = (report.scope.document_key ?? "monthly_gmv") + "/" + revision;
+              const sopRevision = revision && !shownRevisions.has(identity) ? revision : undefined;
+              if (sopRevision) shownRevisions.add(identity);
+              return (
+                <BusinessReportView
+                  key={index}
+                  report={report}
+                  question={question}
+                  sopRevision={sopRevision}
+                />
+              );
+            })}
+            {!reports.length && <p>{result.evidence}</p>}
+          </div>
+        )}
       </details>
     </>
   );

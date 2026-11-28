@@ -19,6 +19,7 @@ from app.modules.database_residency import deferred_reason, ensure_online
 
 from .contracts import PublishResult, SalesError
 from .datasets import EXTENDED_REVISION, INSERT_BATCH_SIZE, READ_SPECS
+from .f01_gmv import F01_GMV_REVISION
 from .normalization import canonical, fingerprint
 from .source_policy import (
     HEARTBEAT_SECONDS,
@@ -73,6 +74,16 @@ class ShopDailyStore:
         self.engine, self.archive_root = engine, Path(archive_root)
         self.approved = approved or approved_window(self.code)
         self.tables = reflect_tables(engine, self.fact_table)
+
+    @property
+    def supports_f01_gmv(self):
+        """接收前检查 F01 实表；两列须同时存在，旧库继续接收原七字段退款投影。"""
+        columns = self.tables["shop_refund_records"].c
+        reported = "source_reported_gmv" in columns
+        adjustment = "source_adjustment_amount" in columns
+        if reported != adjustment:
+            raise SalesError("F01_GMV_STORAGE_SCHEMA_INCOMPLETE", 503)
+        return reported
 
     def _lease(self, connection, run_id, worker):
         tasks = self.tables["task_runs"]
@@ -325,7 +336,17 @@ class ShopDailyStore:
             heartbeat()
             expected[row["source_row_key"]] = row
             new_keys.add((row["source_row_key"], row["shop_id"], row[self.date_column]))
-        readable = fact_content.read_table(connection, self.fact_table)
+        readable = (
+            fact_content.read_table(connection, self.fact_table)
+            if self.fact_table in fact_content.FACTS
+            else facts
+        )
+        row_revision = self.revision
+        if (
+            self.code == "shop_refunds"
+            and (candidate.source_metadata or {}).get("gmv_projection") == F01_GMV_REVISION
+        ):
+            row_revision = F01_GMV_REVISION
         with connection.begin():
             heartbeat(force=True)
             connection.execute(
@@ -383,7 +404,7 @@ class ShopDailyStore:
                         source_locator=self.spec.locator
                         if self.spec
                         else "cubeappdata." + SOURCE_TABLE,
-                        row_schema_revision=self.revision,
+                        row_schema_revision=row_revision,
                         interpretation_ref=interpretation,
                         producer_revision=producer_revision(),
                         retained_input_ref=archive,
@@ -550,6 +571,7 @@ def producer_sources():
         "modules/sales/product_regions_incremental.py",
         "modules/sales/window_incremental.py",
         "modules/sales/archive_replay.py",
+        "modules/sales/f01_gmv.py",
         "modules/sales/rename_archive.py",
         "modules/sales/promotion_history.py",
         "modules/sales/datasets.py",

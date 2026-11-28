@@ -14,11 +14,17 @@ from psycopg import sql
 
 from app.modules.local_storage import require_local_maintenance, verify_connection
 from migrations_v2.baseline_20261028.schema import build_metadata
-from migrations_v2.company_db_objects import COMPATIBLE_RUNTIME_REVISIONS, TARGET_REVISION
+from migrations_v2.company_db_objects import (
+    COMPATIBLE_RUNTIME_REVISIONS,
+    F01_GMV_REVISIONS,
+    LOCAL_FORECAST_REVISIONS,
+    TARGET_REVISION,
+)
 
 # 旧离线包和回执格式保持18；数据库schema独立演进，不用改格式放宽恢复边界。
 HEAD = "20261114_18"
 CURRENT_SCHEMA_HEAD = TARGET_REVISION
+REGION_SCHEMA_HEADS = (CURRENT_SCHEMA_HEAD, *LOCAL_FORECAST_REVISIONS)
 RECONCILIATIONS = "source_reconciliations"
 RECONCILIATION_COLUMNS = (
     "source_id",
@@ -89,8 +95,9 @@ def require_local_test(engine, *, roles=("pdd_admin",)):
 
 
 def compatible_local_schema_head(actual):
-    """显式认可经验证的18/19/20；历史格式测试仍只能使用其对应修订。"""
-    return actual == HEAD or (HEAD == "20261114_18" and actual in COMPATIBLE_RUNTIME_REVISIONS)
+    """仅允许已逐项核对的目录；公司目标与本地知识和 F01 迁移各自固定。"""
+    compatible = (*COMPATIBLE_RUNTIME_REVISIONS, *LOCAL_FORECAST_REVISIONS)
+    return actual == HEAD or (HEAD == "20261114_18" and actual in compatible)
 
 
 def _schema_owner(c):
@@ -132,8 +139,12 @@ def validate_schema(c):
         *CONTENT.TABLES,
         *CONTENT.VIEWS,
     }
-    if revision == CURRENT_SCHEMA_HEAD:
+    if revision in REGION_SCHEMA_HEADS:
         expected.add("region_retirements")
+    knowledge = {
+        "forecast_sop_source", "forecast_sop_versions", "forecast_monthly_snapshots",
+        "read_forecast_sop",
+    } if revision in LOCAL_FORECAST_REVISIONS else set()
     actual = set(
         c.execute(
             sa.text("""SELECT relname FROM pg_class t JOIN pg_namespace n
@@ -142,13 +153,19 @@ def validate_schema(c):
         AND d.objid=t.oid AND d.deptype='e')""")
         ).scalars()
     )
-    if actual != expected:
+    if actual != expected | knowledge:
         raise ValueError("RETENTION_SCHEMA_OBJECTS")
     inspector = sa.inspect(c)
     signature = {}
     baseline = build_metadata().tables
     for table in sorted(expected):
         columns = inspector.get_columns(table, schema="public")
+        if revision in F01_GMV_REVISIONS and table == "shop_refund_records":
+            # 退款表不在此备份的三类事实内；下面仍逐项验证完整的本版目录。
+            columns = [
+                v for v in columns
+                if v["name"] not in {"source_reported_gmv", "source_adjustment_amount"}
+            ]
         signature[table] = [(v["name"], str(v["type"]), v["nullable"]) for v in columns]
         if table in TARGETS.values():
             if [v["name"] for v in columns] != list(baseline["public." + table].c.keys()):
@@ -164,7 +181,7 @@ def validate_schema(c):
     )
     # 18/19格式固定720列/72外键，不能随当前head派生SQL增加对象而变化。
     # 20新增对象在下方按真实PG取得的完整目录签名精确校验。
-    if revision != CURRENT_SCHEMA_HEAD and (
+    if revision not in REGION_SCHEMA_HEADS and (
         column_count != 720 or sum(len(v) for k, v in signature.items() if k.endswith(":fks")) != 72
     ):
         raise ValueError("RETENTION_SCHEMA_RELATIONSHIPS")

@@ -126,7 +126,9 @@ def build_steps(
                 reader = (
                     ShopDailyReader(password=warehouse_password(), heartbeat=hb)
                     if code == "shop_daily"
-                    else FeishuRefundReader(root=paths.feishu_root, heartbeat=hb)
+                    else FeishuRefundReader(
+                        root=paths.feishu_root, include_gmv=store.supports_f01_gmv, heartbeat=hb
+                    )
                     if code == "shop_refunds"
                     else SalesSourceReader(password=warehouse_password(), heartbeat=hb)
                 )

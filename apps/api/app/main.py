@@ -86,6 +86,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ThreadPoolExecutor(max_workers=1, thread_name_prefix="assistant-query")
             )
         )
+        # 飞书检查与首次规则核验可能需要等待网络，独立于经营 SQL 的执行线程。
+        application.state.assistant_sop_executor = (
+            application.state.assistant_resources.enter_context(
+                ThreadPoolExecutor(max_workers=2, thread_name_prefix="assistant-sop")
+            )
+        )
         application.state.assistant_agent = None
         application.state.assistant_active = {}
         application.state.engine = build_engine(configured)

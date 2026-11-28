@@ -86,6 +86,15 @@ def restore_candidate(folder: Path, *, heartbeat=lambda: None, expected_producer
             ):
                 raise SalesError("ARCHIVE_INTERPRETER_MISMATCH")
             candidate = normalize_history(list(rows))
+        elif code == "shop_refunds" and "gmv_projection" in (manifest.get("source_metadata") or {}):
+            from . import f01_gmv
+
+            if (
+                manifest["source_metadata"]["gmv_projection"] != f01_gmv.F01_GMV_REVISION
+                or sources.get("modules/sales/f01_gmv.py") != Path(f01_gmv.__file__).read_text()
+            ):
+                raise SalesError("ARCHIVE_INTERPRETER_MISMATCH")
+            candidate = f01_gmv.normalize_f01_gmv(rows, window, heartbeat)
         else:
             candidate = normalize_source(manifest["dataset"]["code"], rows, window, heartbeat)
     else:

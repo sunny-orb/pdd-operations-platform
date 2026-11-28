@@ -1,7 +1,6 @@
 import type { AssistantReport, BusinessReport } from "./contracts";
 
 export type EvidenceReport = AssistantReport | BusinessReport;
-export type ReportMode = "default" | "chart" | "evidence";
 const day = 86400000;
 const metricTerms: Record<string, RegExp> = {
   net_roi: /净(?:投产|ROI)|net[_ -]?roi/i,
@@ -107,6 +106,57 @@ export const domainNames: Record<string, string> = {
   data_status: "数据更新",
   definitions: "规则定义",
 };
+
+// 只限制依据首层的阅读长度；展开后仍使用接口返回的完整文本与指标顺序。
+const evidenceMetricLimit = 3;
+const textLimit = 96;
+export function longEvidence(text: unknown) {
+  return typeof text === "string" && text.length > textLimit;
+}
+export function shortEvidence(text: string) {
+  return longEvidence(text) ? text.slice(0, textLimit - 1).trimEnd() + "…" : text;
+}
+
+export function previewMetrics<T extends { key: string; label: string }>(
+  metrics: T[],
+  question: string,
+) {
+  if (metrics.length <= evidenceMetricLimit) return metrics;
+  const summary = metrics.slice(0, evidenceMetricLimit);
+  const requested = questionMetric(metrics, question);
+  if (requested && !summary.includes(requested)) summary[summary.length - 1] = requested;
+  return summary;
+}
+
+/** 从本份报告的实际筛选读范围。技术版本、内部链接键不作为运营范围名称。 */
+export function businessScope(report: BusinessReport) {
+  const scope = report.scope;
+  function labels(value: unknown) {
+    if (typeof value === "string") return value.trim();
+    return Array.isArray(value)
+      ? value.filter((item) => typeof item === "string" && item).join("、")
+      : "";
+  }
+  const shops = labels(scope.shop_name) || labels(scope.shop_id);
+  const shopCount = Array.isArray(scope.shop_ids) && scope.shop_ids.length;
+  const products = Array.isArray(scope.listing_ids) && scope.listing_ids.length;
+  const channel =
+    scope.channel === "product_promotion"
+      ? "商品推广"
+      : scope.channel === "star_shop"
+        ? "明星店铺"
+        : labels(scope.channel);
+  const parts = [
+    !report.period && labels(scope.month),
+    shops ? "店铺 " + shops : shopCount && shopCount + " 家店铺",
+    labels(scope.product_name) || (products && products + " 款商品") || labels(scope.product_key),
+    channel,
+    ...(["category", "operator", "level", "keyword"] as const).map((key) => labels(scope[key])),
+    scope.focus === "size" ? "尺码问题" : scope.focus === "quality" ? "质量问题" : "",
+    report.domain === "definitions" && domainNames[labels(scope.view)],
+  ];
+  return parts.filter(Boolean).join(" · ");
+}
 function canChart(report: EvidenceReport) {
   if (report.kind === "dashboard")
     return (

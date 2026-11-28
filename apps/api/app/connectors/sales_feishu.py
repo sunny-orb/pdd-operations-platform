@@ -12,6 +12,14 @@ from uuid import uuid4
 from app.modules.archive_store import run_source_cli, temporary_pages
 from app.modules.sales.contracts import SalesError
 from app.modules.sales.datasets import REFUND_BASE, REFUND_FIELDS, REFUND_TABLE, SOURCE_MAX_ROWS
+from app.modules.sales.f01_gmv import (
+    ADJUSTMENT_FIELD,
+    ADJUSTMENT_LABEL,
+    F01_GMV_REVISION,
+    GMV_FIELD,
+    GMV_LABEL,
+    normalize_f01_gmv,
+)
 from app.modules.sales.source_normalization import normalize_source
 from app.modules.sales.source_policy import MAX_ATTEMPTS, validate_read_window
 
@@ -25,25 +33,46 @@ def cli_command():
     )
 
 
-def validate_column_types(columns):
-    """字段ID固定且类型须与已核七字段相同；改名可映射，变型拒绝。"""
+F01_FIELDS = (*REFUND_FIELDS, GMV_FIELD, ADJUSTMENT_FIELD)
+FIELD_SCHEMA = dict(
+    zip(
+        F01_FIELDS,
+        (
+            ("日期", "datetime"),
+            ("平台", "text"),
+            ("部门", "text"),
+            ("店铺", "text"),
+            ("统计退款金额", "number"),
+            ("统计金额", "number"),
+            ("退款占比", "formula"),
+            (GMV_LABEL, "formula"),
+            (ADJUSTMENT_LABEL, "number"),
+        ),
+        strict=True,
+    )
+)
+
+
+def validate_column_types(columns, fields=REFUND_FIELDS):
+    """字段 ID 和数值/公式类型固定；来源改名可映射，类型改变拒绝。"""
     by_id = {value.get("field_id"): value.get("field_type") for value in columns.values()}
-    expected = ("datetime", "text", "text", "text", "number", "number", "formula")
-    if any(by_id.get(key) != kind for key, kind in zip(REFUND_FIELDS, expected, strict=True)):
+    if any(by_id.get(key) != FIELD_SCHEMA[key][1] for key in fields):
         raise SalesError("FEISHU_FIELD_SCHEMA_CHANGED")
 
 
 class FeishuRefundReader:
-    def __init__(self, *, root: Path, heartbeat=lambda: None):
+    def __init__(self, *, root: Path, include_gmv=False, heartbeat=lambda: None):
         self.root, self.heartbeat = Path(root).resolve(), heartbeat
+        self.fields = F01_FIELDS if include_gmv else REFUND_FIELDS
         self.folder = self.root / "var/ingestion/m3-feishu-staging" / str(uuid4())
         self.folder.mkdir(mode=0o700, parents=True)
         self.page = self._page
 
     @classmethod
-    def for_test(cls, page):
+    def for_test(cls, page, *, include_gmv=False):
         reader = cls.__new__(cls)
         reader.page, reader.heartbeat = page, lambda: None
+        reader.fields = F01_FIELDS if include_gmv else REFUND_FIELDS
         return reader
 
     def _page(self, window, offset):
@@ -66,7 +95,7 @@ class FeishuRefundReader:
             "--as",
             "user",
         ]
-        for field in REFUND_FIELDS:
+        for field in self.fields:
             arguments += ["--field-id", field]
         arguments += [
             "--filter-json",
@@ -93,14 +122,9 @@ class FeishuRefundReader:
         destination.chmod(0o600)
         manifest_path.chmod(0o600)
         columns = manifest.get("columns", {})
-        validate_column_types(columns)
+        validate_column_types(columns, self.fields)
         by_id = {value.get("field_id"): name for name, value in columns.items()}
-        expected_names = ("日期", "平台", "部门", "店铺", "统计退款金额", "统计金额", "退款占比")
-        if any(field not in by_id for field in REFUND_FIELDS):
-            raise SalesError("FEISHU_FIELD_SCHEMA_CHANGED")
-        mapping = {
-            by_id[field]: name for field, name in zip(REFUND_FIELDS, expected_names, strict=True)
-        }
+        mapping = {by_id[field]: FIELD_SCHEMA[field][0] for field in self.fields}
         normalized = [
             {
                 "record_id": row["record_id"],
@@ -108,7 +132,7 @@ class FeishuRefundReader:
             }
             for row in rows
         ]
-        manifest["field_mapping"] = {field: by_id[field] for field in REFUND_FIELDS}
+        manifest["field_mapping"] = {field: by_id[field] for field in self.fields}
         return normalized, manifest
 
     def _scan(self, window):
@@ -143,11 +167,19 @@ class FeishuRefundReader:
     @temporary_pages
     def read_stable(self, window):
         validate_read_window(window)
+
+        def normalize(rows):
+            if self.fields == F01_FIELDS:
+                return normalize_f01_gmv(rows, window, self.heartbeat)
+            return normalize_source("shop_refunds", rows, window, self.heartbeat)
+
         for _ in range(MAX_ATTEMPTS):
             rows, meta = self._scan(window)
-            before = normalize_source("shop_refunds", rows, window, self.heartbeat).fingerprint
+            before = normalize(rows).fingerprint
             rows, after_meta = self._scan(window)
-            after = normalize_source("shop_refunds", rows, window, self.heartbeat)
+            after = normalize(rows)
             if before == after.fingerprint and meta == after_meta:
+                if self.fields == F01_FIELDS:
+                    after_meta["gmv_projection"] = F01_GMV_REVISION
                 return replace(after, source_metadata=after_meta)
         raise SalesError("SOURCE_CHANGED_DURING_READ", 503)

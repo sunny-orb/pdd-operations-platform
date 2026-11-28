@@ -173,14 +173,11 @@ def test_new_policy_does_not_change_local_or_unconfigured_environment(context, m
 def test_scoped_production_policy_reuses_pg_content_and_leaves_aftersales_legacy(
     context, sales_pg, monkeypatch, tmp_path, revision
 ):
-    from tests.test_return_summary_index import revision_sql
+    from tests.sales_pg_support import downgrade_to
 
     # 新镜像须在18/19保持既有共享写，并在20继续沿原业务契约读取。
-    if revision != "20261118_20":
-        with sales_pg.begin() as c:
-            c.connection.driver_connection.execute(
-                revision_sql("20261118_20", revision, downgrade=True), prepare=False
-            )
+    with sales_pg.begin() as c:
+        downgrade_to(c, revision)
     m, root = context
     save(m, root)
     # 只替代生产传输身份边界；业务发布/事务/视图/旧报告均走真实隔离PG。

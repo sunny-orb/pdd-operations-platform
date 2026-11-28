@@ -50,15 +50,23 @@ curl --noproxy '*' -sS http://127.0.0.1:8000/api/v1/assistant/chat \
 
 | 字段                                       | 前端怎么用                                                                                                                     |
 | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `answer`、`model`                          | answer 按安全 Markdown 渲染。model 记录服务端实际使用的型号                                                                    |
+| `answer`、`model`                          | answer 按安全 Markdown 渲染。model 为服务配置的型号，usage.requests 记录实际模型请求数                                         |
 | `status`                                   | answered 展示回答，need_selection 展示候选，no_evidence 展示缺口或澄清提示                                                     |
 | `subject`、`candidates`、`subject_cleared` | 已选商品或候选含 listing_id、shop_id、name、shop_name 和可选 product_id。subject 可为 null，subject_cleared 标记显式清除旧对象 |
 | `evidence`、`reports`                      | 来源说明和结构化依据，由服务端组装。reports 可为空。正文与依据分开展示                                                         |
 | `query_context`、`usage`                   | 前者供追问续用。后者可含本轮 input_tokens、output_tokens、requests、tool_calls，分别统计 token、模型请求和工具调用             |
 
-普通确认和条件性解释可以返回 `answered` 和空 `reports`。此时直接展示正文并保留已选对象；收到 `subject_cleared:true` 或新的待选列表时清除旧选择。
+**`answered` 配空 `reports` 是有效回答。** 能力介绍、用法、写作、按用户所给数字试算都可以只返回正文。客户端应直接展示，保留已选对象。询问型号直接读取服务配置，`usage.requests` 为 0。重新核实实绩或公司规定时展示对应依据。收到 `subject_cleared:true` 或新的待选列表时清除旧选择。
 
 `kind=dashboard` 的报告用 domain、capability、title、source 标明来源，period、scope、versions、data_version 描述实际范围。facts 返回带单位、状态及原因的指标，tables 返回表头、行、总数与偏移，series 返回带日期的点，notes 说明限制。金额和比率使用十进制字符串，例如 percent 的 `"0.03"` 表示 3%。保留 null 和真实零的区别。
+
+公共 SOP 沿用同一个问答接口。列目录只返回标题和适用范围。运营建议在选中并核对文章后返回 `business_knowledge`，其 `scope.document_key` 标识文档，`scope.document_url` 可打开原文，`data_version` 为实际修订。没有适用条款时不生成文档依据。
+
+正式六店月末 GMV 返回 `sales_forecast`。已核修订可直接复算；新版首次提问的解读调用计入 `usage.requests` 和 token，总数已包含 `sop_review_requests`。供应商用量未取得时省略无法确认的总数字段，并返回 `sop_review_usage_complete=false`。
+
+预测正文含数据截止日、结果和“查看预测 SOP”链接。客户端从 `reports[].versions.forecast_sop` 取飞书修订号用于展开依据，`forecast_inputs` 供核对经营输入。`notes` 提供本次使用的公式或所引章节。回算可写“截至 11 月 25 日”，原样回传 `query_context.forecast` 即可继续追问同一期间。复合问题另附本轮查证的其他指标。
+
+「假设近 3 日占 60%、近 7 日占 40%，预测本月 GMV」在同一个接口返回 `scenario_center`（本题试算）和 `official_center`（正式预测），均为估计金额。新修订存在矛盾时返回 `status=no_evidence`、本版原句和出处，金额字段留空。经营建议使用已有公共查询，可同时引用业务数据和 SOP 章节。
 
 单款报告 `product_performance`、`product_promotion` 另含商品、前后期日期、两期指标与变化、各自覆盖、逐日值及规则依据。客户端按 kind 解析，完整结构见[报告契约](../../apps/web/src/shared/assistant/contracts.ts)。
 
@@ -171,6 +179,8 @@ curl --noproxy '*' -sS http://127.0.0.1:8000/api/v1/assistant/chat \
 ## 流式显示和停止
 
 浏览器用 `fetch` POST 同一个请求体，按 SSE 消息边界读取 `data: <JSON>\n\n`。每条事件的类别在 JSON 的 `type` 字段。
+
+商品文案和历史改写在核对数字、规格后发送正文，可能只收到一条 `delta`。客户端以 `done` 为完成标志。
 
 | type   | 行为                                                                         |
 | ------ | ---------------------------------------------------------------------------- |

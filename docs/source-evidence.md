@@ -2572,6 +2572,16 @@ JST按编码复核另发现一条11/05 13:25:43售后记录，名称为`kk树-ko
 
 通过 `lark-cli docs +fetch --as user` 再读[拼多多分析SOP](https://kocotree.feishu.cn/docx/EA2fdkbbLoMhYnxNEEvcxFhPnoc)，取得revision 30，重点第7、9、10章。商品异常已有双7日比较与样本门槛；9.3已有素材测试、承接改善、退款口径检查；10.3已有尺码实测、质量核查及7日动作复核。现有程序覆盖和未接数据仍须逐项区分；本轮不据文档更新擅自改生效阈值。建议接入方式唯一维护于[动作型 SOP 接入设计](implementation/ai-assistance.md#sop-dynamic-plan)。
 
+<a id="forecast-sop-location-20261127"></a>
+
+## 2026-11-27 GMV预测SOP归属核查
+
+按用户要求，用 `lark-cli` 的 `user` 身份只读核查[拼多多月度 GMV 滚动预测 SOP](https://kocotree.feishu.cn/docx/H3svdLyEYoxsK3xgeBOceOxfnMc)。`drive +inspect` 成功识别为 `docx`；`docs +fetch --scope outline --max-depth 2` 成功返回修订号4及六个步骤、算例章节。本轮只核查归属和可读性，不据提纲宣称已验证修订4的完整公式及执行条件。
+
+`wiki +node-get` 返回业务码 `131014`、`document is not in wiki`，确认当次该文档未挂载到Wiki；这不是目录权限不足的返回。随后 `drive metas batch_query` 成功取得该文档元数据，但响应不含父文件夹或目录路径。因此普通云盘父目录仍未确认，不能推断文档没有目录，也不能据此断言用户只拥有这一篇的权限。未全盘扫描、移动文档、申请或修改权限。
+
+当前已证明的是用户身份读取这篇SOP可行，尚未证明部署用同步身份的权限、公共目录枚举或新增文档可发现性。明确单篇URL可作为首版来源，不以父目录已知为接入前提；后续公共目录入口及权限需单独取得并验证。接入设计统一见[公共知识与SOP](implementation/ai-assistance.md#sop-dynamic-plan)。
+
 <a id="aftersales-order-detail-20261125"></a>
 
 ## 2026-11-25 新增数仓RPA售后单明细核查

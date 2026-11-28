@@ -20,6 +20,7 @@ const commands = {
   "db:up": [],
   "db:test": [],
   "db:status": [],
+  "sync:forecast": ["app.jobs.forecast_sop"],
   "sync:m1": ["app.jobs.sync_product_board"],
 };
 const command = commands[process.argv[2]];

@@ -232,15 +232,14 @@ def test_feishu_pagination_revision_and_timezone_are_verified():
 
 
 def test_feishu_field_type_changes_are_rejected_before_normalization():
-    from app.connectors.sales_feishu import validate_column_types
-    from app.modules.sales.datasets import REFUND_FIELDS
+    from app.connectors.sales_feishu import F01_FIELDS, validate_column_types
 
-    kinds = ("datetime", "text", "text", "text", "number", "number", "formula")
+    kinds = ("datetime", "text", "text", "text", "number", "number", "formula", "formula", "number")
     columns = {
         str(i): dict(field_id=key, field_type=kind)
-        for i, (key, kind) in enumerate(zip(REFUND_FIELDS, kinds, strict=True))
+        for i, (key, kind) in enumerate(zip(F01_FIELDS, kinds, strict=True))
     }
-    validate_column_types(columns)
+    validate_column_types(columns, F01_FIELDS)
     columns["4"]["field_type"] = "text"
     with pytest.raises(SalesError, match="FEISHU_FIELD_SCHEMA_CHANGED"):
-        validate_column_types(columns)
+        validate_column_types(columns, F01_FIELDS)

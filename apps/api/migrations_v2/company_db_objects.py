@@ -6,6 +6,9 @@ import json
 START_REVISION = "20261104_12"
 TARGET_REVISION = "20261118_20"
 COMPATIBLE_RUNTIME_REVISIONS = ("20261114_18", "20261116_19", TARGET_REVISION)
+# 隔离 PG 证明的本机目录，独立于公司初始化和升级目标。
+F01_GMV_REVISIONS = ("20261127_22", "20261128_23")
+LOCAL_FORECAST_REVISIONS = ("20261127_21", *F01_GMV_REVISIONS)
 UPGRADE_STARTS = (START_REVISION, "20261111_16", "20261113_17", "20261114_18", "20261116_19")
 RPA_TABLE = "aftersales_reports_rpa"
 RPA_INDEX = "aftersale_reports_rpa_pkey"
@@ -101,6 +104,25 @@ SCHEMA_SIGNATURES[TARGET_REVISION] = {
 
 # 19只补目录说明；目录签名不含COMMENT，所有结构和保护函数仍与18相同。
 SCHEMA_SIGNATURES["20261116_19"] = SCHEMA_SIGNATURES["20261114_18"].copy()
+
+SCHEMA_SIGNATURES["20261127_21"] = {
+    **SCHEMA_SIGNATURES[TARGET_REVISION],
+    "relations": "aee676ebb4654eac6ee36556afd90bce969195106081d47ce53c98ce94a16781",
+    "columns": "4b328dafc6ac2f767cd6cf66cc9c0ad017d261442f98628515885d40575da3a5",
+    "constraints": "1772a71139ff0da80d4a74d0bcb0fef72f08aa41a6edafd988cfd1b6b69a8caf",
+    "internal_triggers": "62ab06789bdf30d181dac916979333cf7e6fbd0e7645ab561827068a217eab0e",
+    "types": "f681dc2baa4a1a07020e96c6d31bcd389c5fcaa115c3c0cdcb2ac8b688621e44",
+}
+SCHEMA_SIGNATURES["20261127_22"] = {
+    **SCHEMA_SIGNATURES["20261127_21"],
+    "columns": "6600b8d628081b4a83eed52fceec6a0262b01568fa099d6e0ee89c4aaa6ec2ca",
+    "constraints": "83959dd5b89f6d563b963bacef3008081592593f4b6aee676836cc4a8c8651e4",
+}
+SCHEMA_SIGNATURES["20261128_23"] = {
+    **SCHEMA_SIGNATURES["20261127_22"],
+    "relations": "d9fa95415e6316280384a674fbbe1094723235df63b4d4627dcaea51faa17662",
+    "columns": "bb7b531c5701f924989436c23ff91409b425f82f666481f29cb0c99b191bd949",
+}
 
 # 只沿扩展成员(e)及不可独立存在的内部实现(i)识别归属。
 # 普通/自动依赖(n/a/x)并不代表扩展成员，不能据此放行业务对象。
@@ -302,9 +324,18 @@ WHERE c.relkind NOT IN ('v','m') OR r.rulename <> '_RETURN'
 )
 
 
-def application_signature(connection, *, has_rpa, expected_owner=None):
+def application_signature(connection, *, has_rpa, expected_owner=None, forecast_columns=False):
     """目录指纹不读业务行；默认当前所有者，本机任务可校验固定迁移所有者。"""
     query = APP_SIGNATURE
+    if forecast_columns:
+        # PG 的 DROP COLUMN 保留已删除槽位。22 空库回退再升级后，只按两新增 F01
+        # 列在可见列中的实际顺序核对，其余表和 20/21 的物理列序继续精确核验。
+        query = query.replace(
+            "c.relname,a.attnum,a.attname",
+            "c.relname,CASE WHEN c.relname='shop_refund_records' AND a.attname IN "
+            "('source_reported_gmv','source_adjustment_amount') THEN "
+            "row_number() OVER (PARTITION BY c.oid ORDER BY a.attnum) ELSE a.attnum END,a.attname",
+        )
     parameters = (has_rpa, RPA_RELATIONS)
     if expected_owner is not None:
         parameters += (expected_owner,) * query.count("current_user::regrole")
@@ -324,14 +355,19 @@ def verify_application(connection, revision, *, has_rpa, expected_owner=None):
     # 事件触发器全库生效，monitor或扩展的schema不构成DDL回调许可；本次无已审核回调。
     if connection.execute("SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_event_trigger)").fetchone()[0]:
         raise ValueError("DEPLOY_EVENT_TRIGGER_MISMATCH")
-    if revision in ("20261111_16", "20261113_17", *COMPATIBLE_RUNTIME_REVISIONS):
+    if revision in (
+        "20261111_16", "20261113_17", *COMPATIBLE_RUNTIME_REVISIONS, *LOCAL_FORECAST_REVISIONS,
+    ):
         state = connection.execute(
             "SELECT indisvalid,indisready FROM pg_index WHERE indexrelid="
             "to_regclass('public.ix_return_records_summary_window')"
         ).fetchone()
         if state != (True, True):
             raise ValueError("DEPLOY_SCHEMA_MISMATCH:index_state")
-    actual = application_signature(connection, has_rpa=has_rpa, expected_owner=expected_owner)
+    actual = application_signature(
+        connection, has_rpa=has_rpa, expected_owner=expected_owner,
+        forecast_columns=revision in F01_GMV_REVISIONS,
+    )
     expected = SCHEMA_SIGNATURES[revision]
     mismatches = sorted(
         category

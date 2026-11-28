@@ -22,7 +22,7 @@ def test_prior_window_is_only_authorized_for_two_promotion_sources():
     assert approved_window("shop_ratings").start == date(2026, 2, 1)
 
 
-def test_all_sources_cli_publishes_each_authorized_window(monkeypatch):
+def test_all_sources_cli_publishes_each_authorized_window(monkeypatch, sales_pg):
     import sys
     from types import SimpleNamespace
 
@@ -32,7 +32,7 @@ def test_all_sources_cli_publishes_each_authorized_window(monkeypatch):
     codes = ("shop_ratings", "shop_channel_product_promotion", "shop_channel_star_shop")
     monkeypatch.setattr(job, "SPECS", {code: job.SPECS[code] for code in codes})
     monkeypatch.setattr(job.getpass, "getpass", lambda _: "test-only")
-    monkeypatch.setattr(job, "runtime_engine", lambda: SimpleNamespace(dispose=lambda: None))
+    monkeypatch.setattr(job, "runtime_engine", lambda: sales_pg)
     monkeypatch.setattr(
         job,
         "SalesSourceReader",
@@ -67,7 +67,7 @@ def test_all_sources_cli_publishes_each_authorized_window(monkeypatch):
             str(approved.end),
         ],
     )
-    assert job._main() == 0
+    assert job.main() == 0
     assert received == {code: approved_window(code) for code in codes}
 
 

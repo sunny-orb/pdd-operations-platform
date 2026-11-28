@@ -466,17 +466,9 @@
   border-radius: 8px;
   background: #f7faff;
 }
-.assistant-candidates small,
-.assistant-report small {
+.assistant-candidates small {
   color: var(--assistant-muted);
 }
-.assistant-report {
-  margin: 12px 0 6px;
-  padding: 10px;
-  border: 1px solid #dde7f0;
-  border-radius: 8px;
-}
-.assistant-report header,
 .assistant-chart-heading {
   display: flex;
   flex-wrap: wrap;
@@ -494,37 +486,16 @@
   font: inherit;
   color: inherit;
 }
-.assistant-report table {
-  width: 100%;
-  font-variant-numeric: tabular-nums;
-  border-collapse: collapse;
-}
-.assistant-report :is(th, td) {
-  padding: 4px 2px;
-  text-align: right;
-  border-bottom: 1px solid #e2eaf1;
-}
-.assistant-report th:first-child,
-.assistant-report caption {
-  text-align: left;
-}
-.assistant-report details {
-  overflow-wrap: anywhere;
-}
 .assistant-unavailable {
   margin: 0;
   padding: 8px 18px;
   color: var(--assistant-muted);
 }
-.assistant-report th small {
-  display: block;
-  font-weight: 400;
-  max-width: 16ch;
-}
 .assistant-rule-evidence {
-  border-block: 1px solid #e2eaf1;
-  margin: 8px 0;
-  padding: 8px 0;
+  margin-block: 8px;
+}
+.assistant-rule-evidence p {
+  margin-block: 2px;
 }
 
 .assistant-reply.is-streaming::after {
@@ -578,7 +549,8 @@
   color: var(--assistant-muted);
   font-size: 12px;
 }
-.assistant-evidence > summary:focus-visible {
+.assistant-evidence > summary:focus-visible,
+.assistant-evidence-more:focus-visible {
   outline: 2px solid #4381cc;
   outline-offset: 2px;
   border-radius: 4px;
@@ -592,6 +564,7 @@
 .assistant-evidence-report {
   padding-block: 8px 12px;
   color: #405570;
+  font-size: 12px;
 }
 .assistant-evidence-report + .assistant-evidence-report {
   border-top: 1px solid #e2eaf1;
@@ -607,6 +580,28 @@
 .assistant-trend header small {
   color: var(--assistant-muted);
   font-size: 11px;
+}
+.assistant-evidence-meta,
+.assistant-evidence-note {
+  margin: 4px 0;
+}
+.assistant-evidence-meta {
+  color: var(--assistant-muted);
+}
+.assistant-evidence-note {
+  white-space: pre-line;
+}
+.assistant-panel .assistant-evidence-more {
+  min-height: 32px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--assistant-blue);
+  font-size: 12px;
+  cursor: pointer;
+}
+.assistant-evidence-more:hover {
+  text-decoration: underline;
 }
 .assistant-evidence-report table {
   width: max-content;

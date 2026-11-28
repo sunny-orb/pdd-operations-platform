@@ -17,6 +17,8 @@ logger = logging.getLogger("uvicorn.error.assistant")
 class AnswerPolicy(AbstractCapability):
     async def prepare_tools(self, ctx, tool_defs):
         """预留一次模型请求整理答案；本轮工具没有新信息时提前收尾。"""
+        if ctx.deps.answer_from_reports or ctx.deps.reply_mode == "open":
+            return []
         if ctx.usage.requests >= MAX_REQUESTS - 1 or ctx.usage.tool_calls >= MAX_TOOL_CALLS - 1:
             return []
         if repeated_tool_round(ctx.messages):
@@ -26,7 +28,11 @@ class AnswerPolicy(AbstractCapability):
 
     async def prepare_output_tools(self, ctx, tool_defs):
         # 已取到报告或明确的范围/数据错误时，必须沿用业务查询结果回答。
-        return [] if ctx.deps.reports or ctx.deps.tool_messages else tool_defs
+        if ctx.deps.reports or ctx.deps.tool_messages or ctx.deps.reply_mode == "open":
+            return []
+        if ctx.deps.reply_mode == "evidence":
+            return [tool for tool in tool_defs if tool.name != "answer_general"]
+        return tool_defs
 
     async def wrap_model_request(self, ctx, *, request_context, handler):
         start = monotonic()

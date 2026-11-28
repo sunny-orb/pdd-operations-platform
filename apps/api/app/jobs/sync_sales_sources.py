@@ -20,7 +20,7 @@ from app.modules.sales.storage import ShopDailyStore
 ROOT = Path(__file__).resolve().parents[4]
 
 
-def _main():
+def _main(engine):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", choices=["all", *SPECS], default="all")
     parser.add_argument("--from", dest="start", type=date.fromisoformat, required=True)
@@ -29,7 +29,7 @@ def _main():
     mode.add_argument("--verify-only", action="store_true")
     mode.add_argument("--publish", action="store_true")
     args = parser.parse_args()
-    reader = engine = None
+    reader = None
     errors = 0
     try:
         selected = list(SPECS) if args.dataset == "all" else [args.dataset]
@@ -53,13 +53,22 @@ def _main():
             password = getpass.getpass("数仓只读密码（不保存）：")
             reader = SalesSourceReader(password=password)
             del password
-        if args.publish:
-            engine = runtime_engine()
         for code in selected:
             window = windows[code]
             started = time.monotonic()
             try:
-                source = FeishuRefundReader(root=ROOT) if code == "shop_refunds" else reader
+                store = (
+                    ShopDailyStore(
+                        engine, archive_root=ROOT / "var/ingestion" / code, spec=SPECS[code]
+                    )
+                    if args.publish or code == "shop_refunds"
+                    else None
+                )
+                source = (
+                    FeishuRefundReader(root=ROOT, include_gmv=store.supports_f01_gmv)
+                    if code == "shop_refunds"
+                    else reader
+                )
 
                 def receive(heartbeat, source=source, code=code, window=window):
                     source.heartbeat = heartbeat
@@ -70,9 +79,6 @@ def _main():
                     )
 
                 if args.publish:
-                    store = ShopDailyStore(
-                        engine, archive_root=ROOT / "var/ingestion" / code, spec=SPECS[code]
-                    )
                     result = asdict(store.run(receive))
                 else:
                     candidate = receive(lambda: None)
@@ -120,8 +126,6 @@ def _main():
     finally:
         if reader:
             reader.close()
-        if engine:
-            engine.dispose()
     return int(errors > 0)
 
 
@@ -130,7 +134,7 @@ def main():
 
     engine = runtime_engine()
     try:
-        return run_guarded(engine, _main)
+        return run_guarded(engine, lambda: _main(engine))
     finally:
         engine.dispose()
 

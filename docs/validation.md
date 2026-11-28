@@ -1,8 +1,16 @@
 # 验证与交付证据
 
-更新日期：2026-11-27。本文维护验收要求与证据入口；执行记录按日期放在 `validation/`，当前进度只见 [TODO](../TODO.md)。范围见[需求](requirements.md)，数据边界见[数据契约](data-contract.md)，调查见[来源证据](source-evidence.md)。测试、样例交付、真实接入与生产上线分别验收。
+更新日期：2026-11-28。本文维护验收要求与证据入口；执行记录按日期放在 `validation/`，当前进度只见 [TODO](../TODO.md)。范围见[需求](requirements.md)，数据边界见[数据契约](data-contract.md)，调查见[来源证据](source-evidence.md)。测试、样例交付、真实接入与生产上线分别验收。
 
 ## 验证记录索引
+
+[右侧助手开放提问、跨页销售与 DeepSeek 深度思考上线](validation/2026-11-28.md#assistant-production-release)（2026-11-28）。
+
+[口语问能力、开放回答与按需取数](validation/2026-11-28.md#assistant-semantic-replies) · [预测后换题与两种范围的浏览器验收](validation/2026-11-28.md#assistant-open-conversation)（2026-11-28，本地）。
+
+[按提问选文、飞书改稿即时核验与同批预测](validation/2026-11-28.md#on-demand-sop) · [此前的定时试验与经营建议](validation/2026-11-28.md#previous-scheduled-pilot)（2026-11-28，本地）。
+
+[单篇飞书 SOP、改稿自动生效与五页 GMV 预测](validation/2026-11-27.md#forecast-sop-local) · [精简依据与改稿边界](validation/2026-11-27.md#assistant-evidence-local) · [DeepSeek 深度思考同题实测](validation/2026-11-27.md#deepseek-thinking-local)（2026-11-27，本地）。
 
 [浏览器图标与当前看板标题（2026-11-27）](validation/2026-11-27.md#browser-tab-identity)。
 

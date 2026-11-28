@@ -12,10 +12,10 @@ from pathlib import Path
 import sqlalchemy as sa
 
 from app.modules.archive_payload import atomic_bytes, safe
+from app.modules.database_retention import REGION_SCHEMA_HEADS
 from app.modules.local_storage import project_endpoint, verify_connection
 
 ROOT = Path(__file__).resolve().parents[4]
-SCHEMA = "20261118_20"
 LIMITS = {
     "interval_seconds": 300,
     "minimum_hours": 24,
@@ -189,7 +189,8 @@ def _run(engine, path, policy, at):
                 _save(path, at, result["status"], elapsed=time.monotonic() - started)
                 return result
             _session(c)
-            if c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2")) != SCHEMA:
+            revision = c.scalar(sa.text("SELECT version_num FROM public.alembic_version_v2"))
+            if revision not in REGION_SCHEMA_HEADS:
                 result["status"] = "schema_pending"
                 _save(path, at, result["status"], elapsed=time.monotonic() - started)
                 return result

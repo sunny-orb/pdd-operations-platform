@@ -22,6 +22,7 @@
     "db:up": "node scripts/api.mjs db:up",
     "db:test": "node scripts/api.mjs db:test",
     "db:status": "node scripts/api.mjs db:status",
+    "sync:forecast": "node scripts/api.mjs sync:forecast",
     "sync:m1": "node scripts/api.mjs sync:m1",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

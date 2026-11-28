@@ -132,18 +132,14 @@ def test_complete_pg_dump_preserves_both_formats_and_shared_members(sales_pg, tm
 
 
 def test_initializer_rejects_missing_shared_read_view(sales_pg):
-    from alembic import command
-    from alembic.config import Config
-
     from migrations_v2.company_db_objects import TARGET_REVISION
+    from tests.sales_pg_support import downgrade_to
     from tests.test_deployment_database import load_script
 
     script = load_script("content_initializer", "init-deployment-db.py")
     with sales_pg.begin() as c:
         # 先使用公司入口当前目标，再验证缺视图的目录保护。
-        config = Config(str(ROOT / "apps/api/alembic-v2.ini"))
-        config.attributes.update(connection=c, v2_expected_database=c.engine.url.database)
-        command.downgrade(config, TARGET_REVISION)
+        downgrade_to(c, TARGET_REVISION)
         c.execute(sa.text("DROP VIEW read_product_daily_facts"))
     with sales_pg.connect() as c, pytest.raises(ValueError, match="DEPLOY_SCHEMA_MISMATCH"):
         script.initialize(
@@ -152,9 +148,13 @@ def test_initializer_rejects_missing_shared_read_view(sales_pg):
 
 
 def test_company_initializer_accepts_reviewed_current_schema_without_changing_it(sales_pg):
+    from migrations_v2.company_db_objects import TARGET_REVISION
+    from tests.sales_pg_support import downgrade_to
     from tests.test_deployment_database import load_script
 
     script = load_script("local_comment_initializer", "init-deployment-db.py")
+    with sales_pg.begin() as c:
+        downgrade_to(c, TARGET_REVISION)
     with sales_pg.connect() as c:
         assert (
             script.initialize(

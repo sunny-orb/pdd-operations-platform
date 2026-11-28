@@ -166,6 +166,7 @@ GMV目标来源已按2026-10-31用户决定采用原版`gmv目标`，不再保�
 
 **COMMON-ISS-15　右侧问答的跨域版本、对象追问与数值核对（已上线，持续试用核对）。** [首次五页实测](validation/2026-11-25.md#assistant-five-page-live) · [双模型同题复测](validation/2026-11-25.md#assistant-two-models-live) · [DeepSeek 错答复测](validation/2026-11-25.md#assistant-deepseek-grounded)。
 
+- 11/28 已上线开放问法与换题、跨页销售口径。推广页问实际销售取店铺成交，两项同时问分别给依据。生产高强度深度思考及五页验收通过。[上线记录](validation/2026-11-28.md#assistant-production-release)
 - 本地已统一开放提问的交付条件，修复换种说法问能力却被要求补指标、查过目录就复述菜单、换题后继续讲预测的问题。上线试用后仍需抽查新问法与真实取数的区分。[语义问答验收](validation/2026-11-28.md#assistant-semantic-replies) · [换题与跨页实测](validation/2026-11-28.md#assistant-open-conversation)
 - 本地提问时核对所选飞书原文。改稿后的首问、同批复算与矛盾条款已实测。六店实际成交直接查销售数据，预测单独取日报。共享上线前需核验服务身份及获准文档范围。[本地验收](validation/2026-11-28.md#on-demand-sop)
 - 跨域版本已在本机修复。中心绑定已加载的商品推广版本，店铺推广查询取本域版本。两款模型均从中心查到店铺推广，跨五页晨会取数通过。
